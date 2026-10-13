@@ -38,6 +38,10 @@ export interface Actor {
   x: number;
   y: number;
   inWater: boolean;
+  /** Profondeur de tri (défaut : y). Un animal en vol passe devant tout le décor. */
+  sortY?: number;
+  /** Nage sous la surface (mosasaure) : teinté par l'eau, sans reflet ni ombre. */
+  submerged?: boolean;
   shadowRx: number;
   /** Œil (px monde), allumé la nuit. */
   eyeX: number;
@@ -71,13 +75,13 @@ export interface WorldView {
 
 // Calques d'animaux à l'échelle de l'écran, réalloués seulement si la taille change.
 let L_N = 0;
-let aMat = new Uint8Array(0), aGlyph = new Uint8Array(0), aHalo = new Int16Array(0), aSel = new Uint8Array(0);
+let aMat = new Uint8Array(0), aGlyph = new Uint8Array(0), aHalo = new Int16Array(0), aSel = new Uint8Array(0), aSub = new Uint8Array(0);
 let aLum = new Float32Array(0), aBase = new Float32Array(0), aShadow = new Float32Array(0);
 let rMat = new Uint8Array(0), rGlyph = new Uint8Array(0), rLum = new Float32Array(0);
 function layers(n: number) {
   if (n === L_N) return;
   L_N = n;
-  aMat = new Uint8Array(n); aGlyph = new Uint8Array(n); aHalo = new Int16Array(n); aSel = new Uint8Array(n);
+  aMat = new Uint8Array(n); aGlyph = new Uint8Array(n); aHalo = new Int16Array(n); aSel = new Uint8Array(n); aSub = new Uint8Array(n);
   aLum = new Float32Array(n); aBase = new Float32Array(n); aShadow = new Float32Array(n);
   rMat = new Uint8Array(n); rGlyph = new Uint8Array(n); rLum = new Float32Array(n);
 }
@@ -111,11 +115,13 @@ function stampActors(v: WorldView, cols: number, rows: number) {
         const si = sy * cols + sx;
         // L'animal sélectionné reste repérable même caché (feuillage, autre animal).
         if (a.id === v.selected) aSel[si] = 1;
-        if (aMat[si] && aBase[si] > a.y) continue;
-        aMat[si] = r.mat[k]; aLum[si] = r.lum[k]; aGlyph[si] = r.glyph[k]; aBase[si] = a.y;
+        const sy2 = a.sortY ?? a.y;
+        if (aMat[si] && aBase[si] > sy2) continue;
+        aMat[si] = r.mat[k]; aLum[si] = r.lum[k]; aGlyph[si] = r.glyph[k]; aBase[si] = sy2; aSub[si] = a.submerged ? 1 : 0;
       }
     }
     // Ombre au sol.
+    if (a.shadowRx <= 0) continue;
     const ry = 18;
     const y0 = Math.floor((a.y - ry) / CELL_H) - v.camY, y1 = Math.ceil((a.y + ry) / CELL_H) - v.camY;
     const x0 = Math.floor((a.x - a.shadowRx) / CELL_W) - v.camX, x1 = Math.ceil((a.x + a.shadowRx) / CELL_W) - v.camX;
@@ -327,6 +333,13 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
           P.void[0] * (1 - bk) + m.color[0] * bk * lr + P.accent[0] * acc * 0.1,
           P.void[1] * (1 - bk) + m.color[1] * bk * lg + P.accent[1] * acc * 0.1,
           P.void[2] * (1 - bk) + m.color[2] * bk * lb + P.accent[2] * acc * 0.1);
+        // Sous la surface : l'eau teinte le corps, et des vaguelettes passent par-dessus.
+        if (isHero && aSub[i] && (terr === T.Deep || terr === T.Shallow)) {
+          const k = i * 4, wsh = 0.22 + 0.08 * Math.sin(wx * 0.3 + wy * 0.5 + t * 1.6);
+          const wc = P.waterMid;
+          for (let q = 0; q < 3; q++) { f.fg[k + q] += (wc[q] * 1.6 * L - f.fg[k + q]) * wsh; f.bg[k + q] += (wc[q] * L - f.bg[k + q]) * wsh * 1.5; }
+          if (Math.sin(wx * 0.45 + t * 1.1 + Math.sin(wy * 0.8 + t)) > 0.9) { f.ch[i] = 126; setFg(f, i, P.specular[0] * 0.7 * L, P.specular[1] * 0.7 * L, P.specular[2] * 0.7 * L); }
+        }
         continue;
       }
 
@@ -413,7 +426,7 @@ function haloOwner(v: WorldView, si: number, cols: number): number {
   for (const a of v.actors) {
     const r = a.r;
     const i = sx - r.cx, j = sy - r.cy;
-    if (i >= 0 && j >= 0 && i < r.w && j < r.h && r.mat[j * r.w + i] && Math.abs(aBase[si] - a.y) < 0.01) return a.id; // aBase est en Float32
+    if (i >= 0 && j >= 0 && i < r.w && j < r.h && r.mat[j * r.w + i] && Math.abs(aBase[si] - (a.sortY ?? a.y)) < 0.01) return a.id; // aBase est en Float32
   }
   return -1;
 }

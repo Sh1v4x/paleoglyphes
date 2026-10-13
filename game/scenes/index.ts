@@ -19,9 +19,9 @@ import { HEADER_ROWS, type Mode, type Scene } from "./types";
 
 export const SCENES: Record<Mode, Scene> = { dig: digScene, lab: labScene, park: parkScene, journal: journalScene, meteor: meteorScene };
 const TABS: { mode: Mode; label: string; key: string }[] = [
-  { mode: "dig", label: "1  Fouille", key: "Digit1" },
-  { mode: "lab", label: "2  Atelier", key: "Digit2" },
-  { mode: "park", label: "3  Reserve", key: "Digit3" },
+  { mode: "park", label: "1  Reserve", key: "Digit1" },
+  { mode: "dig", label: "2  Fouille", key: "Digit2" },
+  { mode: "lab", label: "3  Atelier", key: "Digit3" },
   { mode: "journal", label: "4  Carnet", key: "Digit4" },
 ];
 // Style dark fantasy mis de côté pour l'instant : seul le cartoon est proposé.

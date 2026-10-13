@@ -43,7 +43,8 @@ export interface Bug {
 }
 
 /** Combien de chaque bête, et leur façon de vivre. */
-const COUNT: Partial<Record<string, number>> = { dragonfly: 9, beetle: 8, didelphodon: 3, pterosaur: 2 };
+// Le grand ptérosaure est désormais une espèce à fouiller (Quetzalcoatlus) : plus de ptérosaure d'ambiance.
+const COUNT: Partial<Record<string, number>> = { dragonfly: 9, beetle: 8, didelphodon: 3 };
 const UID0 = 1_000_000;
 const cache = new RasterCache(800);
 const TAU = Math.PI * 2;

@@ -108,6 +108,8 @@ export interface Animal {
   progT: number;
   /** Temps cumulé bloqué : au-delà de quelques secondes, l'animal change d'objectif. */
   stuckT: number;
+  /** Altitude (px) des espèces volantes : 0 = posé au sol. Le dessin est décalé vers le haut, l'ombre reste au sol. */
+  alt: number;
 }
 
 export interface ParkState {
@@ -152,7 +154,7 @@ export function animalRaster(a: Animal, time: number): Raster {
   const flip = a.facing < 0;
   const key = `${a.sp}|${flip ? 1 : 0}|${a.action}|${moving}|${wq}|${tq}|${aq}`;
   const r = cache.get(key, () => spec.model({ walk: wq * (TAU / 12), moving, time: tq / 6, action: a.action, actionT: aq / 8 }), flip);
-  return placed(r, Math.floor(a.x / CELL_W), Math.floor(a.y / CELL_H));
+  return placed(r, Math.floor(a.x / CELL_W), Math.floor((a.y - a.alt) / CELL_H));
 }
 
 /** Un animal peut-il se tenir à (x, y) ? Pas d'eau profonde ni d'obstacle sous le corps. */
@@ -175,7 +177,7 @@ function spawn(s: GameState, sp: SpeciesId, near?: { x: number; y: number }) {
       task: "wander", scan: rng() * 0.4, stun: 0, cool: 10 + rng() * 20, decay: 0, meat: 0, answer: 0,
       age: rng() * rng(), spot: -1, side: rng() < 0.5 ? 1 : -1, blocked: 0, chase: 0, alarm: 0,
       gx: x, gy: y, best: Infinity, stall: 0, vx: 0, vy: 0, vt: 0,
-      path: null, pi: 0, pgx: x, pgy: y, repath: 0, prog: Infinity, progT: 0, stuckT: 0,
+      path: null, pi: 0, pgx: x, pgy: y, repath: 0, prog: Infinity, progT: 0, stuckT: 0, alt: 0,
     };
     p.animals.push(a);
     return a;
@@ -304,7 +306,9 @@ export const parkScene: Scene = {
     const sel = p.animals.find((a) => a.id === p.selected);
     if (!sel) p.selected = undefined;
     const bug = p.bug !== undefined ? p.eco?.fauna.find((b) => b.uid === p.bug) : undefined;
-    const tgt = sel ?? (bug ? { x: bug.x, y: bug.y } : undefined);
+    // Pour un animal en vol, on centre sur son corps (au-dessus de son ombre), pas sur le sol.
+    const box = sel ? animalRaster(sel, s.time) : null;
+    const tgt = sel && box ? { x: (box.cx + box.w / 2) * CELL_W, y: (box.cy + box.h / 2) * CELL_H } : bug ? { x: bug.x, y: bug.y } : undefined;
     if (p.follow && tgt) {
       p.cam.x += (tgt.x - metrics.cols * CELL_W / 2 - p.cam.x) * Math.min(1, dt * 4);
       p.cam.y += (tgt.y - metrics.rows * CELL_H / 2 - p.cam.y) * Math.min(1, dt * 4);
@@ -371,9 +375,13 @@ export const parkScene: Scene = {
       if (a.x < vx0 || a.x > vx1 || a.y < vy0 || a.y > vy1) continue;
       const spec = SPECIES[a.sp];
       if (!spec) continue;
+      const sea = spec.habitat === "sea";
       actors.push({
-        id: a.id, r: animalRaster(a, s.time), x: a.x, y: a.y, inWater: a.inWater,
-        shadowRx: spec.halfLen * spec.shadow * (a.task === "dead" ? 1.1 : 1), eyeX: a.x + spec.eye.x * a.facing, eyeY: a.y + spec.eye.y,
+        id: a.id, r: animalRaster(a, s.time), x: a.x, y: a.y, inWater: a.inWater && !sea && a.alt < 2, submerged: sea && a.task !== "dead",
+        sortY: a.alt > 4 ? 1e7 + a.alt : undefined,
+        // Ombre au sol pour les volants (plus petite quand ils sont haut), aucune pour les nageurs.
+        shadowRx: sea ? 0 : spec.halfLen * spec.shadow * (a.task === "dead" ? 1.1 : 1) * (a.alt > 0 ? Math.max(0.35, 1 - a.alt / 400) : 1),
+        eyeX: a.x + spec.eye.x * a.facing, eyeY: a.y - a.alt + spec.eye.y,
       });
     }
     faunaActors(s, actors, vx0, vy0, vx1, vy1);

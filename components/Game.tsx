@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { FONT_SIZE } from "@/game/config";
+import { DEV, FONT_SIZE } from "@/game/config";
 import { bindInput } from "@/game/input";
 import { startLoop } from "@/game/loop";
 import { Renderer } from "@/game/render/draw";
@@ -22,6 +22,8 @@ export default function Game({ fontFamily }: { fontFamily: string }) {
       const input = bindInput(canvas);
       const renderer = new Renderer(canvas, fontFamily);
       const state = createState();
+      // Accès console pour le débogage (dev uniquement).
+      if (DEV) (window as unknown as { __game: unknown }).__game = state;
       const resize = () => renderer.resize(window.innerWidth, window.innerHeight);
       resize();
       window.addEventListener("resize", resize);

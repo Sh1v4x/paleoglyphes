@@ -6,11 +6,11 @@ import { setBg, setFg, type Frame } from "../render/frame";
 import { M } from "../render/materials";
 import { metrics, uiCellAt } from "../render/metrics";
 import { hash2 } from "../rng";
-import { SPECIES } from "../species";
+import { ofName, SPECIES } from "../species";
 import type { GameState } from "../state";
 import { bar, button, hitAt, panel, text, wrap } from "../ui/kit";
 import { toast } from "../ui/toast";
-import { deName, EXTRA_BY_ID } from "./dig-fossils";
+import { EXTRA_BY_ID } from "./dig-fossils";
 import { buildBackdrop, generateSite, hardness, MATRIX_INFO, SUB, type Backdrop, type Fossil, type Site } from "./dig-site";
 import { SM } from "./scenes.mat";
 import { UI_TOP, type Scene } from "./types";
@@ -150,8 +150,8 @@ function reward(s: GameState, f: Fossil) {
   const isNew = addBone(p, f.sp, f.id);
   const have = p.bones[f.sp]?.length ?? 0, need = spec.bones.length;
   if (!isNew) toast(s, `Os trouve : ${f.label}`, "Deja dans la collection : il rejoint les reserves du musee.");
-  else if (have >= need) toast(s, `Os trouve : ${f.label}`, `Squelette complet ! Va l'assembler a l'atelier (touche 2).`);
-  else toast(s, `Os trouve : ${f.label}`, `${have}/${need} os ${deName(spec.name)}. Il t'attend a l'atelier.`);
+  else if (have >= need) toast(s, `Os trouve : ${f.label}`, `Squelette complet ! Assemble-le a l'atelier (touche 3) pour decouvrir qui c'est.`);
+  else toast(s, `Os trouve : ${f.label}`, `${have}/${need} os ${ofName(p, f.sp)}. Il t'attend a l'atelier.`);
 }
 
 function collect(s: GameState, f: Fossil) {

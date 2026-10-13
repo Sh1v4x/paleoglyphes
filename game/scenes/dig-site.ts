@@ -5,7 +5,8 @@ import { rasterize, type Raster } from "../render/raster";
 import { hash2, mulberry32 } from "../rng";
 import { SPECIES } from "../species";
 import type { SpeciesId } from "../species/types";
-import { bonePrims, deName, EXTRAS, fitScale, orient, primBounds, scaleAll } from "./dig-fossils";
+import { ofName } from "../species";
+import { bonePrims, EXTRAS, fitScale, orient, primBounds, scaleAll } from "./dig-fossils";
 import { SM } from "./scenes.mat";
 
 /**
@@ -85,7 +86,7 @@ const TOPSOIL = { mat: SM.Topsoil, name: "Terre vegetale", hard: 0.5, fact: "Le 
 export const MATRIX_INFO = { name: "Gangue", fact: "La roche collee autour d'un fossile s'appelle la gangue : on la retire tout doucement." };
 
 /** Ordre de déblocage des espèces en fouille : [espèce, squelettes assemblés requis]. */
-const UNLOCK: [SpeciesId, number][] = [["ankylo", 0], ["edmonto", 0], ["raptor", 0], ["trike", 2], ["pachy", 2], ["trex", 4]];
+const UNLOCK: [SpeciesId, number][] = [["ankylo", 0], ["edmonto", 0], ["raptor", 0], ["trike", 2], ["pachy", 2], ["quetzal", 3], ["mosa", 3], ["trex", 4]];
 
 export function unlockedSpecies(p: Progress): SpeciesId[] {
   return UNLOCK.filter(([id, n]) => SPECIES[id] && p.assembled.length >= n).map(([id]) => id);
@@ -123,11 +124,8 @@ function pickBones(p: Progress, rng: () => number): { picks: Pick[]; primary: Sp
   const unlocked = unlockedSpecies(p);
   const missingOf = (sp: SpeciesId) => (SPECIES[sp]?.bones ?? []).filter((b) => !(p.bones[sp] ?? []).includes(b.id)).map((b) => b.id);
   const withMissing = unlocked.filter((sp) => missingOf(sp).length > 0);
-  const first = p.digs === 0 && withMissing.includes("ankylo");
-  // On aide à finir une espèce commencée, sinon on en ouvre une nouvelle.
-  const started = withMissing.filter((sp) => (p.bones[sp]?.length ?? 0) > 0);
-  const pool = started.length && rng() < 0.7 ? started : withMissing;
-  const primary: SpeciesId | null = first ? "ankylo" : pool[Math.floor(rng() * pool.length)] ?? null;
+  // L'espèce du site est tirée au hasard parmi celles débloquées qui ont encore des os à trouver.
+  const primary: SpeciesId | null = withMissing[Math.floor(rng() * withMissing.length)] ?? null;
   // Un site = tous les os manquants de l'espèce visée : une fouille suffit pour l'assembler.
   const n = primary ? Math.max(3, missingOf(primary).length) : 3 + Math.floor(rng() * 3);
   const picks: Pick[] = [];
@@ -137,7 +135,7 @@ function pickBones(p: Progress, rng: () => number): { picks: Pick[]; primary: Sp
   // Doublons : rares, ou seuls quand toute la collection est complète.
   const found = shuffle(unlocked.flatMap((sp) => (p.bones[sp] ?? []).filter((id) => SPECIES[sp]?.bones.some((b) => b.id === id)).map((id) => ({ sp, id, dup: true }))), rng);
   // (jamais au détriment d'un os manquant : un doublon ne remplace rien)
-  if (!first && found.length && (picks.length === 0 || (picks.length < 6 && rng() < 0.18))) picks.push(found.pop()!);
+  if (found.length && (picks.length === 0 || (picks.length < 6 && rng() < 0.18))) picks.push(found.pop()!);
   while (picks.length < 3 && found.length) picks.push(found.pop()!);
   return { picks, primary: primary ?? picks[0]?.sp ?? null };
 }
@@ -214,7 +212,7 @@ export function generateSite(p: Progress, W: number, H: number, seed: number): S
     if (!spec) continue;
     const raw = bonePrims(spec, pk.id);
     const name = spec.bones.find((b) => b.id === pk.id)?.name ?? pk.id;
-    const label = `${name} ${deName(spec.name)}`;
+    const label = `${name} ${ofName(p, pk.sp)}`;
     // Les os allongés restent plutôt couchés : un quart de tour les rendrait trop hauts.
     const [bx0, by0, bx1, by1] = primBounds(raw);
     const long = (bx1 - bx0) / Math.max(1, by1 - by0) > 1.8;

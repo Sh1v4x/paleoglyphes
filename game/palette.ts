@@ -3,6 +3,7 @@ import { HERBIVORE_MATS } from "./species/herbivores.mat";
 import { CARNIVORE_MATS } from "./species/carnivores.mat";
 import { FLORA_MATS } from "./world/flora.mat";
 import { SCENE_MATS } from "./scenes/scenes.mat";
+import { MARINE_MATS } from "./species/marine.mat";
 
 export type { Material };
 
@@ -84,7 +85,7 @@ export interface Theme {
   dirtRamp: string;
 }
 
-const EXTRA = [HERBIVORE_MATS, CARNIVORE_MATS, FLORA_MATS, SCENE_MATS];
+const EXTRA = [HERBIVORE_MATS, CARNIVORE_MATS, FLORA_MATS, SCENE_MATS, MARINE_MATS];
 
 /** Table des matières d'un style : cœur + matières déclarées par les espèces, la flore et les scènes. */
 function materials(def: Record<number, Material>, style: Style): Material[] {

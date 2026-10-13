@@ -36,6 +36,7 @@ export const M = {
  *   60-89   carnivores, faune (game/species/carnivores.mat.ts)
  *   90-119  flore             (game/world/flora.mat.ts)
  *   120-149 fouille, atelier  (game/scenes/scenes.mat.ts)
+ *   150-179 reptiles volants et marins (game/species/marine.mat.ts)
  * Les couleurs et rampes de chaque matière dépendent du thème : voir palette.ts.
  */
 

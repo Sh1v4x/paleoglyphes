@@ -38,6 +38,7 @@ const steps = Math.round((minutes * 60) / dt);
 const last = new Map<number, { x: number; y: number; t: number }>();
 const stuck = new Map<number, number>();
 const why = new Map<string, number>();
+let altMax = 0, seaBad = 0, landed = 0;
 let traced = 0;
 const ov = new Map<string, number>();
 let moving = 0, stuckTotal = 0, overlaps = 0, samples = 0;
@@ -86,6 +87,12 @@ for (let k = 0; k < steps; k++) {
       ov.set(key, (ov.get(key) ?? 0) + 1);
     }
   }
+  for (const a of live) {
+    altMax = Math.max(altMax, a.alt);
+    if (a.sp === "quetzal" && a.alt === 0 && a.mood !== "fly") landed++;
+    const w = worldFor(s);
+    if (a.sp === "mosa" && w.terrain[Math.floor(a.y / 7) * w.cols + Math.floor(a.x / 4)] !== 3) seaBad++;
+  }
   samples++;
 }
 
@@ -99,3 +106,4 @@ console.log(`pires : ${worst.join("  ")}`);
 console.log(`causes : ${[...why.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, n]) => `${k}=${n}`).join("  ")}`);
 console.log(`paires : ${[...ov.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, n]) => `${k}=${n}`).join("  ")}`);
 console.log(`arbres renversés en ce moment : ${[...activeTrees()].length} / ${worldFor(s).trees.length}`);
+console.log(`quetzal : altitude max ${altMax.toFixed(0)} px, mesures posé ${landed}   mosa hors eau profonde : ${seaBad}`);

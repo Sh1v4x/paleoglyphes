@@ -7,7 +7,7 @@ import { metrics, uiCellAt } from "../render/metrics";
 import { rasterize, type Prim, type Raster } from "../render/raster";
 import { drawRaster } from "../render/sprite";
 import { hash2 } from "../rng";
-import { SPECIES, SPECIES_LIST } from "../species";
+import { discovered, shownName, SPECIES } from "../species";
 import type { Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
 import { bar, button, hitAt, panel, text, wrap } from "../ui/kit";
@@ -33,7 +33,8 @@ export interface LabState {
   shake: { bone: string; t: number } | null;
   synth: { sp: SpeciesId; t0: number } | null;
   /** Dernière synthèse terminée : le modèle reste affiché, avec un message. */
-  done: { sp: SpeciesId; added: number; t: number } | null;
+  /** Fin de synthèse ; `first` = première fois : l'espèce mystère est révélée. */
+  done: { sp: SpeciesId; added: number; t: number; first: boolean } | null;
   hint: { text: string; t: number } | null;
 }
 
@@ -93,17 +94,17 @@ const complete = (s: GameState, spec: Species) => placedOf(s, spec).length >= sp
 // ---------------------------------------------------------------------------
 // Mise en page (cellules du calque monde).
 // ---------------------------------------------------------------------------
-const boundsCache = new Map<SpeciesId, [number, number, number]>();
+const boundsCache = new Map<SpeciesId, [number, number, number, number]>();
 /** Boîte (px) du squelette et du modèle réunis : x0, y0 (haut), x1. */
-function specBounds(spec: Species): [number, number, number] {
+function specBounds(spec: Species): [number, number, number, number] {
   let b = boundsCache.get(spec.id);
   if (!b) {
-    let [x0, y0, x1] = primBounds(skeletonPrims(spec));
+    let [x0, y0, x1, y1] = primBounds(skeletonPrims(spec));
     try {
-      const [a, c, d] = primBounds(spec.model(IDLE_POSE));
-      x0 = Math.min(x0, a); y0 = Math.min(y0, c); x1 = Math.max(x1, d);
+      const [a, c, d, e] = primBounds(spec.model(IDLE_POSE));
+      x0 = Math.min(x0, a); y0 = Math.min(y0, c); x1 = Math.max(x1, d); y1 = Math.max(y1, e);
     } catch { /* modèle absent : on se contente du squelette */ }
-    b = [x0, y0, x1];
+    b = [x0, y0, x1, y1];
     boundsCache.set(spec.id, b);
   }
   return b;
@@ -129,13 +130,27 @@ function layout(spec: Species | undefined): Layout {
   const trayY = rows - bottom - trayH;
   const ground = trayY - 5;
   if (!spec) return { left, right, top, trayY, trayH, ground, s: 1, ox: 0, oy: ground, bx0: 0, bx1: 0, by0: 0, hx: 0 };
-  const [x0, y0, x1] = specBounds(spec);
-  const hx = x0 - 22; // silhouette humaine à gauche
-  const wPx = x1 - (hx - 10), hPx = Math.max(-y0, HUMAN_M * PX_PER_M + 2);
-  const raw = Math.min(((right - left) * CELL_W * 0.92) / wPx, ((ground - top - 3) * CELL_H * 0.9) / hPx);
-  const s = Math.max(0.5, Math.min(8, Math.floor(raw * 4) / 4));
-  const ox = Math.round((left + right) / 2 - (((hx - 10 + x1) / 2) * s) / CELL_W);
-  return { left, right, top, trayY, trayH, ground, s, ox, oy: ground, bx0: ox + Math.floor((x0 * s) / CELL_W), bx1: ox + Math.ceil((x1 * s) / CELL_W), by0: ground + Math.floor((y0 * s) / CELL_H), hx };
+  const [x0, y0, x1, y1] = specBounds(spec);
+  // Modèles qui descendent sous leur origine (le mosasaure nage sous sa ligne d'eau) : on les remonte
+  // sur l'estrade pour que tout le squelette soit visible.
+  const lift = Math.max(0, y1);
+  const hPx = Math.max(lift - y0, HUMAN_M * PX_PER_M + 2);
+  // Silhouette humaine à gauche, toujours séparée de l'animal par au moins GAP cellules à l'écran.
+  const GAP = 6;
+  const fit = (sc: number) => {
+    const hx = x0 - 6 - (GAP * CELL_W) / sc;
+    return { hx, w: x1 - (hx - 6) };
+  };
+  let sc = 1;
+  for (let k = 0; k < 3; k++) {
+    const { w } = fit(sc);
+    sc = Math.min(((right - left) * CELL_W * 0.92) / w, ((ground - top - 3) * CELL_H * 0.9) / hPx);
+  }
+  const s = Math.max(0.2, Math.min(8, Math.floor(sc * 8) / 8));
+  const { hx } = fit(s);
+  const ox = Math.round((left + right) / 2 - (((hx - 6 + x1) / 2) * s) / CELL_W);
+  const oy = ground - Math.ceil((lift * s) / CELL_H);
+  return { left, right, top, trayY, trayH, ground, s, ox, oy, bx0: ox + Math.floor((x0 * s) / CELL_W), bx1: ox + Math.ceil((x1 * s) / CELL_W), by0: oy + Math.floor((y0 * s) / CELL_H), hx };
 }
 
 interface Box { bone: string; x: number; y: number; w: number; h: number }
@@ -175,7 +190,7 @@ function placeBone(s: GameState, spec: Species, id: string) {
   if (!list.includes(id)) list.push(id);
   s.lab.flash = { bone: id, t: s.time };
   s.lab.held = null;
-  if (complete(s, spec)) hint(s, `Squelette complet ! Clique sur SYNTHETISER pour donner vie a ton ${spec.name}.`);
+  if (complete(s, spec)) hint(s, "Squelette complet ! Clique sur SYNTHETISER pour decouvrir de qui il s'agit.");
   else hint(s, `${boneName(spec, id)} : en place !`);
 }
 
@@ -203,12 +218,12 @@ function autoPlace(s: GameState, spec: Species) {
   const next = foundOf(s, spec).find((id) => !placed.includes(id));
   if (next) placeBone(s, spec, next);
   else if (complete(s, spec)) startSynth(s, spec);
-  else hint(s, "Il manque des os : retourne a la fouille (touche 1) pour les trouver !");
+  else hint(s, "Il manque des os : retourne a la fouille (touche 2) pour les trouver !");
 }
 
 function startSynth(s: GameState, spec: Species) {
   if (s.lab.synth || !complete(s, spec)) return;
-  if ((s.progress.population[spec.id] ?? 0) >= MAX_POP) return hint(s, `La reserve compte deja ${MAX_POP} ${spec.name} : c'est le maximum.`);
+  if ((s.progress.population[spec.id] ?? 0) >= MAX_POP) return hint(s, `La reserve compte deja ${MAX_POP} ${shownName(s.progress, spec.id)} : c'est le maximum.`);
   s.lab.synth = { sp: spec.id, t0: s.time };
   s.lab.done = null;
 }
@@ -226,25 +241,26 @@ function finishSynth(s: GameState, spec: Species) {
   saveProgress(p);
   syncPopulation(s);
   s.lab.synth = null;
-  s.lab.done = { sp: spec.id, added, t: s.time };
+  s.lab.done = { sp: spec.id, added, t: s.time, first };
   // Pas de notification ici : la modale de fin de synthèse dit déjà la même chose.
   if (first) unlockTrigger(s, spec.id, "assemble");
 }
 
+/** Espèce ouverte par défaut : une espèce commencée mais pas encore assemblée, sinon la première découverte. */
 function pickDefault(s: GameState): SpeciesId | null {
-  const withBones = SPECIES_LIST.find((sp) => foundOf(s, sp).length > 0 && !isAssembled(s, sp.id)) ?? SPECIES_LIST.find((sp) => foundOf(s, sp).length > 0);
-  return (withBones ?? SPECIES_LIST[0])?.id ?? null;
+  const list = discovered(s.progress);
+  return (list.find((sp) => !isAssembled(s, sp.id)) ?? list[0])?.id ?? null;
 }
 
 export const labScene: Scene = {
   enter(s) {
     const l = s.lab;
-    if (!l.species || !SPECIES[l.species] || (foundOf(s, SPECIES[l.species]!).length === 0 && !isAssembled(s, l.species))) l.species = pickDefault(s);
+    if (!l.species || !discovered(s.progress).some((sp) => sp.id === l.species)) l.species = pickDefault(s);
   },
 
   update(s, input: Input) {
     const l = s.lab;
-    if (!l.species || !SPECIES[l.species]) l.species = pickDefault(s);
+    if (!l.species || !discovered(s.progress).some((sp) => sp.id === l.species)) l.species = pickDefault(s);
     const spec = l.species ? SPECIES[l.species] : undefined;
     if (!spec) return;
     const L = layout(spec);
@@ -254,9 +270,10 @@ export const labScene: Scene = {
     };
 
     for (const k of input.pressed) {
-      const i = SPECIES_LIST.findIndex((x) => x.id === l.species);
-      if (k === "ArrowUp" || k === "KeyW" || k === "KeyZ") select(SPECIES_LIST[(i + SPECIES_LIST.length - 1) % SPECIES_LIST.length].id);
-      if (k === "ArrowDown" || k === "KeyS") select(SPECIES_LIST[(i + 1) % SPECIES_LIST.length].id);
+      const list = discovered(s.progress);
+      const i = list.findIndex((x) => x.id === l.species);
+      if (k === "ArrowUp" || k === "KeyW" || k === "KeyZ") select(list[(i + list.length - 1) % list.length].id);
+      if (k === "ArrowDown" || k === "KeyS") select(list[(i + 1) % list.length].id);
       if ((k === "Enter" || k === "Space") && !l.synth) autoPlace(s, spec);
     }
     for (const id of input.ui) {
@@ -396,7 +413,7 @@ function drawStage(s: GameState, th: Theme, f: Frame, spec: Species, L: Layout) 
 
   // Silhouette humaine pour l'échelle.
   const hr = humanRaster(L.hx, L.s);
-  drawRaster(f, th, hr, L.ox, L.oy, { light: 0.95 });
+  drawRaster(f, th, hr, L.ox, L.ground, { light: 0.95 });
 
   const synth = l.synth && l.synth.sp === spec.id ? l.synth : null;
   const showModel = !synth && l.done && l.done.sp === spec.id;
@@ -489,29 +506,44 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
   const T = (x: number, y: number, str: string, col: RGB = u.text) => text(ui, x, y, str, col, u.panel, u.alpha);
 
   // --- Espèces (gauche) ---
+  // Seules les espèces dont on a trouvé des os apparaissent ; leur nom reste caché jusqu'à l'assemblage.
   const lx = 1, ly = UI_TOP, inner = LEFT_W - 4;
-  const lh = 2 + SPECIES_LIST.length * 3;
+  const list = discovered(p);
+  const lh = 2 + Math.max(1, list.length) * 3 + (list.length ? 0 : 2);
   panel(ui, th, lx, ly, LEFT_W, lh, "Especes");
   let y = ly + 1;
-  for (const sp of SPECIES_LIST) {
+  if (!list.length) wrap("Aucun os pour l'instant. Va fouiller (touche 2) : chaque espece trouvee apparaitra ici.", inner).forEach((t, i) => T(lx + 2, y + i, t, u.dim));
+  for (const sp of list) {
     const found = foundOf(s, sp).length, need = sp.bones.length;
-    const known = found > 0 || isAssembled(s, sp.id);
-    const label = known ? sp.name : "???";
+    const label = shownName(p, sp.id);
     button(ui, th, `lab:sp:${sp.id}`, lx + 2, y, isAssembled(s, sp.id) ? `${label} *` : label, { w: inner, active: l.species === sp.id });
     bar(ui, th, lx + 2, y + 1, inner - 6, found / Math.max(1, need), found >= need ? u.ok : u.hi);
     T(lx + inner - 3, y + 1, `${found}/${need}`.padStart(5), u.dim);
     y += 3;
   }
-  T(lx + 2, ly + lh, " * = deja assemble ", u.dim);
+  if (list.some((sp) => isAssembled(s, sp.id))) T(lx + 2, ly + lh, " * = deja assemble ", u.dim);
 
   if (!spec) return;
   const found = foundOf(s, spec), placed = placedOf(s, spec);
   const known = found.length > 0 || isAssembled(s, spec.id);
+  const named = isAssembled(s, spec.id);
 
   // --- Fiche (droite) ---
   const rw = RIGHT_W, rx = ui.cols - rw - 1, ry = UI_TOP, rin = rw - 4;
   const lines: [string, RGB][] = [];
-  if (known) {
+  if (known && !named) {
+    // Espèce mystère : on ne sait que ce que disent les os.
+    wrap("Qui est-ce ? Assemble son squelette pour le decouvrir !", rin).forEach((t) => lines.push([t, u.hi]));
+    lines.push(["", u.text]);
+    lines.push(["Taille, poids, regime : ???", u.dim]);
+    lines.push(["", u.text]);
+    lines.push([`Os places : ${placed.length} / ${spec.bones.length}`, u.hi]);
+    for (const b of spec.bones) {
+      const st = placed.includes(b.id) ? "[x]" : found.includes(b.id) ? "[ ]" : "[?]";
+      const name = found.includes(b.id) || placed.includes(b.id) ? b.name : "???";
+      lines.push([`${st} ${name}`.slice(0, rin), placed.includes(b.id) ? u.ok : found.includes(b.id) ? u.text : u.dim]);
+    }
+  } else if (known) {
     lines.push([spec.latin, u.dim]);
     wrap(spec.period, rin).forEach((t) => lines.push([t, u.text]));
     const ratio = spec.lengthM / HUMAN_M;
@@ -529,10 +561,10 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
     lines.push(["", u.text]);
     lines.push([`Dans la reserve : ${p.population[spec.id] ?? 0} / ${MAX_POP}`, u.dim]);
   } else {
-    wrap("Espece encore inconnue. Fouille les sites (touche 1) pour trouver ses os : sa silhouette apparaitra ici.", rin).forEach((t) => lines.push([t, u.dim]));
+    wrap("Espece encore inconnue. Fouille les sites (touche 2) pour trouver ses os : sa silhouette apparaitra ici.", rin).forEach((t) => lines.push([t, u.dim]));
   }
   const rh = lines.length + 3;
-  panel(ui, th, rx, ry, rw, rh, known ? spec.name : "???");
+  panel(ui, th, rx, ry, rw, rh, known ? shownName(p, spec.id) : "???");
   lines.forEach(([t, c], i) => T(rx + 2, ry + 1 + i, t, c));
   let by = ry + rh - 2 + 2;
   const unplaced = found.some((id) => !placed.includes(id));
@@ -549,7 +581,7 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
   if (l.done && l.done.sp === spec.id && !l.synth) {
     // Modale dimensionnée sur son contenu : titre, phrase, puis les deux choix côte à côte.
     const ok = l.done.added > 0;
-    const msg = ok ? "Envoye dans la reserve !" : "La reserve est pleine pour cette espece.";
+    const msg = !ok ? "La reserve est pleine pour cette espece." : l.done.first ? `C'est un ${spec.name} ! Envoye dans la reserve.` : "Envoye dans la reserve !";
     const sub = !ok ? `Maximum : ${MAX_POP} individus par espece.`
       : l.done.added > 1 ? `${l.done.added} ${spec.name}s vivent maintenant dans la reserve.` : `Ton ${spec.name} vit maintenant dans la reserve.`;
     const b1 = "Voir dans la reserve", b2 = "Encore un";
@@ -591,7 +623,7 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
     text(ui, xUi + Math.max(0, Math.floor((wUi - t.length) / 2)), yUi, t, l.held === b.bone ? u.panel : u.text, l.held === b.bone ? u.hi : u.panel, 0.85);
   }
   if (!trayBoxes(s, spec, L).length && known && !complete(s, spec)) {
-    const msg = "Plateau vide : trouve d'autres os a la fouille (touche 1) !";
+    const msg = "Plateau vide : trouve d'autres os a la fouille (touche 2) !";
     T(midUi - Math.floor(msg.length / 2), Math.floor(((L.trayY + L.trayH / 2) * metrics.cellH) / metrics.uiH), msg, u.dim);
   }
 

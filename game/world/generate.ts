@@ -1,5 +1,5 @@
 import { createNoise2D } from "simplex-noise";
-import { CELL_H, CELL_W, WORLD_COLS, WORLD_H, WORLD_ROWS, WORLD_W } from "../config";
+import { CELL_H, CELL_W, LAND_COLS, WORLD_COLS, WORLD_H, WORLD_ROWS } from "../config";
 import { hash2, mulberry32 } from "../rng";
 import { M } from "../render/materials";
 import { rasterize, type Prim } from "../render/raster";
@@ -75,6 +75,8 @@ export interface World {
   /** Arbres (renversables par le T. rex et la météorite, ils repoussent). */
   trees: Tree[];
   lights: Light[];
+  /** Début de la mer (px) : au-delà, la côte puis le large (mosasaures). */
+  seaX: number;
   /** Grand étang (reflet de lune). Les autres plans d'eau : `ponds`. */
   pond: Pond;
   ponds: Pond[];
@@ -117,8 +119,10 @@ export function generateWorld(style: Style, seed = 7): World {
   const dark = style === "dark";
   const n2 = createNoise2D(rng);
   const cols = WORLD_COLS, rows = WORLD_ROWS, N = cols * rows;
-  const pond: Pond = { x: WORLD_W * 0.6, y: WORLD_H * 0.56, rx: 560, ry: 380 };
-  const mare: Pond = { x: WORLD_W * 0.17, y: WORLD_H * 0.25, rx: 240, ry: 165 };
+  // Le paysage des terres est calé sur LAND_W (la mer s'ajoute à l'est sans rien déplacer).
+  const LW = LAND_COLS * CELL_W;
+  const pond: Pond = { x: LW * 0.6, y: WORLD_H * 0.56, rx: 560, ry: 380 };
+  const mare: Pond = { x: LW * 0.17, y: WORLD_H * 0.25, rx: 240, ry: 165 };
   const w: World = {
     cols, rows,
     terrain: new Uint8Array(N),
@@ -141,7 +145,8 @@ export function generateWorld(style: Style, seed = 7): World {
     lights: [],
     pond,
     ponds: [pond, mare],
-    spawn: { x: WORLD_W * 0.3, y: WORLD_H * 0.62 },
+    spawn: { x: LW * 0.3, y: WORLD_H * 0.62 },
+    seaX: LW,
     plants: [],
     waterPoints: [],
   };
@@ -196,10 +201,20 @@ export function generateWorld(style: Style, seed = 7): World {
       }
     }
   };
-  const W = WORLD_W, H = WORLD_H;
+  const W = LW, H = WORLD_H;
+  // Mer à l'est : côte découpée (baies, caps), plage peu profonde puis le large.
+  const coast = (py: number) => LW * 0.985 + 90 * n2(py * 0.0012, 51) + 40 * n2(py * 0.004, 77);
+  for (let y = 0; y < rows; y++) {
+    const cx = coast((y + 0.5) * CELL_H);
+    for (let x = Math.max(0, Math.floor((cx - 600) / CELL_W)); x < cols; x++) {
+      const px = (x + 0.5) * CELL_W, i = y * cols + x;
+      const d = px >= cx ? Math.max(0, 1 - (px - cx) / 520) : 1 + (cx - px) / 380;
+      if (d < wd[i]) { wd[i] = d; wsc[i] = 1; }
+    }
+  }
   lake(pond, 0);
   lake(mare, 4.7);
-  // Affluent qui descend du nord jusqu'au grand étang, puis exutoire vers le sud-est.
+  // Affluent qui descend du nord jusqu'au grand étang, puis exutoire vers le sud-est (estuaire sur la mer).
   river([[W * 0.36, -90], [W * 0.4, H * 0.1], [W * 0.32, H * 0.22], [W * 0.38, H * 0.33], [W * 0.48, H * 0.4], [pond.x - pond.rx * 0.45, pond.y - pond.ry * 0.4]], 34, [0.3, 0.66]);
   river([[pond.x + pond.rx * 0.5, pond.y + pond.ry * 0.5], [W * 0.84, H * 0.76], [W * 0.78, H * 0.88], [W * 0.86, H + 90]], 28, [0.55]);
 
@@ -424,7 +439,8 @@ export function generateWorld(style: Style, seed = 7): World {
       if (w.terrain[i] !== T.Shallow || !w.shore[i] || w.solid[i]) continue;
       const px = (x + 0.5) * CELL_W, py = (y + 0.5) * CELL_H;
       const key = Math.floor(px / 56) * 1000 + Math.floor(py / 56);
-      if (seen.has(key) || !inside(px, py)) continue;
+      // Pas de point d'eau sur la plage : l'eau de mer ne se boit pas.
+      if (seen.has(key) || !inside(px, py) || px > coast(py) - 60) continue;
       seen.add(key);
       w.waterPoints.push({ x: px, y: py });
     }

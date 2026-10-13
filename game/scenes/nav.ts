@@ -27,6 +27,15 @@ export function standable(w: World, sp: SpeciesId, x: number, y: number): boolea
   const breaks = BREAKERS.has(sp);
   const spec = SPECIES[sp];
   const half = spec ? spec.halfLen * FOOT : 20;
+  // Nageurs : tout le corps en eau profonde, avec une marge au-dessus et au-dessous (pas d'échouage).
+  if (spec?.habitat === "sea") {
+    if (x < half + 10 || x > WORLD_W - half - 10 || y < 100 || y > WORLD_H - 20) return false;
+    for (const dy of [-CELL_H * 2, 0, CELL_H * 2]) {
+      const row = Math.floor((y + dy) / CELL_H) * w.cols;
+      for (let lx = -half; lx <= half; lx += CELL_W * 3) if (w.terrain[row + Math.floor((x + lx) / CELL_W)] !== T.Deep) return false;
+    }
+    return true;
+  }
   if (x < half + 10 || x > WORLD_W - half - 10 || y < 80 || y > WORLD_H - 6) return false;
   const row = Math.floor(y / CELL_H) * w.cols;
   // Troncs et rochers bloquent sur toute la longueur du corps ; l'eau profonde seulement sous le

@@ -9,7 +9,9 @@ export const UI_CELL_H = 15;
 export const UI_FONT_SIZE = 13;
 
 /** Taille du monde en cellules. */
-export const WORLD_COLS = 900;
+/** Terres (le paysage historique) + une bande de mer à l'est : la Voie maritime intérieure de l'Ouest. */
+export const LAND_COLS = 900;
+export const WORLD_COLS = 1180;
 export const WORLD_ROWS = 520;
 
 export const WORLD_W = WORLD_COLS * CELL_W;

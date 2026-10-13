@@ -20,9 +20,10 @@ export function toast(s: GameState, title: string, body = "") {
 
 export function drawToasts(s: GameState, th: Theme, ui: Frame) {
   s.toasts = s.toasts.filter((t) => s.time - t.t0 < LIFE);
-  const w = Math.min(46, ui.cols - 4);
   let y = UI_TOP;
   for (const t of s.toasts) {
+    // Assez large pour le titre (« * » + marges), dans la limite de l'écran.
+    const w = Math.min(Math.max(46, t.title.length + 8), ui.cols - 4);
     const lines = t.text ? wrap(t.text, w - 4) : [];
     const h = 3 + lines.length;
     const age = s.time - t.t0;

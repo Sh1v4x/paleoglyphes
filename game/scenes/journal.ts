@@ -91,10 +91,10 @@ function markSeen(keys: string[]) {
 const factKey = (sp: SpeciesId, id: string) => `${sp}:${id}`;
 const hasF = (s: GameState, sp: SpeciesId, id: string) => s.progress.facts.includes(factKey(sp, id));
 
-/** Une espèce est connue dès le premier os (ou si elle vit déjà dans la réserve). */
+/** Une espèce est connue (nom, fiche) une fois son squelette assemblé : avant, c'est une espèce mystère. */
 export function known(s: GameState, sp: SpeciesId): boolean {
   const p = s.progress;
-  return (p.bones[sp]?.length ?? 0) > 0 || p.assembled.includes(sp) || (p.population[sp] ?? 0) > 0 || p.facts.some((f) => f.startsWith(`${sp}:`));
+  return p.assembled.includes(sp) || (p.population[sp] ?? 0) > 0;
 }
 const knownList = (s: GameState) => SPECIES_LIST.filter((sp) => known(s, sp.id));
 const faunaList = () => Object.values(FAUNA) as FaunaDef[];

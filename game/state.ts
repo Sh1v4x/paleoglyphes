@@ -45,7 +45,7 @@ export function createState(): GameState {
   return {
     time: 0,
     style: "cartoon",
-    mode: "dig",
+    mode: "park",
     menu: { open: false, index: 0, confirm: false },
     progress: loadProgress(),
     clock: START_HOUR,

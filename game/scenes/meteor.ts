@@ -9,6 +9,9 @@ import { resetUi, text } from "../ui/kit";
 import { toast } from "../ui/toast";
 import { knockTree, regrowAll } from "../world/trees";
 import { drawSpace, SPACE_DURATION } from "./meteor-space";
+import { createDigState } from "./dig";
+import { createJournalState } from "./journal";
+import { createLabState } from "./lab";
 import { createParkState, parkScene, syncPopulation } from "./park";
 import type { Scene } from "./types";
 
@@ -44,6 +47,10 @@ function resetAll(s: GameState) {
   } catch {
     // Stockage indisponible : rien à effacer.
   }
+  // Fouille, atelier et carnet repartent de zéro : nouveau site, établi vide.
+  s.dig = createDigState();
+  s.lab = createLabState();
+  s.journal = createJournalState();
   const keep = { cam: { ...s.park.cam }, regrow: 2 };
   s.park = { ...createParkState(), ...keep };
   parkScene.enter?.(s);
@@ -100,7 +107,7 @@ export const meteorScene: Scene = {
     parkScene.update(s, quiet, dt);
     if (tp >= T.end) {
       s.park.regrow = 1;
-      s.mode = "dig";
+      s.mode = "park";
       toast(s, "Tout recommence !", "66 millions d'annees plus tard, les fossiles attendent d'etre decouverts. Bonne fouille !");
     }
   },

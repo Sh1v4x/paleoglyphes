@@ -10,6 +10,7 @@ import { toast } from "../ui/toast";
 import type { World } from "../world/generate";
 import { T, isWater } from "../world/tiles";
 import { initFauna, stepFauna, type Bug } from "./eco-fauna";
+import { liveAir, liveSea, type WildKit } from "./eco-wild";
 import { knockTree } from "../world/trees";
 import { BREAKERS, clearLine, findPath, navStats, nearestFree, pathBudget } from "./nav";
 import { canStand, parkBrain, type Animal, type Task } from "./park";
@@ -138,7 +139,7 @@ function step(s: GameState, a: Animal, spec: Species, tx: number, ty: number, sp
   // Perpendiculaire à la route : on contourne par ce côté-là, sans jamais freiner l'avancée.
   const px = -uy, py = ux;
   for (const o of byId.values()) {
-    if (o === a || o.task === "dead" || o.id === a.targetId || o.targetId === a.id) continue;
+    if (o === a || o.task === "dead" || o.id === a.targetId || o.targetId === a.id || apart(a, o)) continue;
     const os = spOf(o);
     if (!os) continue;
     const rx = (spec.halfLen + os.halfLen) * 0.5 + 8, ry = 22;
@@ -530,7 +531,9 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
   if (!spec) return;
   moved = false;
   const done = tick(a, dt);
-  if (a.task === "dead") { a.moving = 0; return; }
+  if (a.task === "dead") { a.moving = 0; a.alt = Math.max(0, a.alt - dt * 200); return; }
+  if (spec.habitat === "sea") return liveSea(kit(eco), s, a, spec, dt, done);
+  if (spec.habitat === "air") return liveAir(kit(eco), s, a, spec, dt, done);
   const B = spec.behavior;
   const carn = B.diet === "carnivore";
   a.hunger = Math.min(1, a.hunger + dt / (carn ? 260 : 200));
@@ -754,6 +757,31 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
   if (!moved && (a.action === "walk" || a.action === "run")) act(a, "idle");
 }
 
+/** Deux animaux qui ne partagent pas le même espace (mer / sol / ciel) s'ignorent. */
+const apart = (a: Animal, b: Animal) => (spOf(a)?.habitat === "sea") !== (spOf(b)?.habitat === "sea") || a.alt > 4 || b.alt > 4;
+
+/** Briques de déplacement prêtées aux cerveaux de la mer et des airs (eco-wild.ts). */
+let kitCache: { eco: EcoState; k: WildKit } | null = null;
+function kit(eco: EcoState): WildKit {
+  if (kitCache?.eco === eco) return kitCache.k;
+  const k: WildKit = {
+    go, reach, approach, canStand, act, setTask, face, waterSide,
+    water: () => eco.water,
+    pickWater: (a) => pickWater(eco, a),
+    threat: (a, range) => {
+      for (const o of byId.values()) {
+        const os = spOf(o);
+        if (o === a || o.task === "dead" || !os || os.habitat || os.behavior.diet !== "carnivore") continue;
+        if (dist(a, o) < range) return true;
+      }
+      return false;
+    },
+    moved: () => moved,
+  };
+  kitCache = { eco, k };
+  return k;
+}
+
 /** Poids d'un animal dans les bousculades : qui dort, mange ou boit ne se laisse pas pousser. */
 const mass = (a: Animal, h: number) => (a.task === "rest" || a.action === "eat" || a.action === "drink" ? h * 6 : h);
 
@@ -770,7 +798,7 @@ function separate(s: GameState, list: Animal[], dt: number) {
     if (!sa) continue;
     for (let j = i + 1; j < list.length; j++) {
       const b = list[j];
-      if (b.task === "dead" || a.targetId === b.id || b.targetId === a.id) continue;
+      if (b.task === "dead" || a.targetId === b.id || b.targetId === a.id || apart(a, b)) continue;
       const sb = spOf(b);
       if (!sb) continue;
       const rx = (sa.halfLen + sb.halfLen) * 0.45, ry = 18;
@@ -846,7 +874,7 @@ export function stepEcosystem(s: GameState, dt: number) {
     else live(s, eco, a, dt);
     // Filet de sécurité : un animal coincé dans le décor (poussé, apparu de travers) est replacé
     // sur la case libre la plus proche.
-    if (a.task !== "dead" && !canStand(s, a.sp, a.x, a.y)) {
+    if (a.task !== "dead" && a.alt === 0 && a.mood !== "fly" && !canStand(s, a.sp, a.x, a.y)) {
       const f = nearestFree(w, a.sp, a.x, a.y);
       if (f) { a.x = f.x; a.y = f.y; a.path = null; }
     }
@@ -879,6 +907,20 @@ export function stepEcosystem(s: GameState, dt: number) {
 export function activity(a: Animal): string {
   const spec = SPECIES[a.sp];
   const still = a.moving < 0.3;
+  if (spec?.habitat === "sea" && a.task !== "dead") {
+    switch (a.task) {
+      case "hunt": return "fonce sur un banc de poissons";
+      case "attack": return "attaque un poisson !";
+      case "feed": return "avale sa proie";
+      case "rest": return "derive en se reposant";
+      case "call": return "remonte respirer a la surface";
+      default: return still ? "flotte entre deux eaux" : "nage au large";
+    }
+  }
+  if (spec?.habitat === "air" && a.task !== "dead") {
+    if (a.alt > 0 || a.mood === "fly") return a.task === "wander" ? (a.moving > 0.5 ? "bat des ailes" : "plane dans le ciel") : "descend pour se poser";
+    if (a.task === "graze") return a.action === "eat" ? "avale une petite proie" : "chasse de petites betes au sol";
+  }
   switch (a.task) {
     case "wander": return a.action === "idle" ? (a.herd > 1 ? "se tient avec son troupeau" : "observe les alentours") : a.herd > 1 ? "suit son troupeau" : "se promène";
     case "graze": return a.action === "eat" ? (spec?.behavior.browse === "high" ? "broute les feuilles des arbres" : "broute") : "cherche des plantes à brouter";

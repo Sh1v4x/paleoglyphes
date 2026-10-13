@@ -2,7 +2,7 @@ import type { Material } from "../render/materials";
 import type { Prim } from "../render/raster";
 
 /** Espèces que l'on peut fouiller, assembler et lâcher dans la réserve. */
-export type SpeciesId = "ankylo" | "raptor" | "trike" | "edmonto" | "pachy" | "trex";
+export type SpeciesId = "ankylo" | "raptor" | "trike" | "edmonto" | "pachy" | "trex" | "quetzal" | "mosa";
 
 /**
  * Ce que fait un animal. Chaque modèle sait dessiner chaque action (au minimum « idle » et « walk »).
@@ -14,8 +14,13 @@ export type SpeciesId = "ankylo" | "raptor" | "trike" | "edmonto" | "pachy" | "t
  * - call : cri, tête levée
  * - run : course (comme walk mais allure rapide)
  * - dead : couché sur le flanc, immobile
+ * - fly : en vol (espèces "air") ; `walk` = phase des battements, `moving` 1 = bat des ailes, 0 = plane
+ * Espèces "sea" : walk/run = nager (ondulation du corps et de la queue), idle = flotter, rest = dériver.
  */
-export type Action = "idle" | "walk" | "run" | "eat" | "drink" | "rest" | "attack" | "defend" | "call" | "dead";
+export type Action = "idle" | "walk" | "run" | "eat" | "drink" | "rest" | "attack" | "defend" | "call" | "dead" | "fly";
+
+/** Où vit l'espèce : au sol, en mer (eau profonde uniquement), ou dans les airs (se pose au sol). */
+export type Habitat = "land" | "sea" | "air";
 
 export interface Pose {
   /** Phase de marche (radians), avance avec le déplacement. */
@@ -99,6 +104,8 @@ export interface Species {
   runSpeed: number;
   stride: number;
   behavior: Behavior;
+  /** Milieu de vie (défaut : "land"). */
+  habitat?: Habitat;
 }
 
 /** Matières propres à un groupe d'espèces (ou à la flore), déclinées pour chaque style. */

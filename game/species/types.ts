@@ -15,9 +15,10 @@ export type SpeciesId = "ankylo" | "raptor" | "trike" | "edmonto" | "pachy" | "t
  * - run : course (comme walk mais allure rapide)
  * - dead : couché sur le flanc, immobile
  * - fly : en vol (espèces "air") ; `walk` = phase des battements, `moving` 1 = bat des ailes, 0 = plane
+ * - takeoff / land : envol et atterrissage (espèces "air"), actionT 0..1 = déroulé
  * Espèces "sea" : walk/run = nager (ondulation du corps et de la queue), idle = flotter, rest = dériver.
  */
-export type Action = "idle" | "walk" | "run" | "eat" | "drink" | "rest" | "attack" | "defend" | "call" | "dead" | "fly";
+export type Action = "idle" | "walk" | "run" | "eat" | "drink" | "rest" | "attack" | "defend" | "call" | "dead" | "fly" | "takeoff" | "land";
 
 /** Où vit l'espèce : au sol, en mer (eau profonde uniquement), ou dans les airs (se pose au sol). */
 export type Habitat = "land" | "sea" | "air";

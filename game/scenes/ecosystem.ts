@@ -32,7 +32,7 @@ export interface EcoState {
   fauna: Bug[];
 }
 
-const ONE_SHOT: Partial<Record<Action, number>> = { attack: 0.9, call: 1.6, dead: 1.4 };
+const ONE_SHOT: Partial<Record<Action, number>> = { attack: 0.9, call: 1.6, dead: 1.4, takeoff: 1.6, land: 1.4 };
 const LOOP: Partial<Record<Action, number>> = { idle: 4, eat: 1.6, drink: 1.4, rest: 4, defend: 1.2 };
 /** Angles d'évitement essayés tour à tour (radians, du plus direct au plus large). */
 const ANG = [0, 0.55, -0.55, 1.1, -1.1, 1.7, -1.7, 2.4, -2.4];
@@ -918,6 +918,8 @@ export function activity(a: Animal): string {
     }
   }
   if (spec?.habitat === "air" && a.task !== "dead") {
+    if (a.action === "takeoff") return "prend son envol";
+    if (a.action === "land") return "se pose";
     if (a.alt > 0 || a.mood === "fly") return a.task === "wander" ? (a.moving > 0.5 ? "bat des ailes" : "plane dans le ciel") : "descend pour se poser";
     if (a.task === "graze") return a.action === "eat" ? "avale une petite proie" : "chasse de petites betes au sol";
   }

@@ -103,6 +103,29 @@ export function liveAir(k: WildKit, s: GameState, a: Animal, spec: Species, dt: 
   else a.energy = Math.max(0, a.energy - dt / (a.alt > 0 ? 260 : 420));
   a.timer -= dt;
 
+  // Envol : accroupi, poussée, puis il monte en battant des ailes.
+  if (a.action === "takeoff") {
+    a.mood = "fly";
+    a.moving = 0;
+    if (a.actionT > 0.4) a.alt += dt * 120;
+    if (done) k.act(a, "fly");
+    return;
+  }
+  // Atterrissage : il freine ailes cabrées en finissant sa descente, se pose, replie les ailes.
+  if (a.action === "land") {
+    a.moving = 0;
+    a.alt = a.actionT > 0.45 ? 0 : Math.max(0, a.alt - dt * 110);
+    const dx = a.tx - a.x, dy = a.ty - a.y, d = Math.hypot(dx, dy);
+    if (d > 1 && a.actionT < 0.45) { const v = Math.min(d, spec.walkSpeed * 1.5 * dt); a.x += (dx / d) * v; a.y += (dy / d) * v; }
+    if (done) {
+      a.alt = 0; a.mood = "wander";
+      k.act(a, "idle");
+      if (a.task !== "drink") k.setTask(a, "wander");
+      a.timer = 1 + Math.random() * 2;
+    }
+    return;
+  }
+
   if (a.alt > 0 || a.mood === "fly") {
     a.mood = "fly";
     // « wander » = croisière ; toute autre tâche = il cherche à se poser à (tx, ty).
@@ -114,19 +137,16 @@ export function liveAir(k: WildKit, s: GameState, a: Animal, spec: Species, dt: 
       if (Math.abs(dx) > 4) a.facing = dx > 0 ? 1 : -1;
     }
     const cruise = 170 + 50 * Math.sin(s.time * 0.3 + a.phase);
-    const want = landing && d < 160 ? 0 : cruise;
+    // En approche : il descend jusqu'à ~45 px, puis la séquence d'atterrissage prend le relais.
+    const want = landing && d < 160 ? 45 : cruise;
     a.alt = Math.max(0, a.alt + Math.sign(want - a.alt) * Math.min(Math.abs(want - a.alt), dt * 90));
     // Bat des ailes en montée (et de temps en temps) ; plane le reste du temps.
     const flap = want > a.alt + 5 || Math.sin(s.time * 0.4 + a.phase) > 0.35;
     k.act(a, "fly");
     a.walk += dt * spec.stride * (flap ? 1.4 : 0.15);
     a.moving = flap ? 1 : 0;
-    if (landing && d <= 3 && a.alt <= 0.5) {
-      // Posé : il replie les ailes.
-      a.alt = 0; a.mood = "wander"; a.moving = 0;
-      k.act(a, "idle");
-      if (a.task !== "drink") k.setTask(a, "wander");
-      a.timer = 1 + Math.random() * 2;
+    if (landing && d <= 40 && a.alt <= 50) {
+      k.act(a, "land");
     } else if (!landing && d < 40) {
       if (a.timer <= 0 && (a.hunger > 0.4 || a.energy < 0.4 || a.thirst > 0.5 || Math.random() < 0.5)) pickLanding(k, s, a);
       else {
@@ -140,7 +160,8 @@ export function liveAir(k: WildKit, s: GameState, a: Animal, spec: Species, dt: 
   // Posé au sol : un animal terrestre comme les autres, mais il redécolle au moindre danger.
   const takeOff = () => {
     k.setTask(a, "wander", "fly");
-    a.alt = 0.6;
+    a.alt = 0;
+    k.act(a, "takeoff");
     a.timer = 20 + Math.random() * 30;
     a.tx = Math.max(200, Math.min(WORLD_W - 200, a.x + (Math.random() - 0.5) * 1600));
     a.ty = Math.max(SKY_TOP, Math.min(WORLD_H - 200, a.y + (Math.random() - 0.5) * 800));

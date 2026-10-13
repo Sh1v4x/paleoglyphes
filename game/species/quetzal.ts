@@ -311,8 +311,27 @@ function quetzalFly({ walk, moving, time }: Pose): Prim[] {
   return P;
 }
 
+/**
+ * Envol (lancement quadrupède, comme les vrais azhdarchidés) : accroupi, poussée sur les bras ailes
+ * à demi ouvertes, puis deux grands battements. Atterrissage : ailes cabrées pour freiner, pattes en
+ * avant, contact ailes ouvertes, puis il replie les ailes.
+ */
+function quetzalTransition(pose: Pose): Prim[] {
+  const t = pose.actionT, base = { ...pose, moving: 1 };
+  if (pose.action === "takeoff") {
+    if (t < 0.25) return quetzalGround({ ...pose, action: "rest", actionT: 0 });
+    if (t < 0.45) return quetzalGround({ ...pose, action: "defend", actionT: 0.5 });
+    // Deux grands battements (phase complète x2) pendant la montée.
+    return quetzalFly({ ...base, action: "fly", walk: ((t - 0.45) / 0.55) * Math.PI * 4 - Math.PI / 2 });
+  }
+  if (t < 0.45) return quetzalFly({ ...base, action: "fly", walk: Math.PI / 2 }); // ailes hautes : il freine
+  if (t < 0.75) return quetzalGround({ ...pose, action: "defend", actionT: 0.5 });
+  return quetzalGround({ ...pose, action: "idle", actionT: 0 });
+}
+
 export function quetzalModel(pose: Pose): Prim[] {
-  const P = pose.action === "fly" ? quetzalFly(pose) : pose.action === "dead" ? quetzalDead() : quetzalGround(pose);
+  const P = pose.action === "fly" ? quetzalFly(pose) : pose.action === "dead" ? quetzalDead()
+    : pose.action === "takeoff" || pose.action === "land" ? quetzalTransition(pose) : quetzalGround(pose);
   return P.map((p) => scalePrim(p, QUETZAL_SCALE));
 }
 

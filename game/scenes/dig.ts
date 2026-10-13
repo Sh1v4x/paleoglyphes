@@ -1,3 +1,4 @@
+import { DEV } from "../config";
 import type { Input } from "../input";
 import type { RGB, Theme } from "../palette";
 import { addBone, saveProgress } from "../progress";
@@ -12,12 +13,12 @@ import { toast } from "../ui/toast";
 import { deName, EXTRA_BY_ID } from "./dig-fossils";
 import { buildBackdrop, generateSite, hardness, MATRIX_INFO, SUB, type Backdrop, type Fossil, type Site } from "./dig-site";
 import { SM } from "./scenes.mat";
-import type { Scene } from "./types";
+import { UI_TOP, type Scene } from "./types";
 
 /**
  * Fouille : on dégage des os dans une coupe de falaise stratifiée (calque monde, cellules 4x7 px).
  * Pinceau lent et sûr, burin rapide mais dangereux pour les os, loupe qui trahit les formes cachées.
- * Un fossile dégagé à 85 % se récolte d'un clic : il part sous plâtre vers l'atelier.
+ * Un fossile dégagé à 60 % part tout seul sous plâtre vers l'atelier.
  */
 
 export type Tool = "brush" | "pick" | "loupe";
@@ -49,8 +50,8 @@ export function createDigState(): DigState {
 }
 
 const TOOLS: Record<Tool, { name: string; key: string; code: string; rx: number; ry: number; rate: number; desc: string }> = {
-  brush: { name: "Pinceau", key: "E", code: "KeyE", rx: 3.2, ry: 1.9, rate: 2, desc: "Lent mais sans danger : parfait tout pres des os." },
-  pick: { name: "Burin", key: "R", code: "KeyR", rx: 3.6, ry: 2.1, rate: 6.5, desc: "Rapide dans la roche dure... mais il casse les os qu'il touche !" },
+  brush: { name: "Pinceau", key: "E", code: "KeyE", rx: 7, ry: 4, rate: 10, desc: "Lent mais sans danger : parfait tout pres des os." },
+  pick: { name: "Burin", key: "R", code: "KeyR", rx: 8, ry: 4.5, rate: 22, desc: "Rapide dans la roche dure... mais il casse les os qu'il touche !" },
   loupe: { name: "Loupe", key: "F", code: "KeyF", rx: 15, ry: 8.5, rate: 0, desc: "Revele la forme des fossiles caches sous la roche, autour du curseur." },
 };
 const TOOL_ORDER: Tool[] = ["brush", "pick", "loupe"];
@@ -73,7 +74,7 @@ function layout(site: Site | null) {
   const { cols, rows, uiW, uiH, cellW, cellH, ucols } = metrics;
   const left = Math.ceil(((LEFT_W + 2) * uiW) / cellW) + 2;
   const right = Math.floor(((ucols - RIGHT_W - 2) * uiW) / cellW) - 2;
-  const top = Math.ceil((uiH * 1.4) / cellH);
+  const top = Math.ceil((uiH * (UI_TOP - 0.6)) / cellH);
   const bottom = Math.ceil((uiH * 1.6) / cellH) + 1;
   const W = site?.W ?? Math.max(90, Math.min(240, right - left));
   const H = site?.H ?? Math.max(45, Math.min(110, rows - top - bottom - 10));
@@ -99,7 +100,9 @@ function ensureSite(s: GameState): Site | null {
   return d.site;
 }
 
-const ready = (f: Fossil) => f.state === "buried" && f.exposed >= f.cells * 0.85;
+/** Part d'un fossile à dégager avant qu'il parte au laboratoire. */
+const READY = 0.6;
+const ready = (f: Fossil) => f.state === "buried" && f.exposed >= f.cells * READY;
 
 function fossilAt(site: Site, x: number, y: number): Fossil | undefined {
   const i = Math.floor(x), j = Math.floor(y);
@@ -154,6 +157,16 @@ function reward(s: GameState, f: Fossil) {
 function collect(s: GameState, f: Fossil) {
   f.state = "lifting";
   f.t0 = s.time;
+}
+
+/** Mode test : dégage d'un coup tous les fossiles du site et les récolte. */
+function revealAll(s: GameState, site: Site) {
+  const { cover, owner, fossils } = site;
+  for (let k = 0; k < cover.length; k++) {
+    const o = owner[k];
+    if (o >= 0 && fossils[o].state === "buried" && cover[k] > 0) { cover[k] = 0; fossils[o].exposed++; }
+  }
+  for (const f of fossils) if (ready(f)) collect(s, f);
 }
 
 /** Un coup d'outil centré en (cx, cy), cellules du site. */
@@ -230,6 +243,7 @@ export const digScene: Scene = {
       if (id.startsWith("dig:tool:")) d.tool = id.slice(9) as Tool;
       if (id === "dig:next" && site.complete) { nextSite(s); return; }
       if (id === "dig:collect") tryCollect();
+      if (id === "dig:reveal") revealAll(s, site);
     }
 
     // Souris -> cellules du site.
@@ -254,8 +268,10 @@ export const digScene: Scene = {
       // Creuse le long du trajet : frotter vite dégage plus, comme un vrai coup de pinceau.
       const from = d.last ?? m;
       const steps = Math.max(1, Math.ceil(Math.hypot(m.x - from.x, (m.y - from.y) * 1.75) / 1.5));
-      for (let i = 1; i <= steps; i++) stamp(s, site, from.x + ((m.x - from.x) * i) / steps, from.y + ((m.y - from.y) * i) / steps, d.tool, dt * (steps > 1 ? 0.5 : 1));
+      for (let i = 1; i <= steps; i++) stamp(s, site, from.x + ((m.x - from.x) * i) / steps, from.y + ((m.y - from.y) * i) / steps, d.tool, dt * (steps > 1 ? 0.8 : 1));
       d.last = { x: m.x, y: m.y };
+      // Récolte automatique : dès qu'un fossile est assez dégagé, il part sous plâtre.
+      for (const f of site.fossils) if (ready(f)) collect(s, f);
     }
 
     for (const c of input.worldClicks) {
@@ -264,7 +280,7 @@ export const digScene: Scene = {
       const f = fossilAt(site, q.x, q.y);
       if (!f || f.state !== "buried") continue;
       if (ready(f)) collect(s, f);
-      else if (f.exposed > 0) d.hint = { text: `Pas encore : degage-le encore un peu (${Math.round((f.exposed / f.cells) * 100)} % / 85 %)`, t: s.time };
+      else if (f.exposed > 0) d.hint = { text: `Pas encore : degage-le encore un peu (${Math.round((f.exposed / f.cells) * 100)} % / ${READY * 100} %)`, t: s.time };
     }
 
     // Fossiles qui partent sous plâtre.
@@ -551,7 +567,7 @@ function drawUi(s: GameState, th: Theme, ui: Frame, site: Site) {
   const T = (x: number, y: number, str: string, col: RGB = u.text) => text(ui, x, y, str, col, u.panel, u.alpha);
 
   // --- Outils (gauche) ---
-  const lw = LEFT_W, lx = 1, ly = 2, inner = lw - 4;
+  const lw = LEFT_W, lx = 1, ly = UI_TOP, inner = lw - 4;
   const desc = wrap(TOOLS[d.tool].desc, inner);
   let info: string[] = [], layerName = "", hard = 0;
   if (d.hover) {
@@ -569,6 +585,8 @@ function drawUi(s: GameState, th: Theme, ui: Frame, site: Site) {
   const showFo = fo && fo.state === "buried";
   const lh = 3 + TOOL_ORDER.length * 2 + desc.length + 1 + (layerName ? 3 + info.length : 0) + (showFo ? 5 : 0) + 1;
   panel(ui, th, lx, ly, lw, lh, "Outils");
+  // Raccourci de test (dev uniquement) : finir le site d'un clic.
+  if (DEV && !site.complete) button(ui, th, "dig:reveal", lx, ly + lh + 1, "Tout degager (test)", { w: lw });
   let y = ly + 2;
   for (const t of TOOL_ORDER) {
     button(ui, th, `dig:tool:${t}`, lx + 2, y, `${TOOLS[t].name} (${TOOLS[t].key})`, { w: inner, active: d.tool === t });
@@ -588,7 +606,7 @@ function drawUi(s: GameState, th: Theme, ui: Frame, site: Site) {
     const pct = fo.exposed / fo.cells;
     T(lx + 2, y++, fo.kind === "bone" ? "Os en cours" : "Fossile en cours", u.hi);
     T(lx + 2, y, "Degage", u.dim);
-    bar(ui, th, lx + 9, y++, inner - 7, pct / 0.85, pct >= 0.85 ? u.ok : u.hi);
+    bar(ui, th, lx + 9, y++, inner - 7, pct / READY, pct >= READY ? u.ok : u.hi);
     T(lx + 2, y, "Etat", u.dim);
     bar(ui, th, lx + 9, y++, inner - 7, fo.integrity, fo.integrity < 0.5 ? u.bad : u.ok);
     if (ready(fo)) button(ui, th, "dig:collect", lx + 2, y, "Recolter (Entree)", { w: inner });
@@ -596,7 +614,7 @@ function drawUi(s: GameState, th: Theme, ui: Frame, site: Site) {
   }
 
   // --- Site (droite) ---
-  const rw = RIGHT_W, rx = ui.cols - rw - 1, ry = 2, rin = rw - 4;
+  const rw = RIGHT_W, rx = ui.cols - rw - 1, ry = UI_TOP, rin = rw - 4;
   const bones = site.fossils.filter((f) => f.kind === "bone");
   const extras = site.fossils.filter((f) => f.kind === "extra" && f.state === "done");
   const tip = wrap(TIPS[d.tip], rin);

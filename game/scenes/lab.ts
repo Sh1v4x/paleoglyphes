@@ -1,4 +1,4 @@
-import { CELL_H, CELL_W, PX_PER_M } from "../config";
+import { CELL_H, CELL_W, DEV, PX_PER_M } from "../config";
 import type { Input } from "../input";
 import type { RGB, Theme } from "../palette";
 import { saveProgress } from "../progress";
@@ -11,12 +11,11 @@ import { SPECIES, SPECIES_LIST } from "../species";
 import type { Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
 import { bar, button, hitAt, panel, text, wrap } from "../ui/kit";
-import { toast } from "../ui/toast";
 import { unlockTrigger } from "../unlock";
 import { bonePrims, clipCols, IDLE_POSE, outlineRaster, primBounds, rasterMid, scaleAll, skeletonPrims } from "./dig-fossils";
 import { parkScene, syncPopulation } from "./park";
 import { SM } from "./scenes.mat";
-import type { Scene } from "./types";
+import { UI_TOP, type Scene } from "./types";
 
 /**
  * Atelier : on remonte le squelette os par os (glisser depuis le plateau, ou clic puis clic),
@@ -124,7 +123,7 @@ function layout(spec: Species | undefined): Layout {
   const { rows, uiW, uiH, cellW, cellH, ucols } = metrics;
   const left = Math.ceil(((LEFT_W + 2) * uiW) / cellW) + 1;
   const right = Math.max(left + 40, Math.floor(((ucols - RIGHT_W - 2) * uiW) / cellW) - 1);
-  const top = Math.ceil((uiH * 2) / cellH) + 2;
+  const top = Math.ceil((uiH * UI_TOP) / cellH) + 2;
   const bottom = Math.ceil((uiH * 1.3) / cellH);
   const trayH = 15;
   const trayY = rows - bottom - trayH;
@@ -228,7 +227,7 @@ function finishSynth(s: GameState, spec: Species) {
   syncPopulation(s);
   s.lab.synth = null;
   s.lab.done = { sp: spec.id, added, t: s.time };
-  toast(s, "Envoye dans la reserve !", added > 1 ? `${added} ${spec.name}s rejoignent la reserve.` : `Un ${spec.name} rejoint la reserve.`);
+  // Pas de notification ici : la modale de fin de synthèse dit déjà la même chose.
   if (first) unlockTrigger(s, spec.id, "assemble");
 }
 
@@ -263,8 +262,16 @@ export const labScene: Scene = {
     for (const id of input.ui) {
       if (id.startsWith("lab:sp:")) select(id.slice(7) as SpeciesId);
       if (id === "lab:auto") autoPlace(s, spec);
+      if (id === "lab:all") for (let n = 0; n < spec.bones.length; n++) autoPlace(s, spec);
       if (id === "lab:synth") startSynth(s, spec);
-      if (id === "lab:park") { s.mode = "park"; parkScene.enter?.(s); return; }
+      if (id === "lab:park") {
+        s.mode = "park";
+        parkScene.enter?.(s);
+        // La caméra rejoint et suit le dinosaure qu'on vient de synthétiser.
+        const born = s.park.animals.filter((a) => a.sp === spec.id).pop();
+        if (born) { s.park.selected = born.id; s.park.follow = true; s.park.cam.x = born.x - 600; s.park.cam.y = born.y - 350; }
+        return;
+      }
     }
     if (l.synth) {
       if (s.time - l.synth.t0 >= SYNTH_T) finishSynth(s, spec);
@@ -482,7 +489,7 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
   const T = (x: number, y: number, str: string, col: RGB = u.text) => text(ui, x, y, str, col, u.panel, u.alpha);
 
   // --- Espèces (gauche) ---
-  const lx = 1, ly = 2, inner = LEFT_W - 4;
+  const lx = 1, ly = UI_TOP, inner = LEFT_W - 4;
   const lh = 2 + SPECIES_LIST.length * 3;
   panel(ui, th, lx, ly, LEFT_W, lh, "Especes");
   let y = ly + 1;
@@ -502,7 +509,7 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
   const known = found.length > 0 || isAssembled(s, spec.id);
 
   // --- Fiche (droite) ---
-  const rw = RIGHT_W, rx = ui.cols - rw - 1, ry = 2, rin = rw - 4;
+  const rw = RIGHT_W, rx = ui.cols - rw - 1, ry = UI_TOP, rin = rw - 4;
   const lines: [string, RGB][] = [];
   if (known) {
     lines.push([spec.latin, u.dim]);
@@ -532,21 +539,31 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
   if (known && unplaced && !l.synth) {
     button(ui, th, "lab:auto", rx, by, "Placer un os (Entree)", { w: rw });
     by += 2;
+    // Raccourci de test (dev uniquement).
+    if (DEV) { button(ui, th, "lab:all", rx, by, "Tout placer (test)", { w: rw }); by += 2; }
   }
 
   // --- Grand bouton de synthèse, sous le squelette ---
   const midUi = Math.floor(((L.left + L.right) / 2) * metrics.cellW / metrics.uiW);
   const btnY = Math.floor(((L.ground + 3) * metrics.cellH) / metrics.uiH);
   if (l.done && l.done.sp === spec.id && !l.synth) {
-    const msg = l.done.added > 0 ? "Envoye dans la reserve !" : "La reserve est pleine pour cette espece.";
-    const w = Math.max(msg.length, 22) + 6, x = midUi - Math.floor(w / 2);
-    panel(ui, th, x, btnY - 1, w, 5);
-    T(x + Math.floor((w - msg.length) / 2), btnY, msg, u.ok);
+    // Modale dimensionnée sur son contenu : titre, phrase, puis les deux choix côte à côte.
+    const ok = l.done.added > 0;
+    const msg = ok ? "Envoye dans la reserve !" : "La reserve est pleine pour cette espece.";
+    const sub = !ok ? `Maximum : ${MAX_POP} individus par espece.`
+      : l.done.added > 1 ? `${l.done.added} ${spec.name}s vivent maintenant dans la reserve.` : `Ton ${spec.name} vit maintenant dans la reserve.`;
     const b1 = "Voir dans la reserve", b2 = "Encore un";
-    const bw = b1.length + 4 + 1 + b2.length + 4;
-    let bx = x + Math.floor((w - bw) / 2);
-    bx += button(ui, th, "lab:park", bx, btnY + 2, b1, { active: true }) + 1;
-    button(ui, th, "lab:synth", bx, btnY + 2, b2, { disabled: (p.population[spec.id] ?? 0) >= MAX_POP });
+    const b1w = b1.length + 4, b2w = b2.length + 4, gap = 3;
+    const bw = b1w + gap + b2w;
+    const w = Math.max(msg.length, sub.length, bw) + 8, h = 7;
+    // Sous l'estrade, pour ne pas cacher l'animal fraîchement synthétisé.
+    const x = midUi - Math.floor(w / 2), y = Math.min(btnY, ui.rows - h - 1);
+    panel(ui, th, x, y, w, h);
+    T(x + Math.floor((w - msg.length) / 2), y + 1, msg, ok ? u.ok : u.bad);
+    T(x + Math.floor((w - sub.length) / 2), y + 3, sub, u.text);
+    const bx = x + Math.floor((w - bw) / 2);
+    button(ui, th, "lab:park", bx, y + 5, b1, { w: b1w, active: true });
+    button(ui, th, "lab:synth", bx + b1w + gap, y + 5, b2, { w: b2w, disabled: (p.population[spec.id] ?? 0) >= MAX_POP });
   } else if (complete(s, spec) && !l.synth) {
     const full = (p.population[spec.id] ?? 0) >= MAX_POP;
     const label = full ? `Reserve pleine (${MAX_POP})` : "SYNTHETISER";
@@ -596,7 +613,7 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
 
   if (l.hint && s.time - l.hint.t < 3.5) {
     const lines = wrap(l.hint.text, 56);
-    const w = Math.max(...lines.map((t) => t.length)) + 4, x = midUi - Math.floor(w / 2), y0 = Math.max(2, Math.floor((L.top * metrics.cellH) / metrics.uiH));
+    const w = Math.max(...lines.map((t) => t.length)) + 4, x = midUi - Math.floor(w / 2), y0 = Math.max(UI_TOP, Math.floor((L.top * metrics.cellH) / metrics.uiH));
     panel(ui, th, x, y0, w, lines.length + 2);
     lines.forEach((t, i) => T(x + 2, y0 + 1 + i, t));
   }

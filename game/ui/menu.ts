@@ -1,5 +1,7 @@
 import { hex, type RGB, type Theme } from "../palette";
 import { setBg, setFg, type Frame } from "../render/frame";
+import { metrics } from "../render/metrics";
+import { region } from "./kit";
 import type { GameState } from "../state";
 import { BIG, type BigLabel } from "./bigtext";
 
@@ -9,7 +11,8 @@ const SKIN = {
   cartoon: { panel: hex("#fff6e0"), border: hex("#1b1f2e"), dim: hex("#8a7f6a"), text: hex("#1b1f2e"), hi: hex("#e8553a"), veil: 0.45 },
 } as const;
 
-const VALUES: Record<string, BigLabel> = { dark: "dark", cartoon: "cartoon" };
+// Valeurs de la ligne « Style » (désactivée, voir plus bas) :
+// const VALUES: Record<string, BigLabel> = { dark: "dark", cartoon: "cartoon" };
 
 function put(f: Frame, x: number, y: number, ch: number, fg: RGB, bg: RGB) {
   if (x < 0 || y < 0 || x >= f.cols || y >= f.rows) return;
@@ -43,7 +46,7 @@ export function drawMenu(s: GameState, th: Theme, f: Frame) {
     }
   }
 
-  const W = 84, H = 44;
+  const W = 84, H = 40;
   const x0 = Math.floor((f.cols - W) / 2), y0 = Math.floor((f.rows - H) / 2);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
@@ -60,9 +63,11 @@ export function drawMenu(s: GameState, th: Theme, f: Frame) {
   big(f, "title", cx(BIG.title[0].length), y0 + 2, sk.text, sk.panel);
 
   const rows: { label: BigLabel | null; value: BigLabel; y: number }[] = [
-    { label: "style", value: VALUES[s.style], y: y0 + 10 },
-    { label: "test", value: "unlock", y: y0 + 21 },
-    { label: null, value: "resume", y: y0 + 33 },
+    // Style dark fantasy mis de côté pour l'instant (le code reste en place) :
+    // { label: "style", value: VALUES[s.style], y: y0 + 10 },
+    { label: "test", value: "unlock", y: y0 + 10 },
+    { label: null, value: s.menu.confirm ? "confirm" : "restart", y: y0 + 21 },
+    { label: null, value: "resume", y: y0 + 30 },
   ];
   rows.forEach((r, n) => {
     const sel = s.menu.index === n;
@@ -75,16 +80,17 @@ export function drawMenu(s: GameState, th: Theme, f: Frame) {
     const vw = BIG[r.value][0].length;
     const vx = cx(vw);
     big(f, r.value, vx, vy, sel ? sk.hi : sk.text, sk.panel);
-    if (sel && blink) {
-      if (n === 0) {
-        big(f, "left", vx - 8, vy, sk.hi, sk.panel);
-        big(f, "right", vx + vw + 2, vy, sk.hi, sk.panel);
-      } else {
-        big(f, "right", vx - 8, vy, sk.hi, sk.panel);
-      }
-    }
+    if (sel && blink) big(f, "right", vx - 8, vy, sk.hi, sk.panel);
+    // Ligne cliquable : zone convertie des cellules monde vers les cellules d'interface.
+    const ux = Math.floor((vx - 8) * metrics.cellW / metrics.uiW), uy = Math.floor((r.y * metrics.cellH) / metrics.uiH);
+    const uw = Math.ceil(((vw + 16) * metrics.cellW) / metrics.uiW), uh = Math.ceil(((vy + 5 - r.y) * metrics.cellH) / metrics.uiH);
+    region(`menurow:${n}`, ux, uy, uw, uh);
   });
 
-  const hint = "fleches : choisir    < > : changer    entree : valider    echap : fermer";
+  if (s.menu.confirm) {
+    const warn = "Toute ta progression sera effacee ! Valide encore pour confirmer.";
+    small(f, warn, cx(warn.length), y0 + 27, sk.hi, sk.panel);
+  }
+  const hint = "clic ou fleches + entree : choisir    echap : fermer";
   small(f, hint, cx(hint.length), y0 + H - 3, sk.dim, sk.panel);
 }

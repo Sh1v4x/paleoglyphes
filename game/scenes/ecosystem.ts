@@ -1,3 +1,4 @@
+import { isNight } from "../daycycle";
 import { CELL_H, CELL_W, WORLD_H, WORLD_W } from "../config";
 import { saveProgress } from "../progress";
 import { M } from "../render/materials";
@@ -9,6 +10,8 @@ import { toast } from "../ui/toast";
 import type { World } from "../world/generate";
 import { T, isWater } from "../world/tiles";
 import { initFauna, stepFauna, type Bug } from "./eco-fauna";
+import { knockTree } from "../world/trees";
+import { BREAKERS, clearLine, findPath, navStats, nearestFree, pathBudget } from "./nav";
 import { canStand, parkBrain, type Animal, type Task } from "./park";
 
 /**
@@ -36,6 +39,9 @@ const DEAD_TIME = 180;
 
 // Index et chefs de troupeau, reconstruits à chaque pas sans allocation.
 const byId = new Map<number, Animal>();
+/** Rang de chaque suiveur dans son espèce (0 = chef) et rang des chasseurs d'une même proie. */
+const herdRank = new Map<number, number>();
+const huntRank = new Map<number, number>();
 const leader: Partial<Record<SpeciesId, Animal>> = {};
 const alive: Partial<Record<SpeciesId, number>> = {};
 let moved = false;
@@ -71,57 +77,121 @@ function setTask(a: Animal, t: Task, mood = "wander") {
 }
 
 /**
- * Avance vers (tx, ty) en contournant les obstacles (essaie des angles de côté).
- * `plan` (destinations fixes) : si l'animal ne se rapproche plus (rive concave, bosquet), il passe par
- * un point de détour sur le côté pendant quelques secondes.
- * Renvoie la distance restante au but, ou -1 si l'animal est bloqué.
+ * Avance vers (tx, ty) : suit un chemin A* (grille de navigation de l'espèce), recalculé quand la
+ * cible bouge, quand le chemin vieillit ou quand l'animal ne progresse plus vers son point d'étape.
+ * Les voisins sont évités en route (voir `step`). `plan` = destination fixe (chemin gardé plus longtemps).
+ * Renvoie la distance restante au but, ou -1 si l'animal reste bloqué : l'appelant change alors d'objectif.
  */
 function go(s: GameState, a: Animal, spec: Species, tx: number, ty: number, speed: number, dt: number, plan = false): number {
   const d = Math.hypot(tx - a.x, ty - a.y);
-  if (d < 6) return d;
-  if (plan) {
-    if (Math.abs(tx - a.gx) + Math.abs(ty - a.gy) > 30) { a.gx = tx; a.gy = ty; a.best = Infinity; a.stall = 0; a.vt = 0; }
-    if (d < a.best - 4) { a.best = d; a.stall = 0; } else a.stall += dt;
-    if (a.vt > 0) {
-      a.vt -= dt;
-      if (Math.hypot(a.vx - a.x, a.vy - a.y) < 10) a.vt = 0;
-      else { const r = step(s, a, spec, a.vx, a.vy, speed, dt); return r < 0 ? -1 : d; }
-    } else if (a.stall > 2.5) {
-      // Détour : un point praticable sur le côté (et un peu en arrière), puis on retente.
-      const base = Math.atan2(ty - a.y, tx - a.x);
-      a.side = a.side > 0 ? -1 : 1;
-      for (let k = 0; k < 6; k++) {
-        const ang = base + a.side * (1.6 + k * 0.25), r = 140 + k * 40;
-        const vx = a.x + Math.cos(ang) * r, vy = a.y + Math.sin(ang) * r * 0.6;
-        if (canStand(s, a.sp, vx, vy)) { a.vx = vx; a.vy = vy; a.vt = 3.5; break; }
-      }
-      a.stall = 0;
-      a.best = Infinity;
+  if (d < 6) { a.path = null; return d; }
+  const w = worldFor(s);
+  a.repath -= dt;
+  const drift = Math.hypot(tx - a.pgx, ty - a.pgy);
+  // Nouveau chemin seulement si la cible a vraiment bougé, si le chemin a vieilli ou si l'on piétine :
+  // recalculer trop souvent fait hésiter entre deux contournements équivalents (allers-retours).
+  if ((!a.path || drift > Math.max(60, d * 0.35) || a.repath <= 0) && navStats.budget > 0) {
+    // Ligne droite praticable : inutile de lancer A* (sauf si l'on vient de buter : la grille est moins fine).
+    const direct = a.blocked < 0.2 && a.stuckT < 1 && clearLine(w, a.sp, a.x, a.y, tx, ty);
+    const found = direct ? [tx, ty] : findPath(w, a.sp, a.x, a.y, tx, ty);
+    // Pas de chemin (cible isolée) : on tente tout droit, et l'on abandonnera vite si ça ne passe pas
+    // (sans relancer A* à chaque frame, ce qui remettrait la vigie à zéro).
+    if (!found) a.stuckT += 2.5;
+    a.path = found ?? [tx, ty];
+    a.pi = 0; a.pgx = tx; a.pgy = ty;
+    a.repath = plan ? 8 : 3 + Math.random();
+    a.prog = Infinity; a.progT = 0;
+  }
+  // Point d'étape courant ; le dernier est remplacé par la vraie cible (elle peut bouger un peu).
+  let wx = tx, wy = ty;
+  const P = a.path;
+  if (P && a.pi * 2 < P.length) {
+    const last = a.pi * 2 >= P.length - 2;
+    wx = last && drift < 40 ? tx : P[a.pi * 2]; wy = last && drift < 40 ? ty : P[a.pi * 2 + 1];
+    if (!last && Math.hypot(wx - a.x, wy - a.y) < Math.max(12, spec.walkSpeed * dt * 2)) {
+      a.pi++; a.prog = Infinity; a.progT = 0;
+      wx = P[a.pi * 2]; wy = P[a.pi * 2 + 1];
     }
   }
-  return step(s, a, spec, tx, ty, speed, dt) < 0 ? -1 : d;
+  // Vigie : aucun progrès vers le point d'étape -> nouveau chemin ; trop longtemps -> abandon.
+  const dw = Math.hypot(wx - a.x, wy - a.y);
+  if (dw < a.prog - 2) { a.prog = dw; a.progT = 0; } else a.progT += dt;
+  if (a.progT > 1.5) { a.repath = 0; a.prog = Infinity; a.progT = 0; a.stuckT += 1.5; a.side = a.side > 0 ? -1 : 1; }
+  const r = step(s, a, spec, wx, wy, speed, dt);
+  a.stuckT = r >= 0 ? Math.max(0, a.stuckT - dt * 0.3) : a.stuckT + dt;
+  if (a.stuckT > 6) { a.stuckT = 0; a.path = null; a.blocked = 2; return -1; }
+  return d;
 }
 
-/** Un pas vers (tx, ty) avec évitement local. Renvoie -1 si aucun angle n'est praticable. */
+/**
+ * Un pas vers (tx, ty) avec évitement : les voisins proches repoussent la direction voulue
+ * (ellipse d'espace personnel, longue à l'horizontale comme les corps), on contourne par le
+ * haut ou le bas, et l'on ralentit derrière un plus gros ou un animal qui mange / dort.
+ * Ensuite, angles de repli si le décor bloque. Renvoie -1 si aucun angle n'est praticable.
+ */
 function step(s: GameState, a: Animal, spec: Species, tx: number, ty: number, speed: number, dt: number): number {
   const dx = tx - a.x, dy = ty - a.y;
   const d = Math.hypot(dx, dy);
   if (d < 1) return d;
-  const base = Math.atan2(dy, dx);
-  const step = Math.min(d, speed * dt);
-  const look = Math.max(step * 4, 18);
+  let ux = dx / d, uy = dy / d;
+  let ax = 0, ay = 0, slow = 1;
+  // Perpendiculaire à la route : on contourne par ce côté-là, sans jamais freiner l'avancée.
+  const px = -uy, py = ux;
+  for (const o of byId.values()) {
+    if (o === a || o.task === "dead" || o.id === a.targetId || o.targetId === a.id) continue;
+    const os = spOf(o);
+    if (!os) continue;
+    const rx = (spec.halfLen + os.halfLen) * 0.5 + 8, ry = 22;
+    const relx = o.x - a.x, rely = o.y - a.y;
+    const e = Math.hypot(relx / rx, rely / ry);
+    if (e > 1.8) continue;
+    const fwd = relx * ux + rely * uy;
+    if (fwd > 0 && e < 1.6) {
+      // Devant nous : on passe du côté opposé à lui (côté fixe si pile en face, selon les id).
+      const lat = relx * px + rely * py;
+      const sgn = Math.abs(lat) > 2 ? -Math.sign(lat) : a.id < o.id ? 1 : -1;
+      const k = 1 - e / 1.6;
+      ax += px * sgn * k * 1.5; ay += py * sgn * k * 1.5;
+      // On ralentit derrière un plus gros (ou un prioritaire) qui avance ; un animal immobile se contourne.
+      if (o.moving > 0.3 && (os.halfLen > spec.halfLen * 1.1 || o.id < a.id)) slow = Math.min(slow, 0.5 + e * 0.3);
+    }
+    // Au contact : légère répulsion, quel que soit le côté.
+    if (e < 1) { ax -= (relx / rx) * (1 - e) * 0.7; ay -= (rely / ry) * (1 - e) * 0.7; }
+  }
+  if (ax || ay) {
+    ux += ax; uy += ay;
+    const n = Math.hypot(ux, uy) || 1;
+    ux /= n; uy /= n;
+  }
+  const base = Math.atan2(uy, ux);
+  const stp = Math.min(d, speed * slow * dt);
+  const look = Math.max(stp * 4, 18);
   for (let k = 0; k < ANG.length; k++) {
     const ang = base + ANG[k] * a.side;
     const c = Math.cos(ang), sn = Math.sin(ang) * 0.75;
-    if (!canStand(s, a.sp, a.x + c * look, a.y + sn * look) || !canStand(s, a.sp, a.x + c * step, a.y + sn * step)) continue;
-    a.x += c * step;
-    a.y += sn * step;
-    if (Math.abs(c) > 0.25) a.facing = c > 0 ? 1 : -1;
+    if (!canStand(s, a.sp, a.x + c * look, a.y + sn * look) || !canStand(s, a.sp, a.x + c * stp, a.y + sn * stp)) continue;
+    a.x += c * stp;
+    a.y += sn * stp;
+    // Se retourner seulement sur un vrai déplacement horizontal (pas de clignotement gauche/droite).
+    if (Math.abs(c) > 0.5) a.facing = c > 0 ? 1 : -1;
     const run = speed > spec.walkSpeed * 1.3;
     act(a, run ? "run" : "walk");
-    a.walk += dt * spec.stride * (run ? 1.7 : Math.max(0.6, speed / spec.walkSpeed));
+    a.walk += dt * spec.stride * (run ? 1.7 : Math.max(0.6, (speed * slow) / spec.walkSpeed));
     a.blocked = Math.max(0, a.blocked - dt);
     moved = true;
+    return d;
+  }
+  // Passage serré : on retente à petits pas, sans regarder loin devant.
+  for (let k = 0; k < ANG.length; k++) {
+    const ang = base + ANG[k] * a.side;
+    const c = Math.cos(ang), sn = Math.sin(ang) * 0.75;
+    if (!canStand(s, a.sp, a.x + c * stp, a.y + sn * stp)) continue;
+    a.x += c * stp;
+    a.y += sn * stp;
+    act(a, "walk");
+    a.walk += dt * spec.stride * 0.6;
+    moved = true;
+    a.blocked += dt * 0.5;
     return d;
   }
   a.blocked += dt;
@@ -412,7 +482,7 @@ function graze(s: GameState, eco: EcoState, a: Animal, spec: Species): boolean {
 /** Que faire maintenant ? Appelé quand l'animal est disponible (errance, fin de tâche). */
 function decide(s: GameState, eco: EcoState, a: Animal, spec: Species) {
   const B = spec.behavior;
-  const dark = s.style === "dark";
+  const dark = isNight(s.clock);
   if (a.energy < 0.08) { setTask(a, "rest", a.mood); return; }
   if (a.thirst > 0.6 && eco.water.length) {
     a.spot = pickWater(eco, a);
@@ -491,12 +561,28 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
       const ld = leader[a.sp];
       a.mood = a.herd > 1 ? "herd" : "wander";
       if (B.herd[1] > 1 && ld && ld !== a) {
-        // Suiveur : une place stable autour du chef (cohésion), l'écartement fait le reste.
-        const ang = a.id * 2.39996, r = 50 + (a.id % 4) * 34;
-        const tx = ld.x + Math.cos(ang) * r, ty = ld.y + Math.sin(ang) * r * 0.5;
+        // Suiveur : sa place dans la formation, en échelons derrière le chef (un rang en haut,
+        // un rang en bas, de plus en plus en retrait). Chacun vise un point différent : pas de bouchon.
+        // L'arrière et les côtés suivent la direction réelle de marche du chef (lissée), pas son
+        // orientation gauche/droite : un demi-tour ne fait plus se croiser tout le troupeau.
+        const k = Math.max(0, (herdRank.get(a.id) ?? 1) - 1);
+        const row = Math.floor(k / 2) + 1, up = k % 2 ? 1 : -1;
+        const hn = Math.hypot(ld.vx, ld.vy);
+        const bx = hn > 0.2 ? -ld.vx / hn : -ld.facing, by = hn > 0.2 ? -ld.vy / hn : 0;
+        // Rangs en retrait vers l'arrière (b), décalés d'un côté puis de l'autre (perpendiculaire).
+        let tx = ld.x + bx * row * spec.halfLen * 0.75 - by * up * row * 30;
+        let ty = ld.y + by * row * 28 + bx * up * row * 30;
+        // Place inaccessible (eau, bosquet) : la case libre la plus proche.
+        if (!canStand(s, a.sp, tx, ty)) {
+          const f = nearestFree(worldFor(s), a.sp, tx, ty, 8);
+          if (f) { tx = f.x; ty = f.y; } else { tx = ld.x - ld.facing * spec.halfLen; ty = ld.y; }
+        }
         const far = Math.hypot(tx - a.x, ty - a.y);
-        if (far > 24) go(s, a, spec, tx, ty, spec.walkSpeed * (far > 320 ? 1.9 : far > 120 ? 1.15 : 0.9), dt);
-        else { act(a, "idle"); if (ld.moving < 0.2) face(a, a.x + ld.facing); }
+        // Hystérésis (a.vt = 1 : en route) : on repart au-delà de 50 px, on s'arrête sous 20 px.
+        if (far > 50) a.vt = 1;
+        else if (far < 20) a.vt = 0;
+        if (a.vt && go(s, a, spec, tx, ty, spec.walkSpeed * (far > 320 ? 1.9 : far > 120 ? 1.15 : 0.9), dt) < 0) a.vt = 0;
+        if (!a.vt) { act(a, "idle"); if (ld.moving < 0.2) face(a, a.x + ld.facing); }
         a.timer -= dt;
         if (a.timer <= 0) { a.timer = 1.5 + Math.random() * 2; if (ld.moving < 0.5 || a.hunger > 0.6 || a.thirst > 0.65) decide(s, eco, a, spec); }
         break;
@@ -539,7 +625,7 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
     }
     case "rest":
       act(a, "rest");
-      if (a.energy > 0.97 || (s.style !== "dark" && a.energy > 0.9 && Math.random() < dt * 0.2)) { setTask(a, "wander", a.mood); a.timer = 1; }
+      if (a.energy > 0.97 || (!isNight(s.clock) && a.energy > 0.9 && Math.random() < dt * 0.2)) { setTask(a, "wander", a.mood); a.timer = 1; }
       break;
     case "call":
       act(a, "call");
@@ -552,9 +638,18 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
       const ps = spOf(prey)!;
       const d = dist(a, prey);
       a.mood = "hunt";
+      // Meute : chacun prend un angle différent autour de la proie (de face, de dos, par le haut,
+      // par le bas) au lieu de tous viser le même point.
+      const rank = huntRank.get(a.id) ?? 0;
+      const near = prey.x > a.x ? -1 : 1;
+      const sideX = rank % 2 === 0 ? near : -near;
+      const offY = rank < 2 ? 0 : rank % 2 === 0 ? -34 : 34;
+      // Place de chasse dans un obstacle (proie contre un arbre, au bord de l'eau) : la case libre la plus proche.
+      const slot = (sx: number, sy: number) => (canStand(s, a.sp, sx, sy) ? { x: sx, y: sy } : nearestFree(worldFor(s), a.sp, sx, sy, 8) ?? { x: prey.x, y: prey.y });
       if (a.task === "hunt") {
         // Approche discrète, puis la poursuite.
-        go(s, a, spec, prey.x - (prey.x > a.x ? 1 : -1) * spec.halfLen * 0.5, prey.y, spec.walkSpeed * 1.1, dt);
+        const q = slot(prey.x + sideX * spec.halfLen * 0.6, prey.y + offY);
+        go(s, a, spec, q.x, q.y, spec.walkSpeed * 1.1, dt);
         if (d < B.sight * 0.45) { a.task = "chase"; a.chase = 0; }
         a.chase += dt;
         if (a.chase > 60) { setTask(a, "wander"); a.cool = 15; }
@@ -562,7 +657,8 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
       }
       a.chase += dt;
       const range = (spec.halfLen + ps.halfLen) * 0.55;
-      go(s, a, spec, prey.x - (prey.x > a.x ? 1 : -1) * range * 0.6, prey.y, run, dt);
+      const q = slot(prey.x + sideX * range * 0.6, prey.y + offY * 0.5);
+      go(s, a, spec, q.x, q.y, run, dt);
       if (d < range) { a.task = "attack"; act(a, "attack"); face(a, prey.x); }
       else if (a.chase > 9 || d > B.sight * 1.4 || a.energy < 0.05) { setTask(a, "wander"); a.cool = 25; a.timer = 2; }
       break;
@@ -658,8 +754,15 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
   if (!moved && (a.action === "walk" || a.action === "run")) act(a, "idle");
 }
 
-/** Écartement : deux animaux ne se superposent pas (sauf prédateur et proie au contact). */
+/** Poids d'un animal dans les bousculades : qui dort, mange ou boit ne se laisse pas pousser. */
+const mass = (a: Animal, h: number) => (a.task === "rest" || a.action === "eat" || a.action === "drink" ? h * 6 : h);
+
+/**
+ * Écartement : deux corps qui se chevauchent malgré l'évitement sont séparés, surtout en profondeur
+ * (haut / bas). Le plus léger bouge le plus ; si le décor bloque, on essaie l'autre axe.
+ */
 function separate(s: GameState, list: Animal[], dt: number) {
+  const k = Math.min(1, dt * 8);
   for (let i = 0; i < list.length; i++) {
     const a = list[i];
     if (a.task === "dead") continue;
@@ -668,17 +771,42 @@ function separate(s: GameState, list: Animal[], dt: number) {
     for (let j = i + 1; j < list.length; j++) {
       const b = list[j];
       if (b.task === "dead" || a.targetId === b.id || b.targetId === a.id) continue;
-      const dy = b.y - a.y;
-      if (dy > 22 || dy < -22) continue;
       const sb = spOf(b);
       if (!sb) continue;
-      const need = (sa.halfLen + sb.halfLen) * 0.42;
-      const dx = b.x - a.x;
-      if (dx > need || dx < -need) continue;
-      const push = (need - Math.abs(dx)) * Math.min(1, dt * 3) * 0.5;
-      const sx = dx >= 0 ? 1 : -1, sy = dy >= 0 ? 1 : -1;
-      if (a.task !== "rest" && canStand(s, a.sp, a.x - sx * push, a.y - sy * push * 0.3)) { a.x -= sx * push; a.y -= sy * push * 0.3; }
-      if (b.task !== "rest" && canStand(s, b.sp, b.x + sx * push, b.y + sy * push * 0.3)) { b.x += sx * push; b.y += sy * push * 0.3; }
+      const rx = (sa.halfLen + sb.halfLen) * 0.45, ry = 18;
+      const ox = b.x - a.x, oy = b.y - a.y;
+      const e = Math.hypot(ox / rx, oy / ry);
+      if (e >= 1) continue;
+      const pen = 1 - e;
+      const sy = oy !== 0 ? Math.sign(oy) : a.id < b.id ? 1 : -1;
+      const sx = ox !== 0 ? Math.sign(ox) : 1;
+      const py = pen * ry * k, px = pen * rx * 0.25 * k;
+      const ma = mass(a, sa.halfLen), mb = mass(b, sb.halfLen);
+      const wa = mb / (ma + mb), wb = ma / (ma + mb);
+      const shove = (o: Animal, dirX: number, dirY: number, wgt: number) => {
+        if (canStand(s, o.sp, o.x + dirX * px * wgt, o.y + dirY * py * wgt)) { o.x += dirX * px * wgt; o.y += dirY * py * wgt; }
+        else if (canStand(s, o.sp, o.x, o.y + dirY * py * wgt)) o.y += dirY * py * wgt;
+        else if (canStand(s, o.sp, o.x, o.y - dirY * py * wgt)) o.y -= dirY * py * wgt;
+      };
+      shove(a, -sx, -sy, wa);
+      shove(b, sx, sy, wb);
+    }
+  }
+}
+
+/** Arbres sous l'emprise d'un animal massif : ils tombent, poussés dans son sens de marche. */
+function smash(w: World, a: Animal) {
+  const spec = spOf(a);
+  if (!spec) return;
+  const half = spec.halfLen * 0.72;
+  const row = Math.floor(a.y / CELL_H);
+  for (let r = row - 1; r <= row; r++) {
+    for (let lx = -half; lx <= half; lx += CELL_W) {
+      const i = r * w.cols + Math.floor((a.x + lx) / CELL_W);
+      const id = w.solidOwner[i];
+      if (id < 0 || !w.solid[i]) continue;
+      const t = w.trees[id];
+      if (t) knockTree(w, t, Math.abs(a.vx) > 0.2 ? (a.vx > 0 ? 1 : -1) : t.x >= a.x ? 1 : -1);
     }
   }
 }
@@ -697,12 +825,38 @@ export function stepEcosystem(s: GameState, dt: number) {
     const l = leader[a.sp];
     if (!l || a.id < l.id) leader[a.sp] = a;
   }
+  // Rangs de formation (par espèce, dans l'ordre des id) et de meute (par proie).
+  herdRank.clear(); huntRank.clear();
+  const count: Record<string, number> = {};
+  for (const a of p.animals) {
+    if (a.task === "dead") continue;
+    herdRank.set(a.id, (count[a.sp] = (count[a.sp] ?? -1) + 1));
+    if (a.task === "hunt" || a.task === "chase" || a.task === "attack") {
+      const key = `t${a.targetId}`;
+      huntRank.set(a.id, (count[key] = (count[key] ?? -1) + 1));
+    }
+  }
+  // Quelques chemins A* par pas au plus : les autres animaux attendent leur tour (ils avancent quand même).
+  pathBudget(4);
   for (const q of eco.plants) if (q.food < 1) q.food = Math.min(1, q.food + dt / 70);
   separate(s, p.animals, dt);
   const brain = parkBrain;
   for (const a of p.animals) {
     if (brain) brain(s, a, dt);
     else live(s, eco, a, dt);
+    // Filet de sécurité : un animal coincé dans le décor (poussé, apparu de travers) est replacé
+    // sur la case libre la plus proche.
+    if (a.task !== "dead" && !canStand(s, a.sp, a.x, a.y)) {
+      const f = nearestFree(w, a.sp, a.x, a.y);
+      if (f) { a.x = f.x; a.y = f.y; a.path = null; }
+    }
+    // Le T. rex renverse les arbres qu'il traverse (ils repoussent plus tard, voir trees.ts).
+    if (BREAKERS.has(a.sp) && a.moving > 0.3 && a.task !== "dead") smash(w, a);
+    // Direction de marche lissée (sert à la formation du troupeau).
+    const mx = a.x - a.gx, my = a.y - a.gy, ml = Math.hypot(mx, my);
+    if (ml > 0.05 && ml < 50) { const f = Math.min(1, dt * 1.5); a.vx += (mx / ml - a.vx) * f; a.vy += (my / ml - a.vy) * f; }
+    else if (ml <= 0.05) { a.vx *= 1 - Math.min(1, dt * 0.3); a.vy *= 1 - Math.min(1, dt * 0.3); }
+    a.gx = a.x; a.gy = a.y;
     const i = Math.floor(a.y / CELL_H) * w.cols + Math.floor(a.x / CELL_W);
     a.inWater = w.terrain[i] === T.Shallow;
   }

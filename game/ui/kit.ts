@@ -32,6 +32,14 @@ export function beginUi(ui: Frame, mx: number, my: number) {
   ui.bg.fill(0);
 }
 
+/** Efface le calque et les zones de cette frame, sans toucher à celles de la frame précédente. */
+export function resetUi(ui: Frame) {
+  hits = [];
+  ui.ch.fill(0);
+  ui.fg.fill(0);
+  ui.bg.fill(0);
+}
+
 /** Zone cliquable sous un point (px CSS), la plus récemment dessinée gagne. */
 export function hitAt(px: number, py: number): string | undefined {
   const c = uiCellAt(px, py);

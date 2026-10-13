@@ -2,7 +2,7 @@ const KEYS: Record<string, [number, number]> = {
   ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
   KeyA: [-1, 0], KeyQ: [-1, 0], KeyD: [1, 0], KeyW: [0, -1], KeyZ: [0, -1], KeyS: [0, 1],
 };
-const PRESS = new Set(["Escape", "Enter", "Space", "Tab", "Digit1", "Digit2", "Digit3", "Digit4", "KeyE", "KeyR", "KeyF", "KeyC", ...Object.keys(KEYS)]);
+const PRESS = new Set(["Escape", "Enter", "Space", "Tab", "Digit1", "Digit2", "Digit3", "Digit4", "KeyE", "KeyR", "KeyF", "KeyC", "KeyN", ...Object.keys(KEYS)]);
 
 export interface Click {
   /** Position en px CSS dans le canvas. */

@@ -128,17 +128,16 @@ function pickBones(p: Progress, rng: () => number): { picks: Pick[]; primary: Sp
   const started = withMissing.filter((sp) => (p.bones[sp]?.length ?? 0) > 0);
   const pool = started.length && rng() < 0.7 ? started : withMissing;
   const primary: SpeciesId | null = first ? "ankylo" : pool[Math.floor(rng() * pool.length)] ?? null;
-  const n = first ? 4 : 3 + Math.floor(rng() * 3) + (rng() < 0.25 ? 1 : 0);
+  // Un site = tous les os manquants de l'espèce visée : une fouille suffit pour l'assembler.
+  const n = primary ? Math.max(3, missingOf(primary).length) : 3 + Math.floor(rng() * 3);
   const picks: Pick[] = [];
   if (primary) for (const id of shuffle(missingOf(primary), rng)) if (picks.length < n) picks.push({ sp: primary, id, dup: false });
   const others = shuffle(withMissing.filter((sp) => sp !== primary).flatMap((sp) => missingOf(sp).map((id) => ({ sp, id, dup: false }))), rng);
   while (picks.length < n && others.length) picks.push(others.pop()!);
   // Doublons : rares, ou seuls quand toute la collection est complète.
   const found = shuffle(unlocked.flatMap((sp) => (p.bones[sp] ?? []).filter((id) => SPECIES[sp]?.bones.some((b) => b.id === id)).map((id) => ({ sp, id, dup: true }))), rng);
-  if (!first && found.length && (picks.length === 0 || rng() < 0.18)) {
-    if (picks.length >= 6) picks.pop();
-    picks.push(found.pop()!);
-  }
+  // (jamais au détriment d'un os manquant : un doublon ne remplace rien)
+  if (!first && found.length && (picks.length === 0 || (picks.length < 6 && rng() < 0.18))) picks.push(found.pop()!);
   while (picks.length < 3 && found.length) picks.push(found.pop()!);
   return { picks, primary: primary ?? picks[0]?.sp ?? null };
 }
@@ -203,7 +202,7 @@ export function generateSite(p: Progress, W: number, H: number, seed: number): S
     for (let x = 0; x < W; x++) {
       const k = y * W + x;
       s.layer[k] = stratumAt(s, x, y + gTop);
-      const c = 2.3 + hash2(x >> 2, y >> 1, seed) * 0.5 + hash2(x, y, seed + 1) * 0.3 + (y / H) * 0.5;
+      const c = 1.45 + hash2(x >> 2, y >> 1, seed) * 0.3 + hash2(x, y, seed + 1) * 0.2 + (y / H) * 0.3;
       s.cover[k] = c;
       s.cover0[k] = c;
     }

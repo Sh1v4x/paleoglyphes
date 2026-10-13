@@ -8,8 +8,8 @@ import {
   araucaria, bones, cycad, deadTree, fernClump, fossilOutcrop, ginkgo, herbs, horsetails, magnolia, palm, rock, runeStone,
   sequoia, treeFern,
 } from "../sprites/decor";
-import { F } from "./flora.mat";
 import { COVER, T, isWater } from "./tiles";
+import { haloRect, stampTree, type Tree } from "./trees";
 
 export interface Light {
   x: number;
@@ -68,7 +68,12 @@ export interface World {
   shadow: Float32Array;
   /** Cellules vides qui bordent le décor (contours à l'encre en cartoon). */
   decorHalo: Uint8Array;
+  /** Objet propriétaire de chaque cellule décor / solide : id d'arbre, -1 sinon (voir trees.ts). */
+  decorOwner: Int32Array;
   solid: Uint8Array;
+  solidOwner: Int32Array;
+  /** Arbres (renversables par le T. rex et la météorite, ils repoussent). */
+  trees: Tree[];
   lights: Light[];
   /** Grand étang (reflet de lune). Les autres plans d'eau : `ponds`. */
   pond: Pond;
@@ -129,7 +134,10 @@ export function generateWorld(style: Style, seed = 7): World {
     decorBase: new Float32Array(N).fill(-1),
     shadow: new Float32Array(N).fill(1),
     decorHalo: new Uint8Array(N),
+    decorOwner: new Int32Array(N).fill(-1),
     solid: new Uint8Array(N),
+    solidOwner: new Int32Array(N).fill(-1),
+    trees: [],
     lights: [],
     pond,
     ponds: [pond, mare],
@@ -263,7 +271,16 @@ export function generateWorld(style: Style, seed = 7): World {
   const plant = (x: number, y: number, kind: string, level: Plant["level"]) =>
     w.plants.push({ id: w.plants.length, x, y, kind, level, food: 1 });
 
-  const place = (prims: Prim[], ox: number, oy: number, solidW: number, shadowR: number, flip = rng() < 0.5) => {
+  const place = (prims: Prim[], ox: number, oy: number, solidW: number, shadowR: number, flip = rng() < 0.5, tree = false) => {
+    if (tree) {
+      // Arbre : objet vivant (il peut tomber et repousser), voir trees.ts. Sa plante nourricière est
+      // ajoutée juste après par l'appelant, d'où l'index w.plants.length.
+      const t: Tree = { id: w.trees.length, x: ox, y: oy, flip, prims, solidW, plant: w.plants.length, cells: [], under: [], solid: [], state: "up", t: 0, dir: 1 };
+      w.trees.push(t);
+      stampTree(w, t);
+      stampShadow(w, ox, oy, shadowR);
+      return;
+    }
     const r = rasterize(prims, ox, oy, flip);
     for (let j = 0; j < r.h; j++) {
       for (let i = 0; i < r.w; i++) {
@@ -277,6 +294,7 @@ export function generateWorld(style: Style, seed = 7): World {
         w.decorLum[wi] = r.lum[k];
         w.decorGlyph[wi] = r.glyph[k];
         w.decorBase[wi] = oy;
+        w.decorOwner[wi] = -1;
       }
     }
     stampShadow(w, ox, oy, shadowR);
@@ -328,12 +346,15 @@ export function generateWorld(style: Style, seed = 7): World {
     claim(x, y, r);
     if (kind === "snag") {
       // Bois mort en dark ; en cartoon, un gros rocher moussu à la même place.
-      if (dark) place(deadTree(shape()), x, y, 10, 46);
+      if (dark) {
+        place(deadTree(shape()), x, y, 10, 46, undefined, true);
+        w.trees[w.trees.length - 1].plant = -1;
+      }
       else place(rock(shape(), 1.5), x, y, 10, 24);
       return true;
     }
     const [model, solid, shadow, level] = TREES[kind];
-    place(model(shape(), dark), x, y, solid, shadow);
+    place(model(shape(), dark), x, y, solid, shadow, undefined, true);
     plant(x, y, kind, level);
     return true;
   });
@@ -342,7 +363,7 @@ export function generateWorld(style: Style, seed = 7): World {
     const fo = forestAt(x, y);
     if (wdAt(x, y) < 1.4 || fo > 0.35 || u > 0.7 || nearSpawn(x, y, 120) || !room(x, y, 16)) return false;
     claim(x, y, 16);
-    place(cycad(shape(), dark), x, y, 8, 26);
+    place(cycad(shape(), dark), x, y, 8, 26, undefined, true);
     plant(x, y, "cycad", "low");
     return true;
   });
@@ -410,14 +431,7 @@ export function generateWorld(style: Style, seed = 7): World {
   }
 
   // Contours à l'encre (cartoon). Les tiges fines n'en reçoivent pas : elles deviendraient des pâtés d'encre.
-  const thin = (m: number) => m === 0 || m === M.Fern || m === F.Fern || m === F.Horsetail;
-  for (let y = 1; y < rows - 1; y++) {
-    for (let x = 1; x < cols - 1; x++) {
-      const i = y * cols + x;
-      if (w.decorMat[i]) continue;
-      if (!thin(w.decorMat[i - 1]) || !thin(w.decorMat[i + 1]) || !thin(w.decorMat[i - cols]) || !thin(w.decorMat[i + cols])) w.decorHalo[i] = 1;
-    }
-  }
+  haloRect(w, 0, 0, cols, rows);
   return w;
 }
 

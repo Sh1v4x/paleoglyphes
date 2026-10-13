@@ -1,6 +1,7 @@
 import type { Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import type { GameState } from "../state";
+import { UI_TOP } from "../scenes/types";
 import { panel, text, wrap } from "./kit";
 
 export interface Toast {
@@ -20,7 +21,7 @@ export function toast(s: GameState, title: string, body = "") {
 export function drawToasts(s: GameState, th: Theme, ui: Frame) {
   s.toasts = s.toasts.filter((t) => s.time - t.t0 < LIFE);
   const w = Math.min(46, ui.cols - 4);
-  let y = 3;
+  let y = UI_TOP;
   for (const t of s.toasts) {
     const lines = t.text ? wrap(t.text, w - 4) : [];
     const h = 3 + lines.length;

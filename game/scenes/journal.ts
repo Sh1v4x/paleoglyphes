@@ -11,7 +11,7 @@ import { SPECIES, SPECIES_LIST } from "../species";
 import type { FactUnlock, Pose, Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
 import { button, over, panel, put, region, text, wrap } from "../ui/kit";
-import type { Scene } from "./types";
+import { UI_TOP, type Scene } from "./types";
 
 /**
  * Carnet de terrain : sommaire des espèces, page détaillée (rendu de studio, échelle humaine, faits),
@@ -258,7 +258,7 @@ interface Line { t: string; c: RGB; tag?: string }
 function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Species) {
   const u = th.ui, j = s.journal, p = s.progress;
   const L = Math.max(40, Math.floor(ui.cols * 0.55));
-  const top = 2, bottom = ui.rows - 3;
+  const top = UI_TOP, bottom = ui.rows - 3;
   const H = bottom - top;
 
   // --- Rendu de studio à gauche ---
@@ -278,11 +278,14 @@ function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Spe
   const hm = cached(`human|${kq}`, () => human().map((q) => scalePrim(q, kq)));
   const tq = Math.floor(s.time * 5) % 6;
   const flesh = cached(`big:${spec.id}|${kq}|${tq}`, () => spec.model(idle(tq / 5)).map((q) => scalePrim(q, kq)));
+  // La mise en page se cale sur une pose fixe : la respiration anime l'animal sans faire bouger
+  // l'humain, le sol ni la cote (les rasters partagent la même origine, au sol sous le corps).
+  const ref = cached(`big:${spec.id}|${kq}|0`, () => spec.model(idle(0)).map((q) => scalePrim(q, kq)));
   // Sol commun, l'humain à gauche, l'animal à droite : même échelle.
-  const used = hm.w + gap + flesh.w;
+  const used = hm.w + gap + ref.w;
   const left = Math.round(ax + Math.max(0, (aw - used) / 2));
   const hx = left - hm.cx;
-  const dx = left + hm.w + gap - flesh.cx;
+  const dx = left + hm.w + gap - ref.cx;
   for (let x = Math.round(ax); x < ax + aw; x++) {
     if (groundY >= world.rows || x >= world.cols) break;
     const i = groundY * world.cols + x;
@@ -303,8 +306,8 @@ function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Spe
     text(ui, bx, top + 1, cap.slice(0, Math.max(0, L - bx - 2)), u.dim);
   } else drawRaster(world, th, flesh, dx, groundY);
   // Cote de longueur au-dessus de l'animal, légende de l'humain sous ses pieds.
-  const ux0 = Math.ceil((dx + flesh.cx) / rw), ux1 = Math.floor((dx + flesh.cx + flesh.w) / rw);
-  const uy = Math.max(top + 2, Math.floor((groundY + flesh.cy) / rh) - 1);
+  const ux0 = Math.ceil((dx + ref.cx) / rw), ux1 = Math.floor((dx + ref.cx + ref.w) / rw);
+  const uy = Math.max(top + 2, Math.floor((groundY + ref.cy) / rh) - 1);
   const lab = ` ${fmtM(spec.lengthM)} `;
   if (ux1 - ux0 > lab.length + 4) {
     const line = `|${"-".repeat(ux1 - ux0 - 1)}|`;
@@ -401,7 +404,7 @@ function extrasPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
   const u = th.ui, j = s.journal;
   text(ui, 2, 2, "Extras", u.hi);
   text(ui, 2, 3, "Fossiles bonus trouvés en fouille et notes sur la petite faune de la réserve.", u.dim);
-  const top = 5, bottom = ui.rows - 3, H = bottom - top;
+  const top = UI_TOP + 3, bottom = ui.rows - 3, H = bottom - top;
   const x = 2, W = ui.cols - 4, iconW = 14;
   box(ui, th, x, top, W, H, u.border);
   // Entrées : la petite faune (connue ou non), puis les autres extras.

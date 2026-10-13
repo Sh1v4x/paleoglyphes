@@ -71,13 +71,13 @@ export interface WorldView {
 
 // Calques d'animaux à l'échelle de l'écran, réalloués seulement si la taille change.
 let L_N = 0;
-let aMat = new Uint8Array(0), aGlyph = new Uint8Array(0), aHalo = new Int16Array(0);
+let aMat = new Uint8Array(0), aGlyph = new Uint8Array(0), aHalo = new Int16Array(0), aSel = new Uint8Array(0);
 let aLum = new Float32Array(0), aBase = new Float32Array(0), aShadow = new Float32Array(0);
 let rMat = new Uint8Array(0), rGlyph = new Uint8Array(0), rLum = new Float32Array(0);
 function layers(n: number) {
   if (n === L_N) return;
   L_N = n;
-  aMat = new Uint8Array(n); aGlyph = new Uint8Array(n); aHalo = new Int16Array(n);
+  aMat = new Uint8Array(n); aGlyph = new Uint8Array(n); aHalo = new Int16Array(n); aSel = new Uint8Array(n);
   aLum = new Float32Array(n); aBase = new Float32Array(n); aShadow = new Float32Array(n);
   rMat = new Uint8Array(n); rGlyph = new Uint8Array(n); rLum = new Float32Array(n);
 }
@@ -85,7 +85,7 @@ function layers(n: number) {
 /** Pose les animaux dans les calques : tri par la ligne de sol, pattes dans l'eau, reflets, ombres, contours. */
 function stampActors(v: WorldView, cols: number, rows: number) {
   const w = v.world;
-  aMat.fill(0); aHalo.fill(-1); aShadow.fill(1); rMat.fill(0);
+  aMat.fill(0); aHalo.fill(-1); aShadow.fill(1); rMat.fill(0); aSel.fill(0);
   for (const a of v.actors) {
     const r = a.r;
     const footRow = Math.floor(a.y / CELL_H);
@@ -109,6 +109,8 @@ function stampActors(v: WorldView, cols: number, rows: number) {
         // Les pattes s'enfoncent dans l'eau peu profonde.
         if (terr === T.Shallow && wy >= footRow - 1) continue;
         const si = sy * cols + sx;
+        // L'animal sélectionné reste repérable même caché (feuillage, autre animal).
+        if (a.id === v.selected) aSel[si] = 1;
         if (aMat[si] && aBase[si] > a.y) continue;
         aMat[si] = r.mat[k]; aLum[si] = r.lum[k]; aGlyph[si] = r.glyph[k]; aBase[si] = a.y;
       }
@@ -136,6 +138,88 @@ function stampActors(v: WorldView, cols: number, rows: number) {
         if (aBase[n] > by) { by = aBase[n]; best = n; }
       }
       if (best >= 0) { aHalo[si] = best; aBase[si] = by; }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Vent : feuillage qui ondule, filets de vent
+// ---------------------------------------------------------------------------
+
+/** Matières qui bougent au vent (1 = feuillage d'arbre, 2 = petite plante : plus souple). */
+const SWAY = new Uint8Array(256);
+for (const m of [M.Leaf, M.Moss, F.Needle, F.Araucaria, F.Frond, F.PalmLeaf, F.DryFrond, F.Broadleaf, F.Blossom, F.Ginkgo, F.Cone]) SWAY[m] = 1;
+for (const m of [M.Fern, M.Petal, M.PetalAlt, F.Horsetail, F.Fern, F.Herb, F.HerbAlt]) SWAY[m] = 2;
+
+/** Force du vent 0..1 : un souffle de fond et des rafales lentes. */
+const gust = (t: number) => 0.45 + 0.35 * Math.sin(t * 0.23) + 0.2 * Math.sin(t * 0.61 + 1);
+
+/**
+ * Décalage (en cellules) du feuillage en (wx, wy) : jusqu'à 2 cellules selon la hauteur au-dessus
+ * du pied (le haut d'un arbre balance, le tronc reste fixe ; les petites plantes sont plus souples).
+ */
+function swayShift(w: World, wi: number, wx: number, wy: number, t: number): number {
+  const R = Math.sin(t * 1.3 - wx * 0.021 + wy * 0.013) * (0.55 + 0.45 * gust(t)) + 0.25 * gust(t);
+  const guess = wi - (R > 0 ? 1 : -1);
+  const probe = SWAY[w.decorMat[guess]] ? guess : SWAY[w.decorMat[wi]] ? wi : -1;
+  if (probe < 0) return 0;
+  const h = w.decorBase[probe] - (wy + 0.5) * CELL_H;
+  const amp = SWAY[w.decorMat[probe]] === 2 ? Math.min(1.1, h / 14) : Math.min(2, Math.max(0, (h - 14) / 70));
+  return Math.round(R * amp);
+}
+
+/** Cellule du décor à lire pour un décalage `k` ; -1 si des feuilles ont quitté cette cellule. */
+function swaySource(w: World, wi: number, k: number): number {
+  if (k === 0) return wi;
+  const src = wi - k;
+  if (SWAY[w.decorMat[src]]) return src;
+  return SWAY[w.decorMat[wi]] ? -1 : wi;
+}
+
+/**
+ * Filets de vent : de longues traînées blanches (`~ - .`) qui filent vers la droite, dans le sens où
+ * penchent les plantes. Le monde est découpé en couloirs horizontaux ; dans chaque couloir, des
+ * traînées régulièrement espacées avancent ensemble (positions dans le monde : elles ne suivent pas
+ * la caméra). Plus nombreuses et plus rapides pendant les rafales. Aucune allocation.
+ */
+const BAND = 20, SPACING = 130;
+function windPass(v: WorldView, th: Theme, f: Frame) {
+  const t = v.time;
+  const { cols, rows } = f;
+  const g = gust(t);
+  const c = th.pal.specular;
+  for (let lane = Math.floor(v.camY / BAND) - 1; lane <= Math.floor((v.camY + rows) / BAND) + 1; lane++) {
+    const speed = 34 + hash2(lane, 1, 7) * 16 + g * 30;
+    const offset = t * speed + hash2(lane, 2, 7) * 5000;
+    const base = offset % SPACING;
+    const shift = Math.floor(offset / SPACING);
+    for (let k = Math.floor((v.camX - base) / SPACING) - 1; k <= Math.floor((v.camX + cols + 60 - base) / SPACING) + 1; k++) {
+      const id = k - shift; // identité stable de la traînée pendant qu'elle avance
+      if (hash2(id, lane, 3) > 0.35 + 0.35 * g) continue;
+      const head = base + k * SPACING;
+      const wy = lane * BAND + Math.floor(hash2(id, lane, 4) * BAND * 0.8);
+      const len = 40 + Math.floor(hash2(id, lane, 5) * 50);
+      for (let j = 0; j < len; j++) {
+        const wx = Math.floor(head - j);
+        const yy = wy + Math.round(Math.sin(wx * 0.06 + id) * 1.6);
+        const u = j / len;
+        // Fondu aux deux bouts, plus marqué pendant les rafales.
+        const a = Math.min(0.95, Math.min(1, u * 4) * Math.min(1, (1 - u) * 2.5) * (0.9 + 0.35 * g));
+        if (a < 0.08) continue;
+        // Deux lignes : le cœur du filet, et un liseré plus pâle juste au-dessus.
+        for (let row = 0; row < 2; row++) {
+          const x = wx - v.camX, y = yy - row - v.camY;
+          if (x < 0 || y < 0 || x >= cols || y >= rows) continue;
+          const i = y * cols + x, kk = i * 4;
+          const L = Math.min(1.05, 0.4 + (f.lr[i] + f.lg[i] + f.lb[i]) / 3);
+          const aa = row ? a * 0.45 : a;
+          // Cœur en traits pleins (= ~), bouts plus légers (- .), liseré pointillé (').
+          if (!row || (wx + id) % 3 === 0) f.ch[i] = row ? 39 : u > 0.85 ? 46 : u < 0.08 || u > 0.7 ? 45 : (wx + id) % 3 === 0 ? 126 : 61;
+          f.fg[kk] += (c[0] * L - f.fg[kk]) * aa; f.fg[kk + 1] += (c[1] * L - f.fg[kk + 1]) * aa; f.fg[kk + 2] += (c[2] * L - f.fg[kk + 2]) * aa;
+          const ab = aa * (row ? 0.25 : 0.6);
+          f.bg[kk] += (c[0] * L - f.bg[kk]) * ab; f.bg[kk + 1] += (c[1] * L - f.bg[kk + 1]) * ab; f.bg[kk + 2] += (c[2] * L - f.bg[kk + 2]) * ab;
+        }
+      }
     }
   }
 }
@@ -187,9 +271,23 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
       // Objet visible : animal ou décor, trié par la ligne de sol.
       let mat = 0, lum = 0, glyph = 0, isHero = false;
       if (aMat[i]) { mat = aMat[i]; lum = aLum[i]; glyph = aGlyph[i]; isHero = true; }
-      const dm = w.decorMat[wi];
-      if (dm && (!(isHero || aHalo[i] >= 0) || w.decorBase[wi] > aBase[i])) {
-        mat = dm; lum = w.decorLum[wi]; glyph = w.decorGlyph[wi]; isHero = false;
+      // Feuillage et fleurs ondulent au vent : on lit le décor un peu à côté (voir swaySource).
+      const sk = swayShift(w, wi, wx, wy, t);
+      const si = swaySource(w, wi, sk);
+      const dm = si >= 0 ? w.decorMat[si] : 0;
+      if (dm && (!(isHero || aHalo[i] >= 0) || w.decorBase[si] > aBase[i])) {
+        mat = dm; lum = w.decorLum[si]; glyph = w.decorGlyph[si]; isHero = false;
+        // Reflet qui court sur le feuillage au passage d'une rafale.
+        if (SWAY[dm]) lum = Math.min(1, lum + 0.14 * Math.max(0, Math.sin(wx * 0.045 + wy * 0.02 - t * 1.4)) * gust(t));
+      }
+      // Animal sélectionné masqué : on voit sa silhouette à travers, en pointillés d'accent.
+      if (aSel[i] && !isHero && mat && (wx + wy) % 2 === 0) {
+        f.obj[i] = 1;
+        f.ch[i] = 43; // +
+        const k = 0.65 + 0.35 * Math.sin(t * 4);
+        setFg(f, i, P.accent[0] * k, P.accent[1] * k, P.accent[2] * k);
+        setBg(f, i, P.ink[0], P.ink[1], P.ink[2]);
+        continue;
       }
 
       if (mat) {
@@ -236,7 +334,9 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
 
       // Contour d'une cellule autour des animaux (et du décor en cartoon) : ils se détachent du sol.
       const heroEdge = aHalo[i] >= 0;
-      if (heroEdge || (th.outline && w.decorHalo[wi])) {
+      // Le contour à l'encre suit le feuillage qui ondule (contour d'un feuillage voisin décalé).
+      const hi = sk !== 0 && (SWAY[w.decorMat[wi - sk - 1]] || SWAY[w.decorMat[wi - sk + 1]]) ? wi - sk : wi;
+      if (heroEdge || (th.outline && w.decorHalo[hi])) {
         f.ch[i] = 32;
         const sel = heroEdge && v.selected !== undefined && haloOwner(v, aHalo[i], cols) === v.selected;
         const ink = sel ? P.accent : th.outline ? P.ink : P.void;
@@ -304,6 +404,7 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
   waterPass(v, th, f);
   crittersPass(v, th, f);
   fogPass(v, th, f);
+  windPass(v, th, f);
 }
 
 /** Quel animal possède la cellule `si` ? (pour colorer le contour de l'animal sélectionné) */
@@ -312,7 +413,7 @@ function haloOwner(v: WorldView, si: number, cols: number): number {
   for (const a of v.actors) {
     const r = a.r;
     const i = sx - r.cx, j = sy - r.cy;
-    if (i >= 0 && j >= 0 && i < r.w && j < r.h && r.mat[j * r.w + i] && aBase[si] === a.y) return a.id;
+    if (i >= 0 && j >= 0 && i < r.w && j < r.h && r.mat[j * r.w + i] && Math.abs(aBase[si] - a.y) < 0.01) return a.id; // aBase est en Float32
   }
   return -1;
 }

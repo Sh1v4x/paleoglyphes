@@ -1,4 +1,5 @@
-import { CELL_H, CELL_W, WORLD_H, WORLD_W } from "../config";
+import { CELL_H, CELL_W, DEV, WORLD_H, WORLD_W } from "../config";
+import { CLOCK_SPEEDS, clockLabel, daylight, litTheme, periodName } from "../daycycle";
 import type { Input } from "../input";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
@@ -11,11 +12,13 @@ import type { Action, FactUnlock, SpeciesId } from "../species/types";
 import { worldFor, type GameState } from "../state";
 import { bar, button, panel, put, region, text, wrap } from "../ui/kit";
 import { unlockTrigger } from "../unlock";
-import { isWater, T } from "../world/tiles";
+import { isWater } from "../world/tiles";
 import { faunaActors, faunaAt, faunaDef, noteFauna, type Bug } from "./eco-fauna";
 import { activity, stepEcosystem, type EcoState } from "./ecosystem";
 import { UNLOCK_HINT } from "./journal";
-import type { Scene } from "./types";
+import { activeTrees, treeRaster, updateTrees } from "../world/trees";
+import { NAV, navOk, standable } from "./nav";
+import { UI_TOP, type Scene } from "./types";
 
 /**
  * Réserve : caméra libre au-dessus d'un écosystème où vivent les dinosaures synthétisés.
@@ -83,7 +86,10 @@ export interface Animal {
   chase: number;
   /** Alerte (cri avant de fuir), s. */
   alarm: number;
-  /** Navigation : but courant, meilleure distance atteinte, temps sans progrès, détour (point + durée). */
+  /**
+   * gx, gy : position à la frame précédente ; vx, vy : direction de marche lissée (pour la formation
+   * du troupeau) ; vt : suiveur en route (1) ou posé à sa place (0). best, stall : réservés.
+   */
   gx: number;
   gy: number;
   best: number;
@@ -91,6 +97,17 @@ export interface Animal {
   vx: number;
   vy: number;
   vt: number;
+  /** Chemin A* en cours (points d'étape x, y en px), index du prochain point, but pour lequel il a été calculé. */
+  path: number[] | null;
+  pi: number;
+  pgx: number;
+  pgy: number;
+  /** Prochain recalcul du chemin (s), meilleure distance au point d'étape et temps sans progrès vers lui. */
+  repath: number;
+  prog: number;
+  progT: number;
+  /** Temps cumulé bloqué : au-delà de quelques secondes, l'animal change d'objectif. */
+  stuckT: number;
 }
 
 export interface ParkState {
@@ -108,6 +125,10 @@ export interface ParkState {
   critters: (Critter & { hx: number; hy: number })[];
   trample: Float32Array | null;
   started: boolean;
+  /** Vitesse de repousse des arbres (accélérée après la météorite). */
+  regrow?: number;
+  /** Calque de debug de la navigation (dev, touche N). */
+  debugNav?: boolean;
   /** Écosystème : plantes, points d'eau, petite faune. */
   eco: EcoState | null;
   /** Molette cumulée (passer d'un animal à l'autre). */
@@ -136,16 +157,8 @@ export function animalRaster(a: Animal, time: number): Raster {
 
 /** Un animal peut-il se tenir à (x, y) ? Pas d'eau profonde ni d'obstacle sous le corps. */
 export function canStand(s: GameState, sp: SpeciesId, x: number, y: number): boolean {
-  const w = worldFor(s);
-  const spec = SPECIES[sp];
-  const half = spec ? spec.halfLen * 0.5 : 20;
-  if (x < half + 10 || x > WORLD_W - half - 10 || y < 80 || y > WORLD_H - 6) return false;
-  const row = Math.floor(y / CELL_H) * w.cols;
-  for (let lx = -half; lx <= half; lx += CELL_W * 3) {
-    const i = row + Math.floor((x + lx) / CELL_W);
-    if (w.terrain[i] === T.Deep || w.solid[i]) return false;
-  }
-  return true;
+  // Même emprise que la grille de navigation : collisions et chemins sont toujours d'accord.
+  return standable(worldFor(s), sp, x, y);
 }
 
 function spawn(s: GameState, sp: SpeciesId, near?: { x: number; y: number }) {
@@ -161,7 +174,8 @@ function spawn(s: GameState, sp: SpeciesId, near?: { x: number; y: number }) {
       energy: 0.6 + rng() * 0.4, hp: 1, mood: "wander", herd: 1, targetId: 0,
       task: "wander", scan: rng() * 0.4, stun: 0, cool: 10 + rng() * 20, decay: 0, meat: 0, answer: 0,
       age: rng() * rng(), spot: -1, side: rng() < 0.5 ? 1 : -1, blocked: 0, chase: 0, alarm: 0,
-      gx: x, gy: y, best: Infinity, stall: 0, vx: x, vy: y, vt: 0,
+      gx: x, gy: y, best: Infinity, stall: 0, vx: 0, vy: 0, vt: 0,
+      path: null, pi: 0, pgx: x, pgy: y, repath: 0, prog: Infinity, progT: 0, stuckT: 0,
     };
     p.animals.push(a);
     return a;
@@ -285,6 +299,7 @@ export const parkScene: Scene = {
     if (Math.abs(p.wheel) >= 80) { cycle(s, p.wheel > 0 ? 1 : -1); p.wheel = 0; }
 
     stepEcosystem(s, dt);
+    updateTrees(w, dt, p.regrow ?? 1);
 
     const sel = p.animals.find((a) => a.id === p.selected);
     if (!sel) p.selected = undefined;
@@ -330,8 +345,10 @@ export const parkScene: Scene = {
       p.selected = undefined;
       p.bug = undefined;
     }
+    if (DEV && input.pressed.includes("KeyN")) p.debugNav = !p.debugNav;
     for (const id of input.ui) {
       if (id === "park:follow") p.follow = !p.follow;
+      if (id === "park:clock") s.clockSpeed = CLOCK_SPEEDS[(CLOCK_SPEEDS.indexOf(s.clockSpeed as 1) + 1) % CLOCK_SPEEDS.length];
       if (id === "park:close") { p.selected = undefined; p.bug = undefined; p.follow = false; }
       if (id === "park:journal" && sel) { s.journal.species = sel.sp; s.journal.extras = false; s.mode = "journal"; }
       if (id === "park:extras") { s.journal.species = undefined; s.journal.extras = true; s.mode = "journal"; }
@@ -360,12 +377,20 @@ export const parkScene: Scene = {
       });
     }
     faunaActors(s, actors, vx0, vy0, vx1, vy1);
-    composeWorld(th, world, {
+    // Arbres renversés, souches et jeunes pousses : dessinés comme des objets animés.
+    for (const t of activeTrees()) {
+      if (t.x < vx0 || t.x > vx1 || t.y < vy0 || t.y > vy1 || !w.trees.includes(t)) continue;
+      const r = treeRaster(t);
+      if (r) actors.push({ id: -100000 - t.id, r: placed(r, Math.floor(t.x / CELL_W), Math.floor(t.y / CELL_H)), x: t.x, y: t.y, inWater: false, shadowRx: t.state === "down" ? 60 : 18, eyeX: t.x, eyeY: -1e6 });
+    }
+    // La réserve suit le cycle jour / nuit ; l'interface garde ses couleurs.
+    composeWorld(litTheme(th, s.clock), world, {
       world: w, time: s.time, camX, camY,
       glowX: p.cam.x + world.cols * CELL_W / 2, glowY: p.cam.y + world.rows * CELL_H / 2,
       actors, critters: p.critters, trample: p.trample ?? undefined, selected: p.selected ?? (p.bug !== undefined ? 1_000_000 + p.bug : undefined),
     });
 
+    if (DEV && p.debugNav) drawNavDebug(s, th, world, camX, camY);
     const u = th.ui;
     const toUi = (cx: number, cy: number) => ({ x: ((cx - camX) * metrics.cellW) / metrics.uiW, y: ((cy - camY) * metrics.cellH) / metrics.uiH });
     // Étiquettes au-dessus de l'animal survolé ou sélectionné : nom + ce qu'il fait.
@@ -399,6 +424,7 @@ export const parkScene: Scene = {
       if (b) drawBugCard(s, th, ui, b);
     }
     drawMini(s, th, ui);
+    drawClock(s, th, ui);
 
     if (!p.animals.some((a) => a.task !== "dead")) {
       const W = 56, x = Math.floor((ui.cols - W) / 2), y = Math.floor(ui.rows / 2) - 4;
@@ -502,5 +528,74 @@ function drawMini(s: GameState, th: Theme, ui: Frame) {
     const g = dead ? "%" : MINI_GLYPH[a.sp] ?? SPECIES[a.sp]?.name[0] ?? "?";
     const col = a.id === p.selected ? u.hi : dead ? u.dim : SPECIES[a.sp]?.behavior.diet === "carnivore" ? u.bad : u.text;
     text(ui, x0 + 1 + i, y0 + 1 + j, g, col, null);
+  }
+}
+
+/**
+ * Horloge de la réserve (en haut à gauche) : heure, moment de la journée, frise des 24 h avec
+ * le soleil ou la lune, et vitesse du temps (clic pour accélérer : x1, x4, x16).
+ */
+function drawClock(s: GameState, th: Theme, ui: Frame) {
+  const u = th.ui;
+  const W = 32, H = 7, x = 1, y = UI_TOP;
+  const hour = s.clock;
+  const day = daylight(hour) > 0.5;
+  panel(ui, th, x, y, W, H, "Horloge");
+  region("park:clock", x, y, W, H);
+  // Astre + heure + moment.
+  const sun: RGB = [255, 196, 64], moon: RGB = [150, 180, 255];
+  text(ui, x + 2, y + 1, day ? "(O)" : "(C", day ? sun : moon, u.panel, u.alpha);
+  text(ui, x + 7, y + 1, clockLabel(hour), u.text, u.panel, u.alpha);
+  text(ui, x + 14, y + 1, periodName(hour), u.hi, u.panel, u.alpha);
+  // Frise des 24 heures : jour en tirets, nuit en points, l'astre à l'heure courante.
+  const track = W - 6, tx = x + 3, ty = y + 3;
+  text(ui, tx - 1, ty, "[", u.border, u.panel, u.alpha);
+  text(ui, tx + track, ty, "]", u.border, u.panel, u.alpha);
+  for (let i = 0; i < track; i++) {
+    const h = (i / track) * 24;
+    const lit = daylight(h);
+    put(ui, tx + i, ty, lit > 0.5 ? 61 : lit > 0 ? 45 : 46, lit > 0.5 ? u.hi : u.dim, u.panel, u.alpha);
+  }
+  const cur = Math.min(track - 1, Math.floor((hour / 24) * track));
+  put(ui, tx + cur, ty, day ? 79 : 67, day ? sun : moon, u.panel, u.alpha); // O ou C
+  text(ui, tx, ty + 1, "0h", u.dim, u.panel, u.alpha);
+  text(ui, tx + Math.floor(track / 2) - 1, ty + 1, "12h", u.dim, u.panel, u.alpha);
+  text(ui, tx + track - 3, ty + 1, "24h", u.dim, u.panel, u.alpha);
+  text(ui, x + 2, y + 5, "Clic : accelerer le temps", u.dim, u.panel, u.alpha);
+  const sp = `x${s.clockSpeed}`;
+  text(ui, x + W - 2 - sp.length, y + 1, sp, s.clockSpeed > 1 ? u.hi : u.dim, u.panel, u.alpha);
+}
+
+/**
+ * Debug navigation (dev, touche N) : cases infranchissables pour l'animal sélectionné (x),
+ * chemins en cours (points d'accent) et animaux qui piétinent (!).
+ */
+function drawNavDebug(s: GameState, th: Theme, world: Frame, camX: number, camY: number) {
+  const P = th.pal, w = worldFor(s);
+  const mark = (px: number, py: number, ch: number, c: RGB) => {
+    const x = Math.floor(px / CELL_W) - camX, y = Math.floor(py / CELL_H) - camY;
+    if (x < 0 || y < 0 || x >= world.cols || y >= world.rows) return;
+    const i = y * world.cols + x;
+    world.ch[i] = ch;
+    world.fg[i * 4] = c[0]; world.fg[i * 4 + 1] = c[1]; world.fg[i * 4 + 2] = c[2];
+  };
+  const sel = s.park.animals.find((a) => a.id === s.park.selected);
+  if (sel) {
+    const i0 = Math.floor((camX * CELL_W) / NAV), j0 = Math.floor((camY * CELL_H) / NAV);
+    const i1 = i0 + Math.ceil((world.cols * CELL_W) / NAV), j1 = j0 + Math.ceil((world.rows * CELL_H) / NAV);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (!navOk(w, sel.sp, i, j)) mark((i + 0.5) * NAV, (j + 0.5) * NAV, 120, [200, 60, 60]);
+  }
+  for (const a of s.park.animals) {
+    if (a.path) {
+      let x = a.x, y = a.y;
+      for (let k = a.pi; k * 2 < a.path.length; k++) {
+        const tx = a.path[k * 2], ty = a.path[k * 2 + 1];
+        const n = Math.ceil(Math.hypot(tx - x, ty - y) / 8);
+        for (let m = 1; m <= n; m++) mark(x + ((tx - x) * m) / n, y + ((ty - y) * m) / n, 46, P.accent);
+        mark(tx, ty, 111, P.accent);
+        x = tx; y = ty;
+      }
+    }
+    if (a.stuckT > 1.5) mark(a.x, a.y - 40, 33, [255, 80, 80]);
   }
 }

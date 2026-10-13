@@ -23,6 +23,7 @@ uniform sampler2D uUiCh;
 uniform sampler2D uUiFg;
 uniform sampler2D uUiBg;
 uniform ivec2 uUiCell;
+uniform ivec2 uUiSize;
 uniform float uHeight;
 out vec4 o;
 void main() {
@@ -37,6 +38,7 @@ void main() {
 
   ivec2 ucell = px / uUiCell;
   ivec2 uinner = px - ucell * uUiCell;
+  if (ucell.x >= uUiSize.x || ucell.y >= uUiSize.y) { o = vec4(col, 1.0); return; }
   int uc = int(texelFetch(uUiCh, ucell, 0).r * 255.0 + 0.5);
   vec4 ubg = texelFetch(uUiBg, ucell, 0);
   vec4 ufg = texelFetch(uUiFg, ucell, 0);
@@ -72,6 +74,7 @@ export class Renderer {
   private uiBgTex: WebGLTexture;
   private uCell: WebGLUniformLocation;
   private uUiCell: WebGLUniformLocation;
+  private uUiSize: WebGLUniformLocation;
   private uHeight: WebGLUniformLocation;
   /** Calque monde (petites cellules) et calque d'interface (cellules lisibles, fond transparent). */
   frame: Frame = createFrame(1, 1);
@@ -114,6 +117,7 @@ export class Renderer {
     this.uiBgTex = tex(7, "uUiBg");
     this.uCell = gl.getUniformLocation(prog, "uCell")!;
     this.uUiCell = gl.getUniformLocation(prog, "uUiCell")!;
+    this.uUiSize = gl.getUniformLocation(prog, "uUiSize")!;
     this.uHeight = gl.getUniformLocation(prog, "uHeight")!;
   }
 
@@ -134,8 +138,10 @@ export class Renderer {
 
     const ucw = Math.max(1, Math.round(UI_CELL_W * dpr));
     const uch = Math.max(1, Math.round(UI_CELL_H * dpr));
-    const ucols = Math.ceil((cols * cw) / ucw), urows = Math.ceil((rows * ch) / uch);
+    // L'interface tient entièrement dans la fenêtre : jamais de ligne coupée sur les bords.
+    const ucols = Math.floor((width * dpr) / ucw), urows = Math.floor((height * dpr) / uch);
     gl.uniform2i(this.uUiCell, ucw, uch);
+    gl.uniform2i(this.uUiSize, ucols, urows);
     this.ui = createFrame(ucols, urows);
     Object.assign(metrics, { cellW: cw / dpr, cellH: ch / dpr, uiW: ucw / dpr, uiH: uch / dpr, cols, rows, ucols, urows });
 

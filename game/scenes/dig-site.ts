@@ -1,11 +1,13 @@
+import { liveBirth } from "../species/life";
 import { CELL_H, CELL_W } from "../config";
 import type { RGB, Theme } from "../palette";
 import type { Progress } from "../progress";
 import { rasterize, type Raster } from "../render/raster";
 import { hash2, mulberry32 } from "../rng";
-import { SPECIES } from "../species";
+import { SPECIES, SPECIES_LIST } from "../species";
 import type { SpeciesId } from "../species/types";
 import { ofName } from "../species";
+import { eggModel } from "../species/eggs";
 import { bonePrims, EXTRAS, fitScale, orient, primBounds, scaleAll } from "./dig-fossils";
 import { SM } from "./scenes.mat";
 
@@ -28,9 +30,10 @@ export interface Stratum {
 }
 
 export interface Fossil {
-  kind: "bone" | "extra";
+  /** Os, fossile bonus, ou œuf fossile d'une espèce déjà assemblée (à incuber à l'atelier). */
+  kind: "bone" | "extra" | "egg";
   sp: SpeciesId | null;
-  /** Id de l'os, ou de l'extra. */
+  /** Id de l'os, ou de l'extra (« egg » pour un œuf). */
   id: string;
   /** « Crâne d'Ankylosaure », « Ammonite ». */
   label: string;
@@ -86,10 +89,15 @@ const TOPSOIL = { mat: SM.Topsoil, name: "Terre vegetale", hard: 0.5, fact: "Le 
 export const MATRIX_INFO = { name: "Gangue", fact: "La roche collee autour d'un fossile s'appelle la gangue : on la retire tout doucement." };
 
 /** Ordre de déblocage des espèces en fouille : [espèce, squelettes assemblés requis]. */
-const UNLOCK: [SpeciesId, number][] = [["ankylo", 0], ["edmonto", 0], ["raptor", 0], ["trike", 2], ["pachy", 2], ["quetzal", 3], ["mosa", 3], ["trex", 4]];
+const UNLOCK: [SpeciesId, number][] = [["ankylo", 0], ["edmonto", 0], ["raptor", 0], ["trike", 2], ["pachy", 2], ["quetzal", 3], ["mosa", 3], ["trex", 4],
+  ["pectinodon", 1], ["xiphactinus", 2], ["archelon", 2], ["pteranodon", 3], ["nyctosaurus", 3], ["allosaurus", 4], ["alamosaurus", 5]];
+
+/** Seuil de déblocage d'une espèce qui n'est pas dans UNLOCK (nouvelles espèces) : 3 espèces assemblées. */
+const DEFAULT_UNLOCK = 3;
 
 export function unlockedSpecies(p: Progress): SpeciesId[] {
-  return UNLOCK.filter(([id, n]) => SPECIES[id] && p.assembled.length >= n).map(([id]) => id);
+  const at = (id: SpeciesId) => UNLOCK.find(([u]) => u === id)?.[1] ?? DEFAULT_UNLOCK;
+  return SPECIES_LIST.map((sp) => sp.id).filter((id) => p.assembled.length >= at(id));
 }
 
 const NAMES = ["Hell Creek, Montana", "Formation de Lance, Wyoming", "Badlands, Dakota du Sud", "Dinosaur Park, Alberta", "Horseshoe Canyon, Alberta"];
@@ -234,6 +242,15 @@ export function generateSite(p: Progress, W: number, H: number, seed: number): S
     const ps = orient(def.prims(), Math.floor(rng() * 4));
     const r = rasterize(scaleAll(ps, 1.6 + rng() * 0.6), 0, 0, rng() < 0.5);
     addFossil(s, { kind: "extra", sp: null, id: def.id, label: def.name, dup: p.extras.includes(def.id), r }, rng);
+  }
+
+  // Œuf fossile, parfois, d'une espèce déjà assemblée qui pond (pas les vivipares comme le mosasaure).
+  const ovip = p.assembled.filter((sp) => SPECIES[sp] && !liveBirth(SPECIES[sp]));
+  if (ovip.length && rng() < 0.25) {
+    const sp = ovip[Math.floor(rng() * ovip.length)];
+    const ps = eggModel(sp, 0);
+    const r = rasterize(scaleAll(ps, fitScale(ps, 16 * CELL_W, 9 * CELL_H, 1.6, 3)), 0, 0, rng() < 0.5);
+    addFossil(s, { kind: "egg", sp, id: "egg", label: `Oeuf fossile ${ofName(p, sp)}`, dup: false, r }, rng);
   }
 
   // Galets, racines, fissures, éclats de coquille.

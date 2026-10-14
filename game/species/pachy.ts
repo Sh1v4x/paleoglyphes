@@ -214,6 +214,10 @@ export const PACHY: Species = {
       text: "Stygimoloch et Dracorex, aux longues cornes et au dôme plat, sont peut-être des jeunes pachycéphalosaures : leur crâne changeait beaucoup en grandissant." },
     { id: "regime", title: "Que mangeait-il ?", unlock: "eat",
       text: "Ses petites dents en forme de feuille coupaient feuilles, graines et fruits. Certains pensent qu'il croquait aussi des insectes, mais il était surtout herbivore." },
+    { id: "oeuf-mystere", title: "Un œuf encore inconnu", unlock: "nest",
+      text: "Aucun œuf de pachycéphalosaure n'a encore été trouvé ! On pense qu'il pondait comme ses cousins à bec, dans un nid creusé au sol. À toi peut-être de découvrir le premier." },
+    { id: "tete-plate", title: "Le dôme pousse plus tard", unlock: "baby",
+      text: "Les jeunes pachycéphalosaures avaient la tête presque plate. Leur dôme ne gonflait qu'en grandissant, pendant que les pointes autour de leur crâne raccourcissaient." },
   ],
   bones: [
     { id: "dome", name: "Dôme crânien" },

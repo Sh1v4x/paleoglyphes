@@ -207,4 +207,8 @@ export const EXTRAS: ExtraDef[] = [
     },
   },
 ];
+/** Ce qu'apprend un œuf fossile de dinosaure (fouille). */
+export const EGG_FACT =
+  "Les oeufs de dinosaures fossiles sont rares : on en a trouve des nids entiers, ranges en cercle, et parfois un embryon encore dans sa coquille !";
+
 export const EXTRA_BY_ID = Object.fromEntries(EXTRAS.map((x) => [x.id, x])) as Record<string, ExtraDef>;

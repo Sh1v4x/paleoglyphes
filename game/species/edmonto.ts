@@ -245,6 +245,10 @@ export const EDMONTO: Species = {
       text: "Il broutait les plantes basses, mais pouvait aussi se dresser pour atteindre les branches. Ses joues gardaient la nourriture pendant qu'il mâchait." },
     { id: "cri", title: "Un nez qui chante ?", unlock: "call",
       text: "Il n'avait pas de crête creuse comme d'autres hadrosaures. Mais un grand creux autour de ses narines abritait peut-être un sac de peau gonflable pour lancer des appels." },
+    { id: "colonie", title: "Des nids en colonie", unlock: "nest",
+      text: "Son cousin Maiasaura, « la bonne mère lézard », nichait en colonies : des dizaines de nids en terre, espacés d'environ une longueur d'adulte. Les œufs étaient couverts de plantes qui chauffaient en pourrissant." },
+    { id: "croissance-eclair", title: "Une croissance éclair", unlock: "baby",
+      text: "À l'éclosion, un bébé hadrosaure n'était pas plus long qu'un bras. Il grandissait très vite et atteignait presque sa taille adulte en quelques années, à l'abri du troupeau." },
   ],
   bones: [
     { id: "crane", name: "Crâne et bec" },

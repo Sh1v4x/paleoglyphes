@@ -4,6 +4,14 @@ import { CARNIVORE_MATS } from "./species/carnivores.mat";
 import { FLORA_MATS } from "./world/flora.mat";
 import { SCENE_MATS } from "./scenes/scenes.mat";
 import { MARINE_MATS } from "./species/marine.mat";
+import { NEST_MATS } from "./species/nest.mat";
+import { ARCHELON_MATS } from "./species/archelon.mat";
+import { XIPHACTINUS_MATS } from "./species/xiphactinus.mat";
+import { PTERANODON_MATS } from "./species/pteranodon.mat";
+import { NYCTOSAURUS_MATS } from "./species/nyctosaurus.mat";
+import { PECTINODON_MATS } from "./species/pectinodon.mat";
+import { ALLOSAURUS_MATS } from "./species/allosaurus.mat";
+import { ALAMOSAURUS_MATS } from "./species/alamosaurus.mat";
 
 export type { Material };
 
@@ -85,7 +93,10 @@ export interface Theme {
   dirtRamp: string;
 }
 
-const EXTRA = [HERBIVORE_MATS, CARNIVORE_MATS, FLORA_MATS, SCENE_MATS, MARINE_MATS];
+const EXTRA = [
+  HERBIVORE_MATS, CARNIVORE_MATS, FLORA_MATS, SCENE_MATS, MARINE_MATS, NEST_MATS,
+  ARCHELON_MATS, XIPHACTINUS_MATS, PTERANODON_MATS, NYCTOSAURUS_MATS, PECTINODON_MATS, ALLOSAURUS_MATS, ALAMOSAURUS_MATS,
+];
 
 /** Table des matières d'un style : cœur + matières déclarées par les espèces, la flore et les scènes. */
 function materials(def: Record<number, Material>, style: Style): Material[] {
@@ -123,7 +134,7 @@ export const DARK: Theme = {
   style: "dark",
   ui: {
     panel: hex("#100e15"), panelAlt: hex("#1a1722"), border: hex("#4a4458"), text: hex("#c4bed2"),
-    dim: hex("#6d6880"), hi: hex("#9be88a"), ok: hex("#9be88a"), bad: hex("#d0625a"), alpha: 0.92,
+    dim: hex("#8f89a3"), hi: hex("#9be88a"), ok: hex("#9be88a"), bad: hex("#d0625a"), alpha: 0.92,
   },
   pal: DARK_PAL,
   mats: materials({
@@ -200,7 +211,8 @@ export const CARTOON: Theme = {
   style: "cartoon",
   ui: {
     panel: hex("#fff6e0"), panelAlt: hex("#f3e4c2"), border: hex("#1b1f2e"), text: hex("#1b1f2e"),
-    dim: hex("#8a7f6a"), hi: hex("#e8553a"), ok: hex("#3c9a3a"), bad: hex("#d03a3a"), alpha: 0.96,
+    // Contrastes WCAG AA (>= 4,5:1) sur le papier crème, y compris le texte discret.
+    dim: hex("#6b604c"), hi: hex("#b83c1c"), ok: hex("#2a7228"), bad: hex("#b52a2a"), alpha: 0.96,
   },
   pal: CARTOON_PAL,
   mats: materials({

@@ -302,6 +302,10 @@ export const ANKYLO: Species = {
       text: "Le bout de sa queue est une massue d'os soudés. Un coup bien placé pouvait briser la patte d'un tyrannosaure." },
     { id: "solitaire", title: "Plutôt solitaire", unlock: "rest",
       text: "On retrouve rarement plusieurs ankylosaures ensemble : bien protégé, il n'avait pas besoin de troupeau." },
+    { id: "nid-cache", title: "Des œufs bien au chaud", unlock: "nest",
+      text: "Les œufs d'ankylosaures sont très rares. Comme beaucoup de dinosaures, ils pondaient sans doute dans un trou creusé dans le sol, recouvert de terre et de plantes pour garder les œufs au chaud." },
+    { id: "bebe-armure", title: "Une armure qui pousse", unlock: "baby",
+      text: "Les bébés n'avaient pas encore leur blindage complet : les plaques d'os se formaient dans la peau en grandissant. Des jeunes Pinacosaurus, ses cousins, ont été retrouvés serrés en groupe." },
   ],
   bones: [
     { id: "crane", name: "Crâne" },

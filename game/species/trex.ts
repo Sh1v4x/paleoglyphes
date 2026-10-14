@@ -264,6 +264,10 @@ export const TREX: Species = {
       text: "Ses bras ne mesuraient qu'un mètre et n'avaient que deux doigts. Pourtant, leurs muscles étaient puissants : à quoi servaient-ils ? Les savants en débattent encore." },
     { id: "peau", title: "Écailles ou plumes ?", unlock: "rest",
       text: "Des empreintes de peau fossile montrent de petites écailles sur le cou, le bassin et la queue. Ses cousins avaient des plumes : les bébés T. rex en avaient peut-être un peu." },
+    { id: "embryon", title: "Un œuf jamais trouvé", unlock: "nest",
+      text: "Personne n'a encore trouvé d'œuf de T. rex. Mais des chercheurs ont décrit un minuscule bout de mâchoire et une griffe d'embryons de tyrannosaures : leurs œufs mesuraient sans doute plus de 40 cm de long." },
+    { id: "ado", title: "Une poussée de croissance", unlock: "baby",
+      text: "Entre 14 et 18 ans, un jeune T. rex prenait jusqu'à 2 kg par jour ! Avant cela, les jeunes étaient minces et rapides, avec de longues pattes : ils chassaient d'autres proies que les adultes." },
   ],
   bones: [
     { id: "crane", name: "Crâne" },

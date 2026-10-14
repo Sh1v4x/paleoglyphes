@@ -351,6 +351,10 @@ export const RAPTOR: Species = {
       text: "Trop lourd pour voler, il gardait pourtant de grandes plumes aux bras : pour parader, impressionner un rival, ou couver ses œufs comme un oiseau." },
     { id: "opportuniste", title: "Rien ne se perd", unlock: "scavenge",
       text: "Comme la plupart des prédateurs actuels, il ne laissait sûrement pas passer une carcasse : manger sans chasser, c'est économiser son énergie." },
+    { id: "couveur", title: "Il couvait comme un oiseau", unlock: "nest",
+      text: "Les raptors et leurs cousins couvaient sans doute leurs œufs. On a même trouvé un Citipati fossilisé assis sur son nid, les bras ouverts au-dessus des œufs, longs et rangés par paires en cercle." },
+    { id: "poussin", title: "Des bébés en duvet", unlock: "baby",
+      text: "Les bébés raptors étaient sûrement couverts de duvet, comme des poussins. Ils devaient vite apprendre à courir et à attraper de petites proies : insectes, lézards, petits mammifères." },
   ],
   bones: [
     { id: "crane", name: "Crâne" },

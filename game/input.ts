@@ -2,7 +2,13 @@ const KEYS: Record<string, [number, number]> = {
   ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
   KeyA: [-1, 0], KeyQ: [-1, 0], KeyD: [1, 0], KeyW: [0, -1], KeyZ: [0, -1], KeyS: [0, 1],
 };
-const PRESS = new Set(["Escape", "Enter", "Space", "Tab", "Digit1", "Digit2", "Digit3", "Digit4", "KeyE", "KeyR", "KeyF", "KeyC", "KeyN", ...Object.keys(KEYS)]);
+/**
+ * Touches lues par le jeu (les autres restent au navigateur). Carte du clavier :
+ * 1-6 onglets ; Tab / Maj+Tab focus suivant / précédent ; Entrée / Espace activer ; Échap retour puis menu ;
+ * Retour arrière : retour ; H aide ; V documentaire ; P appareil photo ; C recensement ; M carte ; T temps ;
+ * E/R/F outils de fouille ; N (dev) debug navigation ; flèches / ZQSD / WASD déplacements.
+ */
+const PRESS = new Set(["Escape", "Enter", "Space", "Tab", "Backspace", "KeyH", "KeyT", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "KeyP", "KeyV", "KeyM", "KeyE", "KeyR", "KeyF", "KeyC", "KeyN", ...Object.keys(KEYS)]);
 
 export interface Click {
   /** Position en px CSS dans le canvas. */
@@ -15,7 +21,7 @@ export interface Input {
   /** Direction maintenue (flèches, ZQSD, WASD). */
   dx: number;
   dy: number;
-  /** Touches enfoncées depuis la dernière lecture (codes physiques). */
+  /** Touches enfoncées depuis la dernière lecture (codes physiques ; « ShiftTab » pour Maj+Tab). */
   pressed: string[];
   mouse: {
     /** Position courante en px CSS dans le canvas. */
@@ -58,7 +64,8 @@ export function bindInput(canvas: HTMLCanvasElement): { read: () => Input; dispo
     if (!PRESS.has(e.code)) return;
     e.preventDefault();
     if (KEYS[e.code]) down.add(e.code);
-    if (!e.repeat) pressed.push(e.code);
+    // Maj+Tab : focus précédent (code à part, pour ne pas suivre l'état des touches de modification).
+    if (!e.repeat) pressed.push(e.code === "Tab" && e.shiftKey ? "ShiftTab" : e.code);
   };
   const onUp = (e: KeyboardEvent) => down.delete(e.code);
   const onBlur = () => { down.clear(); mouse.down = false; };

@@ -1,6 +1,7 @@
 import { createNoise2D, createNoise3D } from "simplex-noise";
 import type { Frame } from "../render/frame";
 import { hash2, mulberry32 } from "../rng";
+import { calm } from "../settings";
 
 /**
  * Cinématique spatiale : la Terre du Crétacé final (66 Ma) tourne lentement, la météorite de
@@ -459,9 +460,11 @@ export function drawSpace(f: Frame, t: number): void {
   }
 
   // 6. Flash de l'impact puis fondu au blanc final.
+  // Animations réduites : pas d'éclair blanc à l'impact (une lueur douce), et un fondu au blanc plus lent.
+  const still = calm();
   let wk = 0;
-  if (post) wk = dt < 0.06 ? dt / 0.06 : Math.exp(-(dt - 0.06) * 4.5) * 0.97;
-  wk = Math.max(wk, smooth(SPACE_WHITE, SPACE_DURATION - 0.05, t));
+  if (post) wk = still ? 0.25 * smooth(0, 0.5, dt) * Math.exp(-dt * 0.8) : dt < 0.06 ? dt / 0.06 : Math.exp(-(dt - 0.06) * 4.5) * 0.97;
+  wk = Math.max(wk, smooth(still ? SPACE_DURATION - 1.8 : SPACE_WHITE, SPACE_DURATION - 0.05, t));
   if (wk > 0.003) {
     const n = cols * rows, blank = wk > 0.9;
     for (let i = 0; i < n; i++) {

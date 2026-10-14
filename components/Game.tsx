@@ -36,5 +36,13 @@ export default function Game({ fontFamily }: { fontFamily: string }) {
     return () => { disposed = true; stop(); };
   }, [fontFamily]);
 
-  return <canvas ref={ref} style={{ display: "block", touchAction: "none" }} />;
+  // Le jeu se pilote entièrement au clavier (Tab, Entrée, Échap, H pour l'aide) ou à la souris.
+  return (
+    <canvas
+      ref={ref}
+      role="application"
+      aria-label="Paleoglyphes, jeu educatif sur les dinosaures. Touche H : aide et liste des commandes. Tab : bouton suivant, Entree : activer, Echap : menu."
+      style={{ display: "block", touchAction: "none" }}
+    />
+  );
 }

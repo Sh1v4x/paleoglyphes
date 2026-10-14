@@ -1,6 +1,7 @@
 import { CELL_H, CELL_W, FONT_SIZE, UI_CELL_H, UI_CELL_W, UI_FONT_SIZE } from "../config";
 import { createFrame, type Frame } from "./frame";
 import { metrics } from "./metrics";
+import { settings } from "../settings";
 
 const FIRST = 32, LAST = 126;
 
@@ -121,8 +122,15 @@ export class Renderer {
     this.uHeight = gl.getUniformLocation(prog, "uHeight")!;
   }
 
+  /** Dernière taille demandée et échelle d'interface appliquée (pour réagir aux Réglages). */
+  private size = { w: 1, h: 1 };
+  private scale = 0;
+
   resize(width: number, height: number) {
     const gl = this.gl;
+    this.size = { w: width, h: height };
+    this.scale = settings.uiScale;
+    const k = this.scale;
     const dpr = window.devicePixelRatio || 1;
     const cw = Math.max(1, Math.round(CELL_W * dpr));
     const ch = Math.max(1, Math.round(CELL_H * dpr));
@@ -136,8 +144,9 @@ export class Renderer {
     gl.uniform1f(this.uHeight, this.canvas.height);
     this.frame = createFrame(cols, rows);
 
-    const ucw = Math.max(1, Math.round(UI_CELL_W * dpr));
-    const uch = Math.max(1, Math.round(UI_CELL_H * dpr));
+    // Grande interface : les cellules lisibles grossissent (x1,25 ou x1,5), le monde ne bouge pas.
+    const ucw = Math.max(1, Math.round(UI_CELL_W * k * dpr));
+    const uch = Math.max(1, Math.round(UI_CELL_H * k * dpr));
     // L'interface tient entièrement dans la fenêtre : jamais de ligne coupée sur les bords.
     const ucols = Math.floor((width * dpr) / ucw), urows = Math.floor((height * dpr) / uch);
     gl.uniform2i(this.uUiCell, ucw, uch);
@@ -146,7 +155,7 @@ export class Renderer {
     Object.assign(metrics, { cellW: cw / dpr, cellH: ch / dpr, uiW: ucw / dpr, uiH: uch / dpr, cols, rows, ucols, urows });
 
     this.upload(0, this.atlasTex, this.buildAtlas(cw, ch, FONT_SIZE * dpr, dpr));
-    this.upload(4, this.uiAtlasTex, this.buildAtlas(ucw, uch, UI_FONT_SIZE * dpr, dpr));
+    this.upload(4, this.uiAtlasTex, this.buildAtlas(ucw, uch, UI_FONT_SIZE * k * dpr, dpr));
     this.alloc(1, this.chTex, gl.R8, gl.RED, cols, rows);
     this.alloc(2, this.fgTex, gl.RGBA8, gl.RGBA, cols, rows);
     this.alloc(3, this.bgTex, gl.RGBA8, gl.RGBA, cols, rows);
@@ -187,6 +196,8 @@ export class Renderer {
   }
 
   draw() {
+    // Taille d'interface changée dans les Réglages : on reconstruit les grilles et l'atlas.
+    if (settings.uiScale !== this.scale) this.resize(this.size.w, this.size.h);
     const gl = this.gl, f = this.frame;
     gl.activeTexture(gl.TEXTURE1);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, f.cols, f.rows, gl.RED, gl.UNSIGNED_BYTE, f.ch);

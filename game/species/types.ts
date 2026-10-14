@@ -2,7 +2,9 @@ import type { Material } from "../render/materials";
 import type { Prim } from "../render/raster";
 
 /** Espèces que l'on peut fouiller, assembler et lâcher dans la réserve. */
-export type SpeciesId = "ankylo" | "raptor" | "trike" | "edmonto" | "pachy" | "trex" | "quetzal" | "mosa";
+export type SpeciesId =
+  | "ankylo" | "raptor" | "trike" | "edmonto" | "pachy" | "trex" | "quetzal" | "mosa"
+  | "archelon" | "xiphactinus" | "pteranodon" | "nyctosaurus" | "pectinodon" | "allosaurus" | "alamosaurus";
 
 /**
  * Ce que fait un animal. Chaque modèle sait dessiner chaque action (au minimum « idle » et « walk »).
@@ -50,7 +52,9 @@ export type FactUnlock =
   | "herd" // cliquer l'animal quand il est en troupeau
   | "hunt" // cliquer un prédateur en chasse
   | "flee" // cliquer une proie qui fuit
-  | "scavenge"; // cliquer un animal qui mange une carcasse
+  | "scavenge" // cliquer un animal qui mange une carcasse
+  | "nest" // cliquer un nid (ou un parent qui couve)
+  | "baby"; // cliquer un bébé ou un juvénile
 
 export interface Fact {
   id: string;
@@ -107,6 +111,11 @@ export interface Species {
   behavior: Behavior;
   /** Milieu de vie (défaut : "land"). */
   habitat?: Habitat;
+  /**
+   * Reproduction (défaut : "eggs") : "eggs" = nid, couvée, éclosion ; "live" = gestation puis
+   * naissance d'un petit à côté de la mère (pas de nid, pas d'œuf fossile).
+   */
+  birth?: "eggs" | "live";
 }
 
 /** Matières propres à un groupe d'espèces (ou à la flore), déclinées pour chaque style. */

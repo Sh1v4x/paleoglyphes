@@ -4,19 +4,27 @@ import type { Input } from "../input";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { composeWorld, type Actor, type Critter } from "../render/compose";
-import { metrics, worldCellAt } from "../render/metrics";
+import { metrics, uiCellAt, worldCellAt } from "../render/metrics";
 import { placed, RasterCache, type Raster } from "../render/raster";
 import { mulberry32 } from "../rng";
 import { SPECIES, SPECIES_LIST } from "../species";
 import type { Action, FactUnlock, SpeciesId } from "../species/types";
 import { worldFor, type GameState } from "../state";
-import { bar, button, panel, put, region, text, wrap } from "../ui/kit";
+import { actions, bar, emptyState, hitAt, panel, put, region, SP, text, toolbar, wrap, type Hint, type ToolItem } from "../ui/kit";
 import { unlockTrigger } from "../unlock";
 import { isWater } from "../world/tiles";
 import { faunaActors, faunaAt, faunaDef, noteFauna, type Bug } from "./eco-fauna";
 import { activity, stepEcosystem, type EcoState } from "./ecosystem";
-import { UNLOCK_HINT } from "./journal";
+import { deName } from "./dig-fossils";
 import { activeTrees, treeRaster, updateTrees } from "../world/trees";
+import { drawDocuLog, drawDocumentary, missedCount, stopDocumentary, updateDocumentary } from "../features/documentary";
+import { drawPhoto, updatePhoto } from "../features/photo";
+import { drawThunder, drawWeather, drawWeatherRows, updateWeather, weatherClick, weatherTheme } from "../features/weather";
+import { INCUBATION, juvenilePrims, lifespan, STAGE_AT } from "../species/life";
+import { nestModel } from "../species/eggs";
+import { toast } from "../ui/toast";
+import { addTestCouple, retireAnimal } from "./eco-nest";
+import { displayName, drawAnimalCard, drawNestCard, drawRoster, nestCrack, rosterOver, ROSTER_STEP, theName } from "./park-roster";
 import { NAV, navOk, standable } from "./nav";
 import { UI_TOP, type Scene } from "./types";
 
@@ -108,6 +116,19 @@ export interface Animal {
   progT: number;
   /** Temps cumulé bloqué : au-delà de quelques secondes, l'animal change d'objectif. */
   stuckT: number;
+  /** Âge réel (s) depuis la naissance (ou l'arrivée), voir species/life.ts. */
+  life: number;
+  /** Taille relative 0.32 (bébé) .. 1 (adulte), recalculée depuis `life`. */
+  growth: number;
+  /** Parent suivi par un jeune (id), 0 sinon. Nid gardé par un parent (id), 0 sinon. */
+  parentId: number;
+  nestId: number;
+  /** Prochaine nichée possible (s). */
+  breedCool: number;
+  /** Gestation en cours (espèces vivipares) : avancement 0..1, 0 sinon. */
+  gestation?: number;
+  /** Mort de vieillesse ou retiré à la main : disparaît sans laisser de carcasse à manger. */
+  natural?: boolean;
   /** Altitude (px) des espèces volantes : 0 = posé au sol. Le dessin est décalé vers le haut, l'ombre reste au sol. */
   alt: number;
 }
@@ -135,10 +156,42 @@ export interface ParkState {
   eco: EcoState | null;
   /** Molette cumulée (passer d'un animal à l'autre). */
   wheel: number;
+  /** Nids de la réserve (voir eco-nest.ts). */
+  nests: Nest[];
+  nextNest: number;
+  /** Nid sélectionné / survolé. */
+  nestSel?: number;
+  nestHover?: number;
+  /** Interface : recensement ouvert (touche C) et son défilement (lignes). */
+  roster?: boolean;
+  /** Mini-carte masquée (touche M). */
+  hideMap?: boolean;
+  rosterScroll?: number;
+  /** Animal pour lequel on demande confirmation avant de le retirer. */
+  confirmRetire?: number;
+}
+
+/** Un nid : quelques œufs qui éclosent au bout de l'incubation ; un parent le garde. */
+export interface Nest {
+  id: number;
+  sp: SpeciesId;
+  /** Position au sol (px monde). */
+  x: number;
+  y: number;
+  /** Œufs restants (les prédateurs peuvent en voler). */
+  eggs: number;
+  /** Incubation écoulée (s) ; éclosion à species/life.ts INCUBATION. */
+  t: number;
+  /** Parent gardien (id d'animal), 0 si abandonné. */
+  guard: number;
+  /** Nid issu d'un œuf fossile incubé à l'atelier. */
+  fossil?: boolean;
+  /** Éclos : coquilles vides, il disparaît après un moment (s restantes). */
+  hatched?: number;
 }
 
 export function createParkState(): ParkState {
-  return { cam: { x: 0, y: 0 }, animals: [], nextId: 1, follow: false, critters: [], trample: null, started: false, eco: null, wheel: 0 };
+  return { cam: { x: 0, y: 0 }, animals: [], nextId: 1, follow: false, critters: [], trample: null, started: false, eco: null, wheel: 0, nests: [], nextNest: 1 };
 }
 
 const cache = new RasterCache(3000);
@@ -152,10 +205,23 @@ export function animalRaster(a: Animal, time: number): Raster {
   const tq = moving ? 0 : Math.floor(((time + a.phase) % 4.8) * 6);
   const aq = Math.floor(a.actionT * 8) % 8;
   const flip = a.facing < 0;
-  const key = `${a.sp}|${flip ? 1 : 0}|${a.action}|${moving}|${wq}|${tq}|${aq}`;
-  const r = cache.get(key, () => spec.model({ walk: wq * (TAU / 12), moving, time: tq / 6, action: a.action, actionT: aq / 8 }), flip);
+  // Taille quantifiée (bébés et juvéniles) : quelques paliers suffisent, le cache reste petit.
+  const gq = a.growth >= 0.995 ? 1 : Math.round(a.growth * 12) / 12;
+  const key = `${a.sp}|${flip ? 1 : 0}|${a.action}|${moving}|${wq}|${tq}|${aq}|${gq}`;
+  const r = cache.get(key, () => juvenilePrims(spec.model({ walk: wq * (TAU / 12), moving, time: tq / 6, action: a.action, actionT: aq / 8 }), spec, gq), flip);
   return placed(r, Math.floor(a.x / CELL_W), Math.floor((a.y - a.alt) / CELL_H));
 }
+
+/** Raster d'un nid (œufs, fissures quantifiées, coquilles vides), placée à sa position. */
+export function nestRaster(n: Nest): Raster {
+  const cq = Math.round(nestCrack(n) * 4) / 4;
+  const eggs = Math.max(0, Math.min(6, n.eggs));
+  const r = cache.get(`nest|${n.sp}|${eggs}|${cq}|${n.hatched !== undefined ? 1 : 0}`, () => nestModel(n.sp, eggs, cq, n.hatched !== undefined), false);
+  return placed(r, Math.floor(n.x / CELL_W), Math.floor(n.y / CELL_H));
+}
+
+/** Identifiant d'acteur d'un nid (ne croise ni les animaux, ni la faune, ni les arbres). */
+const nestActorId = (id: number) => -200000 - id;
 
 /** Un animal peut-il se tenir à (x, y) ? Pas d'eau profonde ni d'obstacle sous le corps. */
 export function canStand(s: GameState, sp: SpeciesId, x: number, y: number): boolean {
@@ -178,6 +244,8 @@ function spawn(s: GameState, sp: SpeciesId, near?: { x: number; y: number }) {
       age: rng() * rng(), spot: -1, side: rng() < 0.5 ? 1 : -1, blocked: 0, chase: 0, alarm: 0,
       gx: x, gy: y, best: Infinity, stall: 0, vx: 0, vy: 0, vt: 0,
       path: null, pi: 0, pgx: x, pgy: y, repath: 0, prog: Infinity, progT: 0, stuckT: 0, alt: 0,
+      // Arrivée en jeune adulte (âge tiré au hasard dans la vie adulte).
+      life: (SPECIES[sp] ? lifespan(SPECIES[sp]!) : 1800) * (STAGE_AT.adult + 0.05 + rng() * 0.4), growth: 1, parentId: 0, nestId: 0, breedCool: 120 + rng() * 300,
     };
     p.animals.push(a);
     return a;
@@ -231,6 +299,33 @@ export function observe(s: GameState, a: Animal) {
   const t = byAction[a.action];
   if (t) unlockTrigger(s, a.sp, t);
   if (["herd", "hunt", "flee", "scavenge"].includes(a.mood)) unlockTrigger(s, a.sp, a.mood as FactUnlock);
+  // Cycle de vie : un parent qui couve, un petit qui grandit.
+  if (a.task !== "dead" && a.nestId) unlockTrigger(s, a.sp, "nest");
+  if (a.task !== "dead" && a.growth < 1) unlockTrigger(s, a.sp, "baby");
+}
+
+/** Cliquer un nid : sa fiche, et le fait « nid » du carnet. */
+export function observeNest(s: GameState, n: Nest) {
+  s.park.nestSel = n.id;
+  s.park.selected = undefined;
+  s.park.bug = undefined;
+  unlockTrigger(s, n.sp, "nest");
+}
+
+/** Nid sous un point écran (px CSS). */
+function nestAt(s: GameState, px: number, py: number): Nest | undefined {
+  const camX = Math.floor(s.park.cam.x / CELL_W), camY = Math.floor(s.park.cam.y / CELL_H);
+  const c = worldCellAt(px, py);
+  const wx = c.x + camX, wy = c.y + camY;
+  let best: Nest | undefined;
+  for (const n of s.park.nests) {
+    const r = nestRaster(n);
+    const i = wx - r.cx, j = wy - r.cy;
+    // Les nids sont plats : on vise large.
+    if (i < -2 || j < -2 || i > r.w + 1 || j > r.h + 1) continue;
+    if (!best || n.y > best.y) best = n;
+  }
+  return best;
 }
 
 /** Animal sous un point écran (px CSS), le plus proche du spectateur. */
@@ -263,14 +358,15 @@ function cycle(s: GameState, dir: number) {
   const next = list[(k + dir + list.length) % list.length] ?? list[0];
   s.park.selected = next.id;
   s.park.bug = undefined;
+  s.park.nestSel = undefined;
   s.park.follow = true;
 }
 
-const MINI_W = 28, MINI_H = 10;
+export const MINI_W = 28, MINI_H = 10;
 /** Lettre de chaque espèce sur la mini-carte. */
 const MINI_GLYPH: Partial<Record<SpeciesId, string>> = { ankylo: "A", raptor: "R", trike: "T", edmonto: "E", pachy: "P", trex: "X" };
 
-function centerOn(s: GameState, x: number, y: number) {
+export function centerOn(s: GameState, x: number, y: number) {
   s.park.cam.x = x - (metrics.cols * CELL_W) / 2;
   s.park.cam.y = y - (metrics.rows * CELL_H) / 2;
   s.park.follow = false;
@@ -286,6 +382,11 @@ export const parkScene: Scene = {
     const p = s.park;
     if (!p.started) { start(s); syncPopulation(s); }
     const w = worldFor(s);
+    // Fonctions de la réserve : météo, documentaire (peut piloter la caméra), appareil photo.
+    updateWeather(s, dt * s.clockSpeed);
+    const docuCam = updateDocumentary(s, input, dt);
+    const photoCaptures = updatePhoto(s, input, dt);
+    void docuCam; void photoCaptures;
     // Caméra : clavier + glisser.
     const speed = 700 * dt;
     if (input.dx || input.dy) p.follow = false;
@@ -296,20 +397,37 @@ export const parkScene: Scene = {
       p.cam.x -= input.mouse.dragX;
       p.cam.y -= input.mouse.dragY;
     }
-    // Molette : animal suivant / précédent.
-    p.wheel += input.mouse.wheel;
-    if (Math.abs(p.wheel) >= 80) { cycle(s, p.wheel > 0 ? 1 : -1); p.wheel = 0; }
+    // Molette : défile le recensement s'il est sous la souris, sinon animal suivant / précédent.
+    if (p.roster && input.mouse.wheel && rosterOver(input.mouse.x, input.mouse.y)) {
+      p.rosterScroll = Math.max(0, (p.rosterScroll ?? 0) + Math.sign(input.mouse.wheel) * ROSTER_STEP);
+      p.wheel = 0;
+    } else {
+      p.wheel += input.mouse.wheel;
+      if (Math.abs(p.wheel) >= 80) { cycle(s, p.wheel > 0 ? 1 : -1); p.wheel = 0; }
+    }
 
-    stepEcosystem(s, dt);
-    updateTrees(w, dt, p.regrow ?? 1);
+    // Le temps de la réserve suit la vitesse de l'horloge (x1, x4, x16) : déplacements, faim,
+    // incubation, gestation, croissance, vieillissement, repousse des arbres... tout accélère.
+    // Par petits pas (au plus 4 par image) pour que les déplacements restent fluides.
+    const clock = s.clockSpeed;
+    const steps = Math.min(4, Math.max(1, Math.round(clock)));
+    const sdt = (dt * clock) / steps;
+    for (let k = 0; k < steps; k++) {
+      stepEcosystem(s, sdt);
+      updateTrees(w, sdt, p.regrow ?? 1);
+    }
 
     const sel = p.animals.find((a) => a.id === p.selected);
     if (!sel) p.selected = undefined;
+    if (p.confirmRetire !== undefined && p.confirmRetire !== p.selected) p.confirmRetire = undefined;
+    const nest = p.nestSel !== undefined ? p.nests.find((n) => n.id === p.nestSel) : undefined;
+    if (!nest) p.nestSel = undefined;
     const bug = p.bug !== undefined ? p.eco?.fauna.find((b) => b.uid === p.bug) : undefined;
     // Pour un animal en vol, on centre sur son corps (au-dessus de son ombre), pas sur le sol.
     const box = sel ? animalRaster(sel, s.time) : null;
-    const tgt = sel && box ? { x: (box.cx + box.w / 2) * CELL_W, y: (box.cy + box.h / 2) * CELL_H } : bug ? { x: bug.x, y: bug.y } : undefined;
-    if (p.follow && tgt) {
+    const tgt = sel && box ? { x: (box.cx + box.w / 2) * CELL_W, y: (box.cy + box.h / 2) * CELL_H } : bug ? { x: bug.x, y: bug.y } : nest ? { x: nest.x, y: nest.y } : undefined;
+    // Documentaire : il tient la caméra (il s'arrête de lui-même dès que le joueur la reprend).
+    if (p.follow && tgt && !docuCam) {
       p.cam.x += (tgt.x - metrics.cols * CELL_W / 2 - p.cam.x) * Math.min(1, dt * 4);
       p.cam.y += (tgt.y - metrics.rows * CELL_H / 2 - p.cam.y) * Math.min(1, dt * 4);
     }
@@ -337,28 +455,72 @@ export const parkScene: Scene = {
       c.y = c.hy + Math.cos(t * 1.1) * 18 + Math.sin(t * 2.3) * 6;
     }
 
-    if (input.mouse.inside) {
+    const overUi = rosterOver(input.mouse.x, input.mouse.y) && p.roster;
+    if (input.mouse.inside && !overUi) {
       p.hover = animalAt(s, input.mouse.x, input.mouse.y)?.id;
       p.bugHover = p.hover === undefined ? faunaAt(s, input.mouse.x, input.mouse.y)?.uid : undefined;
-    } else p.hover = p.bugHover = undefined;
+      p.nestHover = p.hover === undefined && p.bugHover === undefined ? nestAt(s, input.mouse.x, input.mouse.y)?.id : undefined;
+    } else p.hover = p.bugHover = p.nestHover = undefined;
     for (const c of input.worldClicks) {
       const a = animalAt(s, c.x, c.y);
-      if (a) { observe(s, a); continue; }
+      if (a) { observe(s, a); p.nestSel = undefined; continue; }
       const b = faunaAt(s, c.x, c.y);
-      if (b) { p.bug = b.uid; p.selected = undefined; noteFauna(s, b); continue; }
+      if (b) { p.bug = b.uid; p.selected = undefined; p.nestSel = undefined; noteFauna(s, b); continue; }
+      const n = nestAt(s, c.x, c.y);
+      if (n) { observeNest(s, n); continue; }
       p.selected = undefined;
       p.bug = undefined;
+      p.nestSel = undefined;
     }
     if (DEV && input.pressed.includes("KeyN")) p.debugNav = !p.debugNav;
+    if (input.pressed.includes("KeyC")) p.roster = !p.roster;
+    if (input.pressed.includes("KeyM")) p.hideMap = !p.hideMap;
+    if (input.pressed.includes("KeyT")) nextSpeed(s);
     for (const id of input.ui) {
       if (id === "park:follow") p.follow = !p.follow;
-      if (id === "park:clock") s.clockSpeed = CLOCK_SPEEDS[(CLOCK_SPEEDS.indexOf(s.clockSpeed as 1) + 1) % CLOCK_SPEEDS.length];
-      if (id === "park:close") { p.selected = undefined; p.bug = undefined; p.follow = false; }
+      if (id === "park:clock" || id === "park:speed") nextSpeed(s);
+      if (id === "park:map") p.hideMap = !p.hideMap;
+      if (id === "park:gotodig") s.mode = "dig";
+      if (id === "park:close") { p.selected = undefined; p.bug = undefined; p.nestSel = undefined; p.follow = false; p.confirmRetire = undefined; }
+      if (weatherClick(s, id)) continue;
+      if (id === "park:roster") p.roster = !p.roster;
+      if (id === "park:couple") {
+        // Test : un couple prêt à nicher, au centre de l'écran, de l'espèce sélectionnée si possible.
+        const cx = p.cam.x + (metrics.cols * CELL_W) / 2, cy = p.cam.y + (metrics.rows * CELL_H) / 2;
+        const cur = p.animals.find((a) => a.id === p.selected);
+        const m = addTestCouple(s, cx, cy, cur?.sp);
+        if (m) {
+          const name = SPECIES[m.sp]?.name ?? m.sp;
+          toast(s, "Couple ajoute (test)", `Deux ${name}s prets a nicher : regarde-les construire un nid !`);
+          p.selected = m.id; p.follow = true; p.nestSel = undefined;
+        } else toast(s, "Pas de place", "Toutes les especes assemblees sont deja au complet dans la reserve.");
+      }
+      if (id.startsWith("park:pick:")) {
+        // Ligne du recensement : on sélectionne l'animal et la caméra le rejoint.
+        const a = p.animals.find((b) => b.id === Number(id.slice(10)));
+        if (a) { observe(s, a); p.nestSel = undefined; centerOn(s, a.x, a.y - a.alt); p.follow = true; }
+      }
+      if (id.startsWith("park:nest:")) {
+        const n = p.nests.find((m) => m.id === Number(id.slice(10)));
+        if (n) { observeNest(s, n); centerOn(s, n.x, n.y); }
+      }
+      if (id === "park:retire" && sel && sel.task !== "dead") p.confirmRetire = sel.id;
+      if (id === "park:retire:no") p.confirmRetire = undefined;
+      if (id === "park:retire:yes" && sel && p.confirmRetire === sel.id) {
+        const name = SPECIES[sel.sp]?.name ?? "dinosaure";
+        retireAnimal(s, sel);
+        toast(s, `${theName(name)} a quitté la réserve.`);
+        p.selected = undefined; p.confirmRetire = undefined; p.follow = false;
+      }
       if (id === "park:journal" && sel) { s.journal.species = sel.sp; s.journal.extras = false; s.mode = "journal"; }
       if (id === "park:extras") { s.journal.species = undefined; s.journal.extras = true; s.mode = "journal"; }
-      if (id.startsWith("park:mini:")) {
-        const [, , i, j] = id.split(":");
-        centerOn(s, ((Number(i) + 0.5) / (MINI_W - 2)) * WORLD_W, ((Number(j) + 0.5) / (MINI_H - 2)) * WORLD_H);
+      if (id === "park:mini") {
+        // Case de la carte sous le clic.
+        const c = input.mouse.clicks.find((k) => hitAt(k.x, k.y) === "park:mini");
+        if (c) {
+          const m = uiCellAt(c.x, c.y);
+          centerOn(s, ((m.x - miniRect.x + 0.5) / (MINI_W - 2)) * WORLD_W, ((m.y - miniRect.y + 0.5) / (MINI_H - 2)) * WORLD_H);
+        }
       }
     }
   },
@@ -377,12 +539,17 @@ export const parkScene: Scene = {
       if (!spec) continue;
       const sea = spec.habitat === "sea";
       actors.push({
-        id: a.id, r: animalRaster(a, s.time), x: a.x, y: a.y, inWater: a.inWater && !sea && a.alt < 2, submerged: sea && a.task !== "dead",
+        id: a.id, r: animalRaster(a, s.time), x: a.x, y: a.y, inWater: a.inWater && !sea && a.alt < 2, submerged: sea && a.task !== "dead" && a.action !== "land" && a.action !== "takeoff", // tortue sur la plage : dessinée hors de l'eau
         sortY: a.alt > 4 ? 1e7 + a.alt : undefined,
         // Ombre au sol pour les volants (plus petite quand ils sont haut), aucune pour les nageurs.
         shadowRx: sea ? 0 : spec.halfLen * spec.shadow * (a.task === "dead" ? 1.1 : 1) * (a.alt > 0 ? Math.max(0.35, 1 - a.alt / 400) : 1),
         eyeX: a.x + spec.eye.x * a.facing, eyeY: a.y - a.alt + spec.eye.y,
       });
+    }
+    // Nids : posés au sol, triés avec le reste (le parent qui couve passe devant ou derrière).
+    for (const n of p.nests) {
+      if (n.x < vx0 || n.x > vx1 || n.y < vy0 || n.y > vy1) continue;
+      actors.push({ id: nestActorId(n.id), r: nestRaster(n), x: n.x, y: n.y - 1, inWater: false, shadowRx: 0, eyeX: n.x, eyeY: -1e6 });
     }
     faunaActors(s, actors, vx0, vy0, vx1, vy1);
     // Arbres renversés, souches et jeunes pousses : dessinés comme des objets animés.
@@ -392,129 +559,196 @@ export const parkScene: Scene = {
       if (r) actors.push({ id: -100000 - t.id, r: placed(r, Math.floor(t.x / CELL_W), Math.floor(t.y / CELL_H)), x: t.x, y: t.y, inWater: false, shadowRx: t.state === "down" ? 60 : 18, eyeX: t.x, eyeY: -1e6 });
     }
     // La réserve suit le cycle jour / nuit ; l'interface garde ses couleurs.
-    composeWorld(litTheme(th, s.clock), world, {
+    composeWorld(weatherTheme(s, litTheme(th, s.clock)), world, {
       world: w, time: s.time, camX, camY,
       glowX: p.cam.x + world.cols * CELL_W / 2, glowY: p.cam.y + world.rows * CELL_H / 2,
-      actors, critters: p.critters, trample: p.trample ?? undefined, selected: p.selected ?? (p.bug !== undefined ? 1_000_000 + p.bug : undefined),
+      actors, critters: p.critters, trample: p.trample ?? undefined, selected: p.selected ?? (p.bug !== undefined ? 1_000_000 + p.bug : p.nestSel !== undefined ? nestActorId(p.nestSel) : undefined),
     });
 
+    drawWeather(s, th, world, camX, camY);
     if (DEV && p.debugNav) drawNavDebug(s, th, world, camX, camY);
     const u = th.ui;
     const toUi = (cx: number, cy: number) => ({ x: ((cx - camX) * metrics.cellW) / metrics.uiW, y: ((cy - camY) * metrics.cellH) / metrics.uiH });
-    // Étiquettes au-dessus de l'animal survolé ou sélectionné : nom + ce qu'il fait.
-    for (const id of new Set([p.hover, p.selected])) {
-      const a = p.animals.find((b) => b.id === id);
-      if (!a) continue;
-      const spec = SPECIES[a.sp];
-      if (!spec) continue;
-      const r = animalRaster(a, s.time);
-      const at = toUi(r.cx + r.w / 2, r.cy);
-      const isSel = id === p.selected;
-      const label = ` ${spec.name} `;
-      const lx = Math.round(at.x - label.length / 2), ly = Math.round(at.y - 1.2);
-      text(ui, lx, ly, label, isSel ? u.panel : u.text, isSel ? u.hi : u.panel, 0.9);
-      const sub = ` ${activity(a)} `;
-      if (id === p.hover) text(ui, Math.round(at.x - sub.length / 2), ly + 1, sub, u.dim, u.panel, 0.8);
-    }
-    for (const uid of new Set([p.bugHover, p.bug])) {
-      const b = p.eco?.fauna.find((f) => f.uid === uid);
-      const def = b && faunaDef(b);
-      if (!b || !def) continue;
-      const at = toUi(b.x / CELL_W, (b.y - b.alt) / CELL_H - 4);
-      const label = ` ${def.name} `;
-      text(ui, Math.round(at.x - label.length / 2), Math.round(at.y - 1), label, uid === p.bug ? u.panel : u.text, uid === p.bug ? u.hi : u.panel, 0.9);
-    }
+    // Étiquette accrochée au monde : seulement si elle tient entière dans la zone de jeu.
+    const tag = (x: number, y: number, str: string, fg: RGB, bg: RGB, a: number) => {
+      const t = str.length;
+      if (x < 0 || x + t > ui.cols || y < UI_TOP || y >= ui.rows - 1) return;
+      text(ui, x, y, str, fg, bg, a);
+    };
+    if (!s.photo.aiming && !s.docu.on) {
+      // Étiquettes au-dessus de l'animal survolé ou sélectionné : nom + ce qu'il fait.
+      for (const id of new Set([p.hover, p.selected])) {
+        const a = p.animals.find((b) => b.id === id);
+        if (!a) continue;
+        const spec = SPECIES[a.sp];
+        if (!spec) continue;
+        const r = animalRaster(a, s.time);
+        const at = toUi(r.cx + r.w / 2, r.cy);
+        const isSel = id === p.selected;
+        const label = ` ${isSel ? "> " : ""}${displayName(spec, a)} `;
+        const lx = Math.round(at.x - label.length / 2), ly = Math.round(at.y - 1.2);
+        tag(lx, ly, label, isSel ? u.panel : u.text, isSel ? u.hi : u.panel, 0.9);
+        const sub = ` ${activity(a)} `;
+        if (id === p.hover) tag(Math.round(at.x - sub.length / 2), ly + 1, sub, u.dim, u.panel, 0.8);
+      }
+      for (const uid of new Set([p.bugHover, p.bug])) {
+        const b = p.eco?.fauna.find((f) => f.uid === uid);
+        const def = b && faunaDef(b);
+        if (!b || !def) continue;
+        const at = toUi(b.x / CELL_W, (b.y - b.alt) / CELL_H - 4);
+        const label = ` ${def.name} `;
+        tag(Math.round(at.x - label.length / 2), Math.round(at.y - 1), label, uid === p.bug ? u.panel : u.text, uid === p.bug ? u.hi : u.panel, 0.9);
+      }
 
-    const sel = p.animals.find((a) => a.id === p.selected);
-    if (sel) drawCard(s, th, ui, sel);
-    else if (p.bug !== undefined) {
-      const b = p.eco?.fauna.find((f) => f.uid === p.bug);
-      if (b) drawBugCard(s, th, ui, b);
-    }
-    drawMini(s, th, ui);
-    drawClock(s, th, ui);
+      // Barre d'incubation au-dessus de chaque nid visible (et de chaque gestation, voir `progressBars`).
+      for (const pb of progressBars(s)) {
+        const at = toUi(pb.cx, pb.cy);
+        const x = Math.round(at.x - 6), y = Math.round(at.y) - (pb.selected ? 2 : 1);
+        if (x < 0 || y < UI_TOP || x + 12 > ui.cols || y >= ui.rows - 1) continue;
+        bar(ui, th, x, y, 12, pb.v, pb.v > 0.85 ? u.ok : u.hi);
+      }
 
-    if (!p.animals.some((a) => a.task !== "dead")) {
-      const W = 56, x = Math.floor((ui.cols - W) / 2), y = Math.floor(ui.rows / 2) - 4;
-      panel(ui, th, x, y, W, 7, "Réserve vide");
-      wrap("Aucun dinosaure ici pour l'instant. Fouille des os, assemble un squelette à l'atelier, puis synthétise-le : il viendra vivre ici.", W - 4)
-        .forEach((l, i) => text(ui, x + 2, y + 2 + i, l, u.text, u.panel, u.alpha));
+      for (const id of new Set([p.nestHover, p.nestSel])) {
+        const n = p.nests.find((m) => m.id === id);
+        if (!n) continue;
+        const r = nestRaster(n);
+        const at = toUi(r.cx + r.w / 2, r.cy);
+        const label = ` Nid ${deName(SPECIES[n.sp]?.name ?? "dinosaure")} `;
+        const isSel = id === p.nestSel;
+        tag(Math.round(at.x - label.length / 2), Math.round(at.y - 1.2), label, isSel ? u.panel : u.text, isSel ? u.hi : u.panel, 0.9);
+      }
     }
-    text(ui, 1, ui.rows - 1, "Flèches/ZQSD ou glisser : caméra   Clic : observer   Molette : animal suivant", u.dim, u.panel, 0.7);
+    drawHud(s, th, world, ui);
+  },
+
+  hints(s) {
+    if (s.photo.aiming) return [["Clic", "declencher"], ["Molette", "cadrage"], ["Glisser", "deplacer"], ["P", "ranger l'appareil"]];
+    if (s.docu.on) return [["V", "arreter"], ["Fleches", "reprendre la camera"]];
+    const h: Hint[] = [["Fleches", "camera"], ["Glisser", "camera"], ["Clic", "observer"], ["Molette", "animal suivant"]];
+    if (s.park.selected !== undefined || s.park.nestSel !== undefined || s.park.bug !== undefined) h.push(["Echap", "fermer la fiche"]);
+    return h;
+  },
+
+  help() {
+    const h: Hint[] = [
+      ["Fleches", "deplacer la camera (ou ZQSD / WASD, ou glisser)"],
+      ["Clic", "observer un animal, un nid, une petite bete : remplit le carnet"],
+      ["Molette", "animal suivant / precedent (ou defiler le recensement)"],
+      ["V", "documentaire : la camera filme les moments forts"],
+      ["P", "appareil photo (clic ou Espace : declencher, molette : cadrage)"],
+      ["C", "recensement : la liste de tous les animaux"],
+      ["M", "afficher / masquer la carte (clic sur la carte : y aller)"],
+      ["T", "accelerer le temps (x1, x4, x16)"],
+      ["Echap", "fermer la fiche, le viseur, le documentaire..."],
+    ];
+    if (DEV) h.push(["N", "(dev) debug de la navigation"]);
+    return h;
+  },
+
+  back(s) {
+    const p = s.park;
+    if (s.photo.aiming) { s.photo.aiming = false; return true; }
+    if (s.docu.listOpen) { s.docu.listOpen = false; return true; }
+    if (s.docu.on) { stopDocumentary(s); return true; }
+    if (p.confirmRetire !== undefined) { p.confirmRetire = undefined; return true; }
+    if (p.selected !== undefined || p.bug !== undefined || p.nestSel !== undefined) {
+      p.selected = undefined; p.bug = undefined; p.nestSel = undefined; p.follow = false;
+      return true;
+    }
+    if (p.roster) { p.roster = false; return true; }
+    return false;
   },
 };
 
-/** Fiche de l'animal sélectionné : activité, besoins, troupeau, ce qu'il reste à découvrir. */
-function drawCard(s: GameState, th: Theme, ui: Frame, a: Animal) {
-  const spec = SPECIES[a.sp];
-  if (!spec) return;
-  const u = th.ui;
-  const W = 46, H = 16, x = 2, y = ui.rows - H - 2;
-  panel(ui, th, x, y, W, H, spec.name);
-  text(ui, x + 2, y + 1, spec.latin, u.dim, u.panel, u.alpha);
-  const lines = wrap(`En ce moment : il ${activity(a)}.`, W - 4);
-  lines.slice(0, 2).forEach((l, i) => text(ui, x + 2, y + 2 + i, l, u.text, u.panel, u.alpha));
-  let r = y + 5;
-  if (a.task === "dead") {
-    wrap(`Carcasse : elle disparaîtra dans ${Math.ceil(a.decay / 60)} min. Les charognards en profitent.`, W - 4)
-      .forEach((l, i) => text(ui, x + 2, r + i, l, u.dim, u.panel, u.alpha));
-    r += 4;
-  } else {
-    const need = (label: string, v: number, bad: boolean) => {
-      text(ui, x + 2, r, label, u.text, u.panel, u.alpha);
-      bar(ui, th, x + 11, r, 20, v, bad ? u.bad : u.ok);
-      text(ui, x + 32, r, bad ? "!" : "", u.bad, u.panel, u.alpha);
-      r++;
-    };
-    need("Faim", a.hunger, a.hunger > 0.7);
-    need("Soif", a.thirst, a.thirst > 0.7);
-    need("Énergie", a.energy, a.energy < 0.25);
-    const [h0, h1] = spec.behavior.herd;
-    const herdTxt = h1 <= 1 ? "Solitaire : il vit seul." : a.herd > 1 ? `Troupeau : ${a.herd} individus ensemble.` : `Seul, loin de son groupe (${h0}-${h1} d'habitude).`;
-    text(ui, x + 2, r++, herdTxt, u.dim, u.panel, u.alpha);
-  }
-  // Ce qui reste à découvrir : on pointe le prochain fait verrouillé.
-  const facts = spec.facts;
-  const got = facts.filter((f) => s.progress.facts.includes(`${a.sp}:${f.id}`)).length;
-  text(ui, x + 2, r + 1, `Carnet : ${got}/${facts.length} faits`, u.text, u.panel, u.alpha);
-  const locked = facts.filter((f) => !s.progress.facts.includes(`${a.sp}:${f.id}`) && f.unlock !== "assemble");
-  const now = locked.find((f) => f.unlock === a.action || f.unlock === a.mood);
-  let teaser: string, hot = false;
-  if (now) { teaser = "Clique-le maintenant pour en apprendre plus !"; hot = true; }
-  else if (locked[0]) teaser = `Indice : ${UNLOCK_HINT[locked[0].unlock]}`;
-  else teaser = got === facts.length ? "Carnet complet pour cette espèce. Bravo !" : "Assemble son squelette à l'atelier pour le dernier fait.";
-  wrap(teaser, W - 4).slice(0, 2).forEach((l, i) => text(ui, x + 2, r + 2 + i, l, hot ? u.hi : u.dim, u.panel, u.alpha));
-  let bx = x + 2;
-  bx += button(ui, th, "park:follow", bx, y + H - 2, s.park.follow ? "Ne plus suivre" : "Suivre", { active: s.park.follow }) + 1;
-  bx += button(ui, th, "park:journal", bx, y + H - 2, "Carnet") + 1;
-  button(ui, th, "park:close", bx, y + H - 2, "x");
+/** Vitesse du temps suivante (x1, x4, x16). */
+function nextSpeed(s: GameState) {
+  s.clockSpeed = CLOCK_SPEEDS[(CLOCK_SPEEDS.indexOf(s.clockSpeed as 1) + 1) % CLOCK_SPEEDS.length];
 }
 
-/** Fiche d'une petite bête (note bonus du carnet). */
-function drawBugCard(s: GameState, th: Theme, ui: Frame, b: Bug) {
+/**
+ * Interface de la réserve (règles de placement, sans chevauchement) :
+ * - en haut à gauche, « Temps et météo » (complet, compact, ou masqué si la fiche a besoin de la place) ;
+ * - à sa droite, la barre d'outils (Documentaire V, Moments, Photo P, Recensement C, Carte M, Temps T) ;
+ * - en bas à gauche, la fiche de l'élément sélectionné ; en bas à droite, la carte ;
+ * - à droite, entre la barre d'outils et la carte, le recensement ; notifications en haut à droite (au-dessus).
+ * Pendant le documentaire ou la visée photo, tout s'efface sauf leurs propres commandes.
+ */
+function drawHud(s: GameState, th: Theme, world: Frame, ui: Frame) {
+  const p = s.park, d = s.docu;
+  if (s.photo.aiming) { drawPhoto(s, th, world, ui); return; }
+  if (d.on) { drawDocumentary(s, th, ui); drawPhoto(s, th, world, ui); drawThunder(s, th, ui); return; }
+
+  // --- Fiche (bas gauche) ---
+  const sel = p.animals.find((a) => a.id === p.selected);
+  const nest = p.nests.find((n) => n.id === p.nestSel);
+  const bug = p.bug !== undefined ? p.eco?.fauna.find((f) => f.uid === p.bug) : undefined;
+  let cardTop = ui.rows - 1;
+  if (sel) cardTop = drawAnimalCard(s, th, ui, sel);
+  else if (bug) cardTop = drawBugCard(s, th, ui, bug);
+  else if (nest) cardTop = drawNestCard(s, th, ui, nest);
+
+  // --- Temps et météo (haut gauche) : complet, compact ou masqué selon la place laissée par la fiche ---
+  const room = cardTop - 1 - UI_TOP;
+  const full = 6 + (DEV ? 3 : 2) + 1;
+  const timeH = room >= full ? full : room >= 4 ? 4 : 0;
+  if (timeH) drawTime(s, th, ui, SP.margin, UI_TOP, TIME_W, timeH);
+
+  // --- Barre d'outils ---
+  const missed = missedCount(s);
+  const tools: ToolItem[] = [
+    { id: "docu:toggle", label: "Documentaire", short: "Docu", icon: "o", key: "V", tip: "Documentaire : la camera filme les moments forts" },
+  ];
+  if (d.log.length) tools.push({ id: "docu:list", label: missed ? `${missed} moment${missed > 1 ? "s" : ""} manque${missed > 1 ? "s" : ""}` : "Moments passes", short: missed ? `${missed} manque${missed > 1 ? "s" : ""}` : "Moments", icon: `!${missed}`, toggle: true, active: d.listOpen, tip: "Moments forts manques : clic pour y aller" });
+  tools.push(
+    { id: "photo:toggle", label: "Appareil photo", short: "Photo", icon: "@", key: "P", tip: "Appareil photo : cadrer, puis declencher" },
+    { id: "park:roster", label: "Recensement", short: "Liste", icon: "#", key: "C", toggle: true, active: !!p.roster, tip: "Recensement : tous les animaux de la reserve" },
+    { id: "park:map", label: "Carte", icon: "%", key: "M", toggle: true, active: !p.hideMap, tip: "Afficher / masquer la carte" },
+    { id: "park:speed", label: `Temps x${s.clockSpeed}`, short: `x${s.clockSpeed}`, icon: `x${s.clockSpeed}`, key: "T", active: s.clockSpeed > 1, tip: "Accelerer le temps (x1, x4, x16)" },
+  );
+  if (DEV) tools.push({ id: "park:couple", label: "Couple (test)", short: "Couple", icon: "+", variant: "ghost", tip: "Test : ajouter un couple pret a nicher" });
+  const tx = timeH ? SP.margin + TIME_W + SP.gap + 1 : SP.margin;
+  toolbar(ui, th, tx, UI_TOP, ui.cols - tx - SP.margin, tools);
+
+  // --- Carte (bas droite) et recensement (droite) ---
+  const mapShown = !p.hideMap && ui.cols >= 90 && ui.rows >= 30;
+  const mapTop = ui.rows - MINI_H - 2;
+  if (mapShown) drawMini(s, th, ui, ui.cols - MINI_W - SP.margin, mapTop);
+  if (p.roster) drawRoster(s, th, ui, UI_TOP + 2, mapShown ? mapTop - 1 : ui.rows - 2, timeH ? SP.margin + TIME_W + SP.gap : 0);
+
+  if (!p.animals.some((a) => a.task !== "dead")) {
+    emptyState(ui, th, "Reserve vide", "Aucun dinosaure ici pour l'instant. Fouille des os, assemble un squelette a l'atelier, puis synthetise-le : il viendra vivre ici.",
+      { id: "park:gotodig", label: "Aller a la fouille", key: "2" });
+  }
+  // Menu déroulant des moments manqués : par-dessus le reste.
+  if (d.listOpen) drawDocuLog(s, th, ui, tx, UI_TOP + 1);
+  drawPhoto(s, th, world, ui);
+  drawThunder(s, th, ui);
+}
+
+/** Fiche d'une petite bête (note bonus du carnet). Renvoie sa ligne du haut. */
+function drawBugCard(s: GameState, th: Theme, ui: Frame, b: Bug): number {
   const def = faunaDef(b);
-  if (!def) return;
+  if (!def) return ui.rows - 1;
   const u = th.ui;
-  const W = 46;
+  const W = Math.min(46, ui.cols - 2 * SP.margin - 2);
   const body = wrap(def.text, W - 4).slice(0, 6);
-  const H = 7 + body.length, x = 2, y = ui.rows - H - 2;
-  panel(ui, th, x, y, W, H, def.name);
+  const H = 7 + body.length, x = SP.margin + 1, y = Math.max(UI_TOP, ui.rows - H - 2);
+  panel(ui, th, x, y, W, H, def.name, { close: "park:close" });
   text(ui, x + 2, y + 1, def.latin, u.dim, u.panel, u.alpha);
   body.forEach((l, i) => text(ui, x + 2, y + 3 + i, l, u.text, u.panel, u.alpha));
-  text(ui, x + 2, y + H - 3, "Note ajoutée au carnet (Extras).", u.hi, u.panel, u.alpha);
-  let bx = x + 2;
-  bx += button(ui, th, "park:follow", bx, y + H - 2, s.park.follow ? "Ne plus suivre" : "Suivre", { active: s.park.follow }) + 1;
-  bx += button(ui, th, "park:extras", bx, y + H - 2, "Extras") + 1;
-  button(ui, th, "park:close", bx, y + H - 2, "x");
+  text(ui, x + 2, y + H - 3, "Note ajoutée au carnet (Extras).", u.ok, u.panel, u.alpha);
+  actions(ui, th, x + 2, y + H - 2, W - 4, [
+    { id: "park:extras", label: "Voir au carnet" },
+    { id: "park:follow", label: "Suivre", toggle: true, active: s.park.follow, variant: "primary" },
+  ]);
+  return y;
 }
 
-/** Mini-carte : eau, animaux (initiale de l'espèce), carcasses, cadre de la caméra. Cliquer y déplace la caméra. */
-function drawMini(s: GameState, th: Theme, ui: Frame) {
+/** Mini-carte : eau, nids (o), animaux (initiale de l'espèce, minuscule pour les petits), carcasses, cadre de la caméra. Cliquer y déplace la caméra. */
+function drawMini(s: GameState, th: Theme, ui: Frame, x0: number, y0: number) {
   const p = s.park, w = worldFor(s), u = th.ui;
-  if (ui.cols < 90 || ui.rows < 30) return;
-  const x0 = ui.cols - MINI_W - 1, y0 = ui.rows - MINI_H - 2;
   const iw = MINI_W - 2, ih = MINI_H - 2;
-  panel(ui, th, x0, y0, MINI_W, MINI_H, "Carte");
+  panel(ui, th, x0, y0, MINI_W, MINI_H, "Carte", { key: "M", close: "park:map" });
   const cw = WORLD_W / iw, ch = WORLD_H / ih;
   const vx0 = p.cam.x / cw, vy0 = p.cam.y / ch;
   const vx1 = (p.cam.x + metrics.cols * CELL_W) / cw, vy1 = (p.cam.y + metrics.rows * CELL_H) / ch;
@@ -526,37 +760,59 @@ function drawMini(s: GameState, th: Theme, ui: Frame) {
       const bg = inView ? u.panelAlt : u.panel;
       const wet = isWater(w.terrain[wi]);
       put(ui, x0 + 1 + i, y0 + 1 + j, wet ? 126 : 46, wet ? water : u.dim, bg, u.alpha);
-      region(`park:mini:${i}:${j}`, x0 + 1 + i, y0 + 1 + j, 1, 1);
     }
+  }
+  // Une seule zone : la case visée se calcule au clic (voir update, « park:mini »).
+  region("park:mini", x0 + 1, y0 + 1, iw, ih, { tip: "Clic : y emmener la camera. Lettres : animaux (rouge : carnivores), o : nids" });
+  miniRect = { x: x0 + 1, y: y0 + 1 };
+  // Nids (o), puis les animaux par-dessus ; les petits en minuscule.
+  for (const n of p.nests) {
+    const i = Math.floor(n.x / cw), j = Math.floor(n.y / ch);
+    if (i < 0 || j < 0 || i >= iw || j >= ih) continue;
+    text(ui, x0 + 1 + i, y0 + 1 + j, "o", n.id === p.nestSel ? u.hi : u.ok, null);
   }
   for (const a of p.animals) {
     const i = Math.floor(a.x / cw), j = Math.floor(a.y / ch);
     if (i < 0 || j < 0 || i >= iw || j >= ih) continue;
     const dead = a.task === "dead";
-    const g = dead ? "%" : MINI_GLYPH[a.sp] ?? SPECIES[a.sp]?.name[0] ?? "?";
+    const glyph = MINI_GLYPH[a.sp] ?? SPECIES[a.sp]?.name[0] ?? "?";
+    const g = a.id === p.selected ? "@" : dead ? "%" : a.growth < 1 ? glyph.toLowerCase() : glyph;
     const col = a.id === p.selected ? u.hi : dead ? u.dim : SPECIES[a.sp]?.behavior.diet === "carnivore" ? u.bad : u.text;
     text(ui, x0 + 1 + i, y0 + 1 + j, g, col, null);
   }
 }
 
+/** Coin haut gauche de la mini-carte à la dernière image (cellules d'interface), pour convertir un clic. */
+let miniRect = { x: 0, y: 0 };
+
+/** Largeur du panneau « Temps et météo ». */
+const TIME_W = 34;
+
 /**
- * Horloge de la réserve (en haut à gauche) : heure, moment de la journée, frise des 24 h avec
- * le soleil ou la lune, et vitesse du temps (clic pour accélérer : x1, x4, x16).
+ * Temps et météo (haut gauche) : heure, moment de la journée, vitesse ; frise des 24 h avec le soleil
+ * ou la lune ; puis la météo (saison, frise de l'année, ciel, température). Compact (h = 4) : deux lignes.
+ * Cliquer l'horloge accélère le temps (comme T).
  */
-function drawClock(s: GameState, th: Theme, ui: Frame) {
+function drawTime(s: GameState, th: Theme, ui: Frame, x: number, y: number, W: number, H: number) {
   const u = th.ui;
-  const W = 32, H = 7, x = 1, y = UI_TOP;
   const hour = s.clock;
   const day = daylight(hour) > 0.5;
-  panel(ui, th, x, y, W, H, "Horloge");
-  region("park:clock", x, y, W, H);
-  // Astre + heure + moment.
-  const sun: RGB = [255, 196, 64], moon: RGB = [150, 180, 255];
-  text(ui, x + 2, y + 1, day ? "(O)" : "(C", day ? sun : moon, u.panel, u.alpha);
-  text(ui, x + 7, y + 1, clockLabel(hour), u.text, u.panel, u.alpha);
-  text(ui, x + 14, y + 1, periodName(hour), u.hi, u.panel, u.alpha);
-  // Frise des 24 heures : jour en tirets, nuit en points, l'astre à l'heure courante.
-  const track = W - 6, tx = x + 3, ty = y + 3;
+  panel(ui, th, x, y, W, H, "Temps et meteo");
+  region("park:clock", x, y, W, 4, { tip: "Clic : accelerer le temps (T)" });
+  const iw = W - 4, ix = x + 2;
+  // Astre (forme + couleur) + heure + moment + vitesse.
+  const sun: RGB = [200, 130, 0], moon: RGB = [60, 90, 170];
+  text(ui, ix, y + 1, day ? "(O)" : "(C", day ? sun : moon, u.panel, u.alpha);
+  text(ui, ix + 4, y + 1, clockLabel(hour), u.text, u.panel, u.alpha);
+  const sp = `x${s.clockSpeed}`;
+  text(ui, ix + 10, y + 1, periodName(hour).slice(0, iw - 11 - sp.length), u.hi, u.panel, u.alpha);
+  text(ui, ix + iw - sp.length, y + 1, sp, s.clockSpeed > 1 ? u.hi : u.dim, u.panel, u.alpha);
+  if (H <= 4) {
+    drawWeatherRows(s, th, ui, ix, y + 2, iw, true);
+    return;
+  }
+  // Frise des 24 heures : jour en =, aube et crépuscule en -, nuit en points, l'astre à l'heure courante.
+  const track = iw - 2, tx = ix + 1, ty = y + 2;
   text(ui, tx - 1, ty, "[", u.border, u.panel, u.alpha);
   text(ui, tx + track, ty, "]", u.border, u.panel, u.alpha);
   for (let i = 0; i < track; i++) {
@@ -569,9 +825,7 @@ function drawClock(s: GameState, th: Theme, ui: Frame) {
   text(ui, tx, ty + 1, "0h", u.dim, u.panel, u.alpha);
   text(ui, tx + Math.floor(track / 2) - 1, ty + 1, "12h", u.dim, u.panel, u.alpha);
   text(ui, tx + track - 3, ty + 1, "24h", u.dim, u.panel, u.alpha);
-  text(ui, x + 2, y + 5, "Clic : accelerer le temps", u.dim, u.panel, u.alpha);
-  const sp = `x${s.clockSpeed}`;
-  text(ui, x + W - 2 - sp.length, y + 1, sp, s.clockSpeed > 1 ? u.hi : u.dim, u.panel, u.alpha);
+  drawWeatherRows(s, th, ui, ix, y + 5, iw);
 }
 
 /**
@@ -606,4 +860,26 @@ function drawNavDebug(s: GameState, th: Theme, world: Frame, camX: number, camY:
     }
     if (a.stuckT > 1.5) mark(a.x, a.y - 40, 33, [255, 80, 80]);
   }
+}
+
+/**
+ * Barres d'avancement à afficher au-dessus du monde : incubation des nids et gestation des
+ * espèces vivipares (`Animal.gestation`, 0..1, si la simulation la renseigne). En cellules monde.
+ */
+function progressBars(s: GameState): { cx: number; cy: number; v: number; selected: boolean }[] {
+  const p = s.park, out: { cx: number; cy: number; v: number; selected: boolean }[] = [];
+  const x0 = p.cam.x - 200, x1 = p.cam.x + metrics.cols * CELL_W + 200;
+  const y0 = p.cam.y - 200, y1 = p.cam.y + metrics.rows * CELL_H + 200;
+  for (const n of p.nests) {
+    if (n.hatched !== undefined || n.x < x0 || n.x > x1 || n.y < y0 || n.y > y1) continue;
+    const r = nestRaster(n);
+    out.push({ cx: r.cx + r.w / 2, cy: r.cy, v: Math.min(1, n.t / INCUBATION), selected: n.id === p.nestSel || n.id === p.nestHover });
+  }
+  for (const a of p.animals) {
+    const g = a.gestation;
+    if (!g || a.task === "dead" || a.x < x0 || a.x > x1 || a.y < y0 || a.y > y1) continue;
+    const r = animalRaster(a, s.time);
+    out.push({ cx: r.cx + r.w / 2, cy: r.cy, v: Math.min(1, g), selected: a.id === p.selected || a.id === p.hover });
+  }
+  return out;
 }

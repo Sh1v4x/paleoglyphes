@@ -8,9 +8,10 @@ import { metrics, uiCellAt } from "../render/metrics";
 import { hash2 } from "../rng";
 import { ofName, SPECIES } from "../species";
 import type { GameState } from "../state";
-import { bar, button, hitAt, panel, text, wrap } from "../ui/kit";
+import { calm } from "../settings";
+import { bar, button, hitAt, panel, text, wrap, type Hint } from "../ui/kit";
 import { toast } from "../ui/toast";
-import { EXTRA_BY_ID } from "./dig-fossils";
+import { EGG_FACT, EXTRA_BY_ID } from "./dig-fossils";
 import { buildBackdrop, generateSite, hardness, MATRIX_INFO, SUB, type Backdrop, type Fossil, type Site } from "./dig-site";
 import { SM } from "./scenes.mat";
 import { UI_TOP, type Scene } from "./types";
@@ -43,10 +44,12 @@ export interface DigState {
   shake: number;
   hint: { text: string; t: number } | null;
   backdrop: Backdrop | null;
+  /** Indice de fouille (gagné au quiz du carnet) : contours des fossiles cachés visibles jusqu'à cet instant. */
+  reveal: number;
 }
 
 export function createDigState(): DigState {
-  return { site: null, tool: "brush", dust: [], digging: false, last: null, focus: -1, hover: null, tip: 0, tipT: 0, shake: -9, hint: null, backdrop: null };
+  return { site: null, tool: "brush", dust: [], digging: false, last: null, focus: -1, hover: null, tip: 0, tipT: 0, shake: -9, hint: null, backdrop: null, reveal: -9 };
 }
 
 const TOOLS: Record<Tool, { name: string; key: string; code: string; rx: number; ry: number; rate: number; desc: string }> = {
@@ -65,6 +68,7 @@ const TIPS = [
   "Un fossile, c'est un os ou la roche a remplace la matiere, petit a petit, en des millions d'annees.",
   "Les os se fossilisent surtout s'ils sont vite recouverts de sable ou de boue, a l'abri de l'air.",
   "A Hell Creek, on trouve les derniers dinosaures, juste avant la chute de la grande meteorite.",
+  "Un oeuf fossile, c'est rare ! Sa coquille poreuse laissait respirer le petit qui grandissait dedans.",
 ];
 
 const LEFT_W = 27, RIGHT_W = 34;
@@ -119,7 +123,7 @@ function fossilAt(site: Site, x: number, y: number): Fossil | undefined {
 function breakFossil(s: GameState, site: Site, f: Fossil) {
   f.state = "broken";
   f.t0 = s.time;
-  const what = f.kind === "bone" ? "l'os s'est brise" : "le fossile s'est brise";
+  const what = f.kind === "bone" ? "l'os s'est brise" : f.kind === "egg" ? "l'oeuf s'est brise" : "le fossile s'est brise";
   toast(s, `Oh non, ${what} !`, "Le burin tape trop fort. Tout pres d'un os, prends le pinceau (touche E).");
   checkComplete(s, site);
 }
@@ -147,6 +151,13 @@ function reward(s: GameState, f: Fossil) {
   }
   const spec = f.sp ? SPECIES[f.sp] : undefined;
   if (!f.sp || !spec) return;
+  if (f.kind === "egg") {
+    // Œuf fossile : il rejoint l'atelier, où l'on peut l'incuber.
+    p.eggs[f.sp] = (p.eggs[f.sp] ?? 0) + 1;
+    saveProgress(p);
+    toast(s, `${f.label} ! Incube-le a l'atelier.`, EGG_FACT);
+    return;
+  }
   const isNew = addBone(p, f.sp, f.id);
   const have = p.bones[f.sp]?.length ?? 0, need = spec.bones.length;
   if (!isNew) toast(s, `Os trouve : ${f.label}`, "Deja dans la collection : il rejoint les reserves du musee.");
@@ -236,7 +247,8 @@ export const digScene: Scene = {
     };
     for (const k of input.pressed) {
       for (const t of TOOL_ORDER) if (k === TOOLS[t].code) d.tool = t;
-      if (k === "Tab" || k === "Space") d.tool = TOOL_ORDER[(TOOL_ORDER.indexOf(d.tool) + 1) % TOOL_ORDER.length];
+      // Tab sert au focus clavier (cœur) : Espace fait tourner les outils.
+      if (k === "Space") d.tool = TOOL_ORDER[(TOOL_ORDER.indexOf(d.tool) + 1) % TOOL_ORDER.length];
       if (k === "Enter") tryCollect();
     }
     for (const id of input.ui) {
@@ -244,6 +256,12 @@ export const digScene: Scene = {
       if (id === "dig:next" && site.complete) { nextSite(s); return; }
       if (id === "dig:collect") tryCollect();
       if (id === "dig:reveal") revealAll(s, site);
+      // Indice de fouille (quiz du carnet) : dépense un jeton, montre les contours quelques secondes.
+      if (id === "dig:hint" && (s.progress.hints ?? 0) > 0 && !site.complete) {
+        s.progress.hints = (s.progress.hints ?? 0) - 1;
+        saveProgress(s.progress);
+        d.reveal = s.time + HINT_SECONDS;
+      }
     }
 
     // Souris -> cellules du site.
@@ -316,10 +334,31 @@ export const digScene: Scene = {
     world.fg.set(d.backdrop.fg);
     world.bg.set(d.backdrop.bg);
 
-    const shake = s.time - d.shake < 0.12 ? (hash2(Math.floor(s.time * 60), 1, 3) < 0.5 ? -1 : 1) : 0;
+    const shake = !calm() && s.time - d.shake < 0.12 ? (hash2(Math.floor(s.time * 60), 1, 3) < 0.5 ? -1 : 1) : 0;
     drawSite(s, th, world, site, L.ox, L.oy, shake);
+    if (s.time < d.reveal) outlineFossils(th, world, site, L.ox, L.oy, site.W / 2, site.H / 2, site.W * 0.75, site.H * 0.75, 0.6 + 0.4 * Math.sin(s.time * 4), false);
     drawCursor(s, th, world, site, L.ox, L.oy);
     drawUi(s, th, ui, site);
+  },
+
+  hints(s) {
+    const site = s.dig.site;
+    const h: Hint[] = [["Glisser", "creuser"], ["E R F", "outil"], ["Clic", "recolter un fossile degage"]];
+    if (site?.complete) h.push(["Entree", "site suivant"]);
+    else h.push(["Entree", "recolter"]);
+    return h;
+  },
+
+  help() {
+    return [
+      ["Glisser", "creuser avec l'outil choisi"],
+      ["E", "pinceau : lent, sans danger pour les os"],
+      ["R", "burin : rapide, mais casse les os qu'il touche"],
+      ["F", "loupe : revele la forme des fossiles caches"],
+      ["Espace", "outil suivant"],
+      ["Clic", "recolter un fossile assez degage"],
+      ["Entree", "recolter, ou passer au site suivant une fois termine"],
+    ];
   },
 };
 
@@ -516,6 +555,34 @@ function drawSite(s: GameState, th: Theme, f: Frame, site: Site, ox: number, oy:
   }
 }
 
+/** Durée de l'indice de fouille (s). */
+const HINT_SECONDS = 6;
+
+/**
+ * Contours des fossiles encore cachés dans une ellipse (cellules du site) : la loupe autour du curseur,
+ * ou tout le site pour un indice de fouille. `fade` : plus pâle vers le bord de l'ellipse.
+ */
+function outlineFossils(th: Theme, f: Frame, site: Site, ox: number, oy: number, cx: number, cy: number, rx: number, ry: number, pulse: number, fade: boolean) {
+  const { W, H, owner, cover, fossils } = site;
+  const hi = th.ui.hi;
+  for (let y = Math.max(0, Math.floor(cy - ry)); y <= Math.min(H - 1, Math.ceil(cy + ry)); y++)
+    for (let x = Math.max(0, Math.floor(cx - rx)); x <= Math.min(W - 1, Math.ceil(cx + rx)); x++) {
+      const e = ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2;
+      const k = y * W + x, o = owner[k];
+      if (e >= 1 || o < 0 || cover[k] <= 0 || fossils[o].state !== "buried") continue;
+      const border = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+        const xx = x + dx, yy = y + dy;
+        return xx < 0 || yy < 0 || xx >= W || yy >= H || owner[yy * W + xx] !== o;
+      });
+      if (!border && (x + y) % 3 !== 0) continue;
+      const X = ox + x, Y = oy + y;
+      if (X < 0 || Y < 0 || X >= f.cols || Y >= f.rows) continue;
+      const idx = Y * f.cols + X, lum = 0.55 + 0.45 * pulse * (fade ? 1 - e : 1);
+      f.ch[idx] = border ? 58 : 46;
+      setFg(f, idx, hi[0] * lum, hi[1] * lum, hi[2] * lum);
+    }
+}
+
 function drawCursor(s: GameState, th: Theme, f: Frame, site: Site, ox: number, oy: number) {
   const d = s.dig, h = d.hover;
   if (!h) return;
@@ -531,20 +598,7 @@ function drawCursor(s: GameState, th: Theme, f: Frame, site: Site, ox: number, o
   };
 
   // Loupe : révèle le contour des fossiles cachés.
-  if (d.tool === "loupe") {
-    const { W, H, owner, cover, fossils } = site;
-    for (let y = Math.max(0, Math.floor(cy - T.ry)); y <= Math.min(H - 1, Math.ceil(cy + T.ry)); y++)
-      for (let x = Math.max(0, Math.floor(cx - T.rx)); x <= Math.min(W - 1, Math.ceil(cx + T.rx)); x++) {
-        const e = ((x + 0.5 - cx) / T.rx) ** 2 + ((y + 0.5 - cy) / T.ry) ** 2;
-        const k = y * W + x, o = owner[k];
-        if (e >= 1 || o < 0 || cover[k] <= 0 || fossils[o].state !== "buried") continue;
-        const border = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
-          const xx = x + dx, yy = y + dy;
-          return xx < 0 || yy < 0 || xx >= W || yy >= H || owner[yy * W + xx] !== o;
-        });
-        if (border || (x + y) % 3 === 0) put(x, y, border ? 58 : 46, hi.map((v) => v * (0.55 + 0.45 * pulse * (1 - e))));
-      }
-  }
+  if (d.tool === "loupe") outlineFossils(th, f, site, ox, oy, cx, cy, T.rx, T.ry, pulse, true);
 
   // Empreinte de l'outil.
   for (let y = Math.floor(cy - T.ry - 1); y <= cy + T.ry + 1; y++)
@@ -586,10 +640,14 @@ function drawUi(s: GameState, th: Theme, ui: Frame, site: Site) {
   const lh = 3 + TOOL_ORDER.length * 2 + desc.length + 1 + (layerName ? 3 + info.length : 0) + (showFo ? 5 : 0) + 1;
   panel(ui, th, lx, ly, lw, lh, "Outils");
   // Raccourci de test (dev uniquement) : finir le site d'un clic.
-  if (DEV && !site.complete) button(ui, th, "dig:reveal", lx, ly + lh + 1, "Tout degager (test)", { w: lw });
+  if (DEV && !site.complete) button(ui, th, "dig:reveal", lx, ly + lh + 1, "Tout degager (test)", { w: lw, variant: "ghost", tip: "Test : degager tout le site" });
+  // Indice de fouille gagné au quiz du carnet : montre tous les fossiles cachés quelques secondes.
+  const hints = s.progress.hints ?? 0, hy = ly + lh + (DEV && !site.complete ? 3 : 1);
+  button(ui, th, "dig:hint", lx, hy, `Utiliser un indice (${hints})`, { w: lw, disabled: hints <= 0 || site.complete || s.time < d.reveal, tip: "Montre les fossiles caches quelques secondes" });
+  if (hints <= 0 && hy + 1 < ui.rows - 1) T(lx + 1, hy + 1, "A gagner au quiz du Carnet", u.dim);
   let y = ly + 2;
   for (const t of TOOL_ORDER) {
-    button(ui, th, `dig:tool:${t}`, lx + 2, y, `${TOOLS[t].name} (${TOOLS[t].key})`, { w: inner, active: d.tool === t });
+    button(ui, th, `dig:tool:${t}`, lx + 2, y, TOOLS[t].name, { w: inner, toggle: true, active: d.tool === t, key: TOOLS[t].key, tip: TOOLS[t].desc });
     y += 2;
   }
   desc.forEach((l) => T(lx + 2, y++, l, u.dim));
@@ -604,19 +662,19 @@ function drawUi(s: GameState, th: Theme, ui: Frame, site: Site) {
   }
   if (fo && showFo) {
     const pct = fo.exposed / fo.cells;
-    T(lx + 2, y++, fo.kind === "bone" ? "Os en cours" : "Fossile en cours", u.hi);
+    T(lx + 2, y++, fo.kind === "bone" ? "Os en cours" : fo.kind === "egg" ? "Oeuf fossile en cours !" : "Fossile en cours", u.hi);
     T(lx + 2, y, "Degage", u.dim);
     bar(ui, th, lx + 9, y++, inner - 7, pct / READY, pct >= READY ? u.ok : u.hi);
     T(lx + 2, y, "Etat", u.dim);
     bar(ui, th, lx + 9, y++, inner - 7, fo.integrity, fo.integrity < 0.5 ? u.bad : u.ok);
-    if (ready(fo)) button(ui, th, "dig:collect", lx + 2, y, "Recolter (Entree)", { w: inner });
+    if (ready(fo)) button(ui, th, "dig:collect", lx + 2, y, "Recolter", { w: inner, key: "Entree", variant: "primary" });
     else T(lx + 2, y, pct > 0 ? "Continue de degager..." : "Quelque chose de dur ici !", u.dim);
   }
 
   // --- Site (droite) ---
   const rw = RIGHT_W, rx = ui.cols - rw - 1, ry = UI_TOP, rin = rw - 4;
   const bones = site.fossils.filter((f) => f.kind === "bone");
-  const extras = site.fossils.filter((f) => f.kind === "extra" && f.state === "done");
+  const extras = site.fossils.filter((f) => f.kind !== "bone" && f.state === "done");
   const tip = wrap(TIPS[d.tip], rin);
   const name = wrap(site.name.replace(/^Site \d+ - /, ""), rin);
   const rh = 4 + name.length + bones.length + (extras.length ? extras.length + 1 : 0) + 2 + tip.length + (site.complete ? 4 : 1);
@@ -633,15 +691,15 @@ function drawUi(s: GameState, th: Theme, ui: Frame, site: Site) {
   }
   if (extras.length) {
     T(rx + 2, y++, "Bonus :", u.dim);
-    for (const f of extras) T(rx + 2, y++, `[*] ${f.label}`.slice(0, rin), u.hi);
+    for (const f of extras) T(rx + 2, y++, `${f.kind === "egg" ? "[o]" : "[*]"} ${f.label}`.slice(0, rin), u.hi);
   }
   y++;
   T(rx + 2, y++, "Le savais-tu ?", u.hi);
   tip.forEach((l) => T(rx + 2, y++, l));
   if (site.complete) {
     y++;
-    T(rx + 2, y++, "Site termine, bravo !", u.ok);
-    button(ui, th, "dig:next", rx + 2, y, "Site suivant (Entree)", { w: rin });
+    T(rx + 2, y++, "* Site termine, bravo !", u.ok);
+    button(ui, th, "dig:next", rx + 2, y, "Site suivant", { w: rin, key: "Entree", variant: "primary" });
   }
 
   // --- Bulle sous la souris ---
@@ -660,6 +718,4 @@ function drawUi(s: GameState, th: Theme, ui: Frame, site: Site) {
     T(x + 2, ui.rows - 4, d.hint.text);
   }
 
-  text(ui, 1, ui.rows - 1, "Glisser : creuser   E/R/F ou Tab : outil   Clic sur un fossile degage : le recolter   Entree : recolter",
-    u.dim, u.panel, 0.7);
 }

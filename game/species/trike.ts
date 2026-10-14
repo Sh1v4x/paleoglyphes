@@ -229,6 +229,10 @@ export const TRIKE: Species = {
       text: "On l'a longtemps cru solitaire, mais des gisements de plusieurs jeunes ensemble suggèrent qu'il vivait parfois en petits groupes." },
     { id: "hell-creek", title: "Star de Hell Creek", unlock: "drink",
       text: "C'est le dinosaure le plus courant de Hell Creek : on y a trouvé des centaines de crânes. Il a vécu jusqu'à la toute fin de l'ère des dinosaures." },
+    { id: "oeufs-mous", title: "Des œufs à coquille molle", unlock: "nest",
+      text: "On n'a jamais trouvé d'œuf de tricératops. Mais son cousin Protoceratops pondait des œufs à coquille souple, comme les tortues : ils étaient sûrement enterrés sous la terre et les plantes pour rester humides et au chaud." },
+    { id: "cornes-jeune", title: "Des cornes qui se retournent", unlock: "baby",
+      text: "Chez les jeunes tricératops, les grandes cornes pointaient vers l'arrière. En grandissant, elles se redressaient puis se courbaient vers l'avant : on peut deviner l'âge d'un crâne à la forme de ses cornes." },
   ],
   bones: [
     { id: "crane", name: "Crâne et bec" },

@@ -1,4 +1,4 @@
-import { CELL_H, CELL_W, DEV, PX_PER_M } from "../config";
+import { CELL_H, CELL_W, DEV, PX_PER_M, WORLD_H, WORLD_W } from "../config";
 import type { Input } from "../input";
 import type { RGB, Theme } from "../palette";
 import { saveProgress } from "../progress";
@@ -8,12 +8,16 @@ import { rasterize, type Prim, type Raster } from "../render/raster";
 import { drawRaster } from "../render/sprite";
 import { hash2 } from "../rng";
 import { discovered, shownName, SPECIES } from "../species";
+import { eggModel } from "../species/eggs";
+import { liveBirth, MAX_PER_SPECIES } from "../species/life";
 import type { Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
-import { bar, button, hitAt, panel, text, wrap } from "../ui/kit";
+import { calm } from "../settings";
+import { actions, button, buttonW, hitAt, overlay, panel, put as uiPut, SP, text, wrap, type Hint } from "../ui/kit";
+import { toast } from "../ui/toast";
 import { unlockTrigger } from "../unlock";
-import { bonePrims, clipCols, IDLE_POSE, outlineRaster, primBounds, rasterMid, scaleAll, skeletonPrims } from "./dig-fossils";
-import { parkScene, syncPopulation } from "./park";
+import { bonePrims, clipCols, deName, IDLE_POSE, outlineRaster, primBounds, rasterMid, scaleAll, skeletonPrims } from "./dig-fossils";
+import { canStand, centerOn, observeNest, parkScene, syncPopulation } from "./park";
 import { SM } from "./scenes.mat";
 import { UI_TOP, type Scene } from "./types";
 
@@ -36,10 +40,14 @@ export interface LabState {
   /** Fin de synthèse ; `first` = première fois : l'espèce mystère est révélée. */
   done: { sp: SpeciesId; added: number; t: number; first: boolean } | null;
   hint: { text: string; t: number } | null;
+  /** Dernier nid installé depuis l'atelier (bouton « Voir le nid »). */
+  nest?: { sp: SpeciesId; id: number; t: number } | null;
+  /** Défilement de la liste des espèces (lignes). */
+  scroll?: number;
 }
 
 export function createLabState(): LabState {
-  return { species: null, placed: {}, held: null, drag: null, flash: null, shake: null, synth: null, done: null, hint: null };
+  return { species: null, placed: {}, held: null, drag: null, flash: null, shake: null, synth: null, done: null, hint: null, nest: null };
 }
 
 const LEFT_W = 28, RIGHT_W = 34;
@@ -246,6 +254,44 @@ function finishSynth(s: GameState, spec: Species) {
   if (first) unlockTrigger(s, spec.id, "assemble");
 }
 
+/** Œufs fossiles prêts à incuber pour cette espèce (jamais pour les vivipares comme le mosasaure). */
+const eggsOf = (s: GameState, sp: SpeciesId) => (liveBirth(SPECIES[sp]) || !isAssembled(s, sp) ? 0 : (s.progress.eggs[sp] ?? 0));
+
+/** Individus vivants + œufs en couveuse de l'espèce dans la réserve (plafond MAX_PER_SPECIES). */
+function parkCount(s: GameState, sp: SpeciesId): number {
+  const p = s.park;
+  return p.animals.filter((a) => a.sp === sp && a.task !== "dead").length + p.nests.filter((n) => n.sp === sp && n.hatched === undefined).reduce((k, n) => k + n.eggs, 0);
+}
+
+/**
+ * Incube un œuf fossile : un nid apparaît dans la réserve, près des congénères s'il y en a
+ * (sinon n'importe où sur la terre ferme), loin des autres nids.
+ */
+function incubate(s: GameState, spec: Species) {
+  const p = s.progress;
+  if (eggsOf(s, spec.id) <= 0) return;
+  // La réserve doit exister (monde, population) pour y poser le nid.
+  parkScene.enter?.(s);
+  if (parkCount(s, spec.id) >= MAX_PER_SPECIES) return hint(s, `La reserve compte deja ${MAX_PER_SPECIES} ${spec.name}s : garde l'oeuf pour plus tard.`);
+  const park = s.park;
+  const kin = park.animals.filter((a) => a.sp === spec.id && a.task !== "dead");
+  const free = (x: number, y: number) => canStand(s, spec.id, x, y) && !park.nests.some((n) => Math.hypot(n.x - x, n.y - y) < 70);
+  let pos: { x: number; y: number } | null = null;
+  for (let k = 0; k < 400 && !pos; k++) {
+    const a = kin.length && k < 250 ? kin[k % kin.length] : undefined;
+    const x = a ? a.x + (Math.random() - 0.5) * 320 : 200 + Math.random() * (WORLD_W - 400);
+    const y = a ? a.y + (Math.random() - 0.5) * 150 : 200 + Math.random() * (WORLD_H - 400);
+    if (free(x, y)) pos = { x, y };
+  }
+  if (!pos) return hint(s, "Pas de place pour un nid dans la reserve, reessaie plus tard.");
+  p.eggs[spec.id] = (p.eggs[spec.id] ?? 1) - 1;
+  saveProgress(p);
+  const id = park.nextNest++;
+  park.nests.push({ id, sp: spec.id, x: pos.x, y: pos.y, eggs: 1, t: 0, guard: 0, fossil: true });
+  s.lab.nest = { sp: spec.id, id, t: s.time };
+  toast(s, "Oeuf mis a incuber !", `Un nid ${deName(spec.name)} t'attend dans la reserve. Va le voir eclore !`);
+}
+
 /** Espèce ouverte par défaut : une espèce commencée mais pas encore assemblée, sinon la première découverte. */
 function pickDefault(s: GameState): SpeciesId | null {
   const list = discovered(s.progress);
@@ -276,11 +322,27 @@ export const labScene: Scene = {
       if (k === "ArrowDown" || k === "KeyS") select(list[(i + 1) % list.length].id);
       if ((k === "Enter" || k === "Space") && !l.synth) autoPlace(s, spec);
     }
+    // Molette sur la liste des espèces : défilement.
+    const mc = uiCellAt(input.mouse.x, input.mouse.y);
+    if (input.mouse.wheel && mc.x >= listRect.x && mc.x < listRect.x + listRect.w && mc.y >= listRect.y && mc.y < listRect.y + listRect.h) {
+      l.scroll = Math.max(0, (l.scroll ?? 0) + Math.sign(input.mouse.wheel) * 2);
+      input.mouse.wheel = 0;
+    }
     for (const id of input.ui) {
+      if (id === "lab:dismiss") l.done = null;
       if (id.startsWith("lab:sp:")) select(id.slice(7) as SpeciesId);
       if (id === "lab:auto") autoPlace(s, spec);
       if (id === "lab:all") for (let n = 0; n < spec.bones.length; n++) autoPlace(s, spec);
       if (id === "lab:synth") startSynth(s, spec);
+      if (id === "lab:incubate") incubate(s, spec);
+      if (id === "lab:seenest" && l.nest) {
+        s.mode = "park";
+        parkScene.enter?.(s);
+        const n = s.park.nests.find((m) => m.id === l.nest?.id);
+        if (n) { observeNest(s, n); centerOn(s, n.x, n.y); }
+        l.nest = null;
+        return;
+      }
       if (id === "lab:park") {
         s.mode = "park";
         parkScene.enter?.(s);
@@ -336,6 +398,29 @@ export const labScene: Scene = {
     drawBackdrop(th, world, L);
     if (spec) drawStage(s, th, world, spec, L);
     drawUi(s, th, ui, spec, L);
+  },
+
+  hints(s) {
+    const h: Hint[] = [["Glisser", "poser un os"], ["Entree", "placer un os"], ["Haut/Bas", "espece"]];
+    if (s.lab.held) h.unshift(["Clic", "poser l'os saisi"]);
+    return h;
+  },
+
+  help() {
+    return [
+      ["Glisser", "deposer un os du plateau sur sa place dans le squelette"],
+      ["Clic", "saisir un os du plateau, puis clic sur sa place"],
+      ["Entree", "placer automatiquement un os (ou Espace)"],
+      ["Haut/Bas", "espece precedente / suivante (molette sur la liste : defiler)"],
+      ["Echap", "lacher l'os saisi, fermer le message de synthese"],
+    ];
+  },
+
+  back(s) {
+    const l = s.lab;
+    if (l.done) { l.done = null; return true; }
+    if (l.held) { l.held = null; return true; }
+    return false;
   },
 };
 
@@ -471,6 +556,21 @@ function drawStage(s: GameState, th: Theme, f: Frame, spec: Species, L: Layout) 
     }
   }
 
+  // Œufs fossiles posés sur l'établi, avec une douce lueur : ils attendent la couveuse.
+  const eggs = eggsOf(s, spec.id);
+  if (eggs > 0 && !trayBoxes(s, spec, L).length) {
+    const er = cached(`${spec.id}|egg`, () => scaleAll(eggModel(spec.id, 0), 3));
+    const glow = 0.35 + 0.2 * Math.sin(s.time * 2.2);
+    const bench = th.mats[SM.Bench].color;
+    const halo = bench.map((v, i) => v + (hi[i] - v) * glow) as unknown as RGB;
+    for (let k = 0; k < Math.min(3, eggs); k++) {
+      const x0 = eggX(L) + k * (er.w + 3), y0 = L.trayY + L.trayH - 3;
+      outlineRaster(f, er, x0, y0, halo);
+      if (th.outline) outlineRaster(f, er, x0, y0, ink);
+      drawRaster(f, th, er, x0, y0, { light: 1.05 + glow * 0.5 });
+    }
+  }
+
   // Plateau : un casier par os trouvé.
   for (const b of trayBoxes(s, spec, L)) {
     const sel = l.held === b.bone, dragging = l.drag?.bone === b.bone;
@@ -501,27 +601,53 @@ function drawStage(s: GameState, th: Theme, f: Frame, spec: Species, L: Layout) 
   }
 }
 
+/** Colonne monde du premier œuf posé sur l'établi. */
+const eggX = (L: Layout) => L.left + 10;
+
 function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L: Layout) {
   const l = s.lab, u = th.ui, p = s.progress;
   const T = (x: number, y: number, str: string, col: RGB = u.text) => text(ui, x, y, str, col, u.panel, u.alpha);
 
   // --- Espèces (gauche) ---
   // Seules les espèces dont on a trouvé des os apparaissent ; leur nom reste caché jusqu'à l'assemblage.
-  const lx = 1, ly = UI_TOP, inner = LEFT_W - 4;
+  // Une ligne par espèce (nom, os trouvés), défilante à la molette si la liste dépasse.
+  const lx = SP.margin, ly = UI_TOP, inner = LEFT_W - 4;
   const list = discovered(p);
-  const lh = 2 + Math.max(1, list.length) * 3 + (list.length ? 0 : 2);
+  const anyAsm = list.some((sp) => isAssembled(s, sp.id));
+  const maxH = ui.rows - 2 - ly;
+  const want = 2 + Math.max(1, list.length) + (list.length ? 0 : 3) + (anyAsm ? 2 : 0);
+  const lh = Math.max(6, Math.min(maxH, want));
+  const view = Math.max(1, lh - 2 - (anyAsm ? 2 : 0) - (list.length ? 0 : 3));
   panel(ui, th, lx, ly, LEFT_W, lh, "Especes");
+  listRect = { x: lx, y: ly, w: LEFT_W, h: lh, view };
   let y = ly + 1;
-  if (!list.length) wrap("Aucun os pour l'instant. Va fouiller (touche 2) : chaque espece trouvee apparaitra ici.", inner).forEach((t, i) => T(lx + 2, y + i, t, u.dim));
-  for (const sp of list) {
-    const found = foundOf(s, sp).length, need = sp.bones.length;
-    const label = shownName(p, sp.id);
-    button(ui, th, `lab:sp:${sp.id}`, lx + 2, y, isAssembled(s, sp.id) ? `${label} *` : label, { w: inner, active: l.species === sp.id });
-    bar(ui, th, lx + 2, y + 1, inner - 6, found / Math.max(1, need), found >= need ? u.ok : u.hi);
-    T(lx + inner - 3, y + 1, `${found}/${need}`.padStart(5), u.dim);
-    y += 3;
+  if (!list.length) wrap("Aucun os pour l'instant. Va fouiller (touche 2) : chaque espece trouvee apparaitra ici.", inner).slice(0, lh - 2).forEach((t, i) => T(lx + 2, y + i, t, u.dim));
+  const maxScroll = Math.max(0, list.length - view);
+  // Nouvelle espèce choisie : elle revient dans la partie visible.
+  const si = list.findIndex((sp) => sp.id === l.species);
+  let off = Math.max(0, Math.min(maxScroll, l.scroll ?? 0));
+  if (l.species !== listSel) {
+    listSel = l.species;
+    if (si >= 0 && si < off) off = si;
+    if (si >= off + view) off = si - view + 1;
   }
-  if (list.some((sp) => isAssembled(s, sp.id))) T(lx + 2, ly + lh, " * = deja assemble ", u.dim);
+  l.scroll = off;
+  for (let i = off; i < Math.min(list.length, off + view); i++) {
+    const sp = list[i];
+    const found = foundOf(s, sp).length, need = sp.bones.length;
+    // Nom dans le bouton ; os trouvés et « * » (assemblé) dans la colonne de droite.
+    const cnt = `${found}/${need}${isAssembled(s, sp.id) ? " *" : ""}`;
+    const bw = LEFT_W - 9;
+    button(ui, th, `lab:sp:${sp.id}`, lx + 2, y, shownName(p, sp.id), { w: bw, active: l.species === sp.id, tip: `${shownName(p, sp.id)} : ${found} os sur ${need}` });
+    T(lx + 3 + bw, y, cnt, found >= need ? u.ok : u.dim);
+    y++;
+  }
+  if (maxScroll > 0) {
+    // Ascenseur.
+    const pos = Math.round((off / maxScroll) * (view - 1));
+    for (let i = 0; i < view; i++) uiPut(ui, lx + LEFT_W - 1, ly + 1 + i, i === pos ? 35 : 58, i === pos ? u.hi : u.dim, u.panel, u.alpha);
+  }
+  if (anyAsm) T(lx + 2, ly + lh - 2, "* = deja assemble", u.dim);
 
   if (!spec) return;
   const found = foundOf(s, spec), placed = placedOf(s, spec);
@@ -560,6 +686,12 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
     }
     lines.push(["", u.text]);
     lines.push([`Dans la reserve : ${p.population[spec.id] ?? 0} / ${MAX_POP}`, u.dim]);
+    const eggs = eggsOf(s, spec.id);
+    if (eggs > 0) {
+      lines.push(["", u.text]);
+      lines.push([`Oeufs fossiles : ${eggs}`, u.hi]);
+      wrap("Incube-le : il eclora dans un nid de la reserve.", rin).forEach((t) => lines.push([t, u.dim]));
+    }
   } else {
     wrap("Espece encore inconnue. Fouille les sites (touche 2) pour trouver ses os : sa silhouette apparaitra ici.", rin).forEach((t) => lines.push([t, u.dim]));
   }
@@ -568,11 +700,20 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
   lines.forEach(([t, c], i) => T(rx + 2, ry + 1 + i, t, c));
   let by = ry + rh - 2 + 2;
   const unplaced = found.some((id) => !placed.includes(id));
+  if (eggsOf(s, spec.id) > 0 && !l.synth) {
+    const full = parkCount(s, spec.id) >= MAX_PER_SPECIES;
+    button(ui, th, "lab:incubate", rx, by, full ? "Reserve pleine" : "Incuber un oeuf", { w: rw, disabled: full, variant: "primary", tip: "L'oeuf eclora dans un nid de la reserve" });
+    by += 2;
+  }
+  if (l.nest && l.nest.sp === spec.id && !l.synth) {
+    button(ui, th, "lab:seenest", rx, by, "Voir le nid", { w: rw, tip: "Aller voir le nid dans la reserve" });
+    by += 2;
+  }
   if (known && unplaced && !l.synth) {
-    button(ui, th, "lab:auto", rx, by, "Placer un os (Entree)", { w: rw });
+    button(ui, th, "lab:auto", rx, by, "Placer un os", { w: rw, key: "Entree", tip: "Place automatiquement un os trouve" });
     by += 2;
     // Raccourci de test (dev uniquement).
-    if (DEV) { button(ui, th, "lab:all", rx, by, "Tout placer (test)", { w: rw }); by += 2; }
+    if (DEV) { button(ui, th, "lab:all", rx, by, "Tout placer (test)", { w: rw, variant: "ghost", tip: "Test : placer tous les os trouves" }); by += 2; }
   }
 
   // --- Grand bouton de synthèse, sous le squelette ---
@@ -585,23 +726,26 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
     const sub = !ok ? `Maximum : ${MAX_POP} individus par espece.`
       : l.done.added > 1 ? `${l.done.added} ${spec.name}s vivent maintenant dans la reserve.` : `Ton ${spec.name} vit maintenant dans la reserve.`;
     const b1 = "Voir dans la reserve", b2 = "Encore un";
-    const b1w = b1.length + 4, b2w = b2.length + 4, gap = 3;
-    const bw = b1w + gap + b2w;
-    const w = Math.max(msg.length, sub.length, bw) + 8, h = 7;
+    const bw = buttonW(b1) + SP.gap + buttonW(b2);
+    const w = Math.min(ui.cols - 2, Math.max(msg.length, sub.length, bw) + 8), h = 7;
     // Sous l'estrade, pour ne pas cacher l'animal fraîchement synthétisé.
-    const x = midUi - Math.floor(w / 2), y = Math.min(btnY, ui.rows - h - 1);
-    panel(ui, th, x, y, w, h);
-    T(x + Math.floor((w - msg.length) / 2), y + 1, msg, ok ? u.ok : u.bad);
-    T(x + Math.floor((w - sub.length) / 2), y + 3, sub, u.text);
-    const bx = x + Math.floor((w - bw) / 2);
-    button(ui, th, "lab:park", bx, y + 5, b1, { w: b1w, active: true });
-    button(ui, th, "lab:synth", bx + b1w + gap, y + 5, b2, { w: b2w, disabled: (p.population[spec.id] ?? 0) >= MAX_POP });
+    const x = Math.max(1, Math.min(ui.cols - w - 1, midUi - Math.floor(w / 2))), y = Math.min(btnY, ui.rows - h - 2);
+    overlay(() => {
+      panel(ui, th, x, y, w, h, ok ? "Synthese reussie" : "Reserve pleine", { close: "lab:dismiss", overlay: true });
+      T(x + Math.max(2, Math.floor((w - msg.length) / 2)), y + 2, msg.slice(0, w - 4), ok ? u.ok : u.bad);
+      T(x + Math.max(2, Math.floor((w - sub.length) / 2)), y + 3, sub.slice(0, w - 4), u.text);
+      actions(ui, th, x + 2, y + 5, w - 4, [
+        { id: "lab:synth", label: b2, disabled: (p.population[spec.id] ?? 0) >= MAX_POP, tip: "Synthetiser un autre individu" },
+        { id: "lab:park", label: b1, variant: "primary" },
+      ]);
+    });
   } else if (complete(s, spec) && !l.synth) {
     const full = (p.population[spec.id] ?? 0) >= MAX_POP;
     const label = full ? `Reserve pleine (${MAX_POP})` : "SYNTHETISER";
     const w = label.length + 12, x = midUi - Math.floor(w / 2);
     panel(ui, th, x, btnY - 1, w, 3);
-    button(ui, th, "lab:synth", x + 2, btnY, label, { w: w - 4, active: !full && Math.sin(s.time * 4) > -0.3, disabled: full });
+    // Clignotement d'appel coupé si les animations sont réduites.
+    button(ui, th, "lab:synth", x + 2, btnY, label, { w: w - 4, variant: !full && (calm() || Math.sin(s.time * 4) > -0.3) ? "primary" : "secondary", disabled: full, tip: "Ramener l'espece a la vie dans la reserve" });
   } else if (l.synth) {
     const msg = "Synthese en cours...";
     T(midUi - Math.floor(msg.length / 2), btnY, msg, u.hi);
@@ -612,6 +756,13 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
   const hxUi = Math.floor(((L.ox + hm.x) * metrics.cellW) / metrics.uiW);
   const hyUi = Math.ceil(((L.ground + 1) * metrics.cellH) / metrics.uiH);
   text(ui, hxUi - 3, hyUi, "1,75 m", u.dim, u.panel, 0.6);
+
+  // Étiquette sous les œufs de l'établi.
+  const eggs = eggsOf(s, spec.id);
+  if (eggs > 0 && !trayBoxes(s, spec, L).length) {
+    const t = ` Oeuf${eggs > 1 ? "s" : ""} fossile${eggs > 1 ? "s" : ""} x${eggs} `;
+    text(ui, Math.floor((eggX(L) * metrics.cellW) / metrics.uiW) - 2, Math.ceil(((L.trayY + L.trayH - 2) * metrics.cellH) / metrics.uiH), t, u.hi, u.panel, 0.85);
+  }
 
   // Noms des os dans le plateau.
   for (const b of trayBoxes(s, spec, L)) {
@@ -650,6 +801,9 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
     lines.forEach((t, i) => T(x + 2, y0 + 1 + i, t));
   }
 
-  text(ui, 1, ui.rows - 1, "Glisser un os du plateau sur sa place (ou clic, puis clic)   Entree : placer un os   Haut/Bas : espece",
-    u.dim, u.panel, 0.7);
 }
+
+/** Rectangle de la liste des espèces à la dernière image (molette). */
+let listRect = { x: 0, y: 0, w: 0, h: 0, view: 1 };
+/** Espèce choisie à la dernière image (pour ramener la liste sur un nouveau choix). */
+let listSel: SpeciesId | null = null;

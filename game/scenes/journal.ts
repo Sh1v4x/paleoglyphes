@@ -1,25 +1,42 @@
-import { PX_PER_M } from "../config";
+import { liveBirth } from "../species/life";
 import type { Input } from "../input";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
-import { M } from "../render/materials";
-import { metrics } from "../render/metrics";
-import { rasterize, scalePrim, type Prim, type Raster } from "../render/raster";
-import { clearWorld, drawRaster } from "../render/sprite";
+import { scalePrim } from "../render/raster";
+import { drawRaster } from "../render/sprite";
 import { FAUNA, type FaunaDef } from "../species/fauna";
 import { SPECIES, SPECIES_LIST } from "../species";
-import type { FactUnlock, Pose, Species, SpeciesId } from "../species/types";
+import { eggModel } from "../species/eggs";
+import type { FactUnlock, Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
-import { button, over, panel, put, region, text, wrap } from "../ui/kit";
+import { actions, button, buttonW, clip, over, panel, put, region, SP, text, wrap, type Hint } from "../ui/kit";
+import { box, cached, DEFENSE, factKey, fitSprite, fmtKg, fmtM, groundLine, hasF, human, idle, known, knownList, lerp, paper, RH, RW } from "./journal-common";
+import { createQuizState, quizPage, quizUpdate, type QuizState } from "./journal-quiz";
+import { createSizesState, sizesPage, sizesUpdate, type SizesState } from "./journal-sizes";
+import { createTimelineState, timelinePage, timelineUpdate, type TimelineState } from "./journal-timeline";
 import { UI_TOP, type Scene } from "./types";
 
 /**
  * Carnet de terrain : sommaire des espèces, page détaillée (rendu de studio, échelle humaine, faits),
  * page « Extras » (fossiles bonus, notes sur la petite faune).
  * Les faits jamais lus dans le carnet portent la marque « Nouveau ! » (mémorisée dans le navigateur).
+ * Sous-onglets pédagogiques : frise du temps (journal-timeline), quiz (journal-quiz), tailles (journal-sizes).
  */
 
+export type JournalTab = "species" | "timeline" | "quiz" | "sizes";
+const SUBTABS: { id: JournalTab; label: string; tip: string }[] = [
+  { id: "species", label: "Espèces", tip: "Les fiches de toutes les especes" },
+  { id: "timeline", label: "Frise du temps", tip: "Quand vivaient-ils ? Et un petit jeu" },
+  { id: "quiz", label: "Quiz", tip: "Questions sur les faits decouverts" },
+  { id: "sizes", label: "Tailles", tip: "Comparer leur taille a la notre" },
+];
+
 export interface JournalState {
+  /** Sous-onglet du carnet (« Espèces » par défaut). */
+  tab: JournalTab;
+  tl: TimelineState;
+  quiz: QuizState;
+  sizes: SizesState;
   /** Espèce ouverte dans le carnet (sinon : sommaire). */
   species?: SpeciesId;
   /** Page des extras ouverte (si aucune espèce). */
@@ -37,7 +54,8 @@ export interface JournalState {
 }
 
 export function createJournalState(): JournalState {
-  return { extras: false, skeleton: false, scroll: 0, focus: 0, opened: "", fresh: [] };
+  return { tab: "species", tl: createTimelineState(), quiz: createQuizState(), sizes: createSizesState(),
+    extras: false, skeleton: false, scroll: 0, focus: 0, opened: "", fresh: [] };
 }
 
 /** Comment débloquer un fait, en clair (carnet et fiche de la réserve). */
@@ -54,14 +72,8 @@ export const UNLOCK_HINT: Record<FactUnlock, string> = {
   hunt: "Observe-le pendant qu'il chasse.",
   flee: "Observe-le pendant qu'il fuit un prédateur.",
   scavenge: "Observe-le pendant qu'il mange une carcasse.",
-};
-
-const DEFENSE: Record<Species["behavior"]["defense"], string> = {
-  club: "massue d'os au bout de la queue",
-  horns: "cornes et collerette, il fait face",
-  headbutt: "crâne épais en dôme, coups de tête",
-  flee: "la fuite en troupeau, et le cri d'alerte",
-  bite: "dents et griffes",
+  nest: "Observe un de ses nids (ou un parent qui le garde) dans la réserve.",
+  baby: "Observe un de ses petits dans la réserve.",
 };
 
 // ---------------------------------------------------------------------------
@@ -88,15 +100,7 @@ function markSeen(keys: string[]) {
   try { localStorage.setItem(SEEN_KEY, JSON.stringify([...set])); } catch { /* sans stockage */ }
 }
 
-const factKey = (sp: SpeciesId, id: string) => `${sp}:${id}`;
-const hasF = (s: GameState, sp: SpeciesId, id: string) => s.progress.facts.includes(factKey(sp, id));
-
-/** Une espèce est connue (nom, fiche) une fois son squelette assemblé : avant, c'est une espèce mystère. */
-export function known(s: GameState, sp: SpeciesId): boolean {
-  const p = s.progress;
-  return p.assembled.includes(sp) || (p.population[sp] ?? 0) > 0;
-}
-const knownList = (s: GameState) => SPECIES_LIST.filter((sp) => known(s, sp.id));
+export { known } from "./journal-common";
 const faunaList = () => Object.values(FAUNA) as FaunaDef[];
 
 function newCount(s: GameState, sp: Species): number {
@@ -132,102 +136,59 @@ function step(s: GameState, dir: number) {
 }
 
 // ---------------------------------------------------------------------------
-// Rendus de studio (cache de rasters, poses quantifiées)
-// ---------------------------------------------------------------------------
-const rcache = new Map<string, Raster>();
-function cached(key: string, build: () => Prim[]): Raster {
-  let r = rcache.get(key);
-  if (!r) {
-    if (rcache.size > 160) rcache.clear();
-    r = rasterize(build(), 0, 0, false);
-    rcache.set(key, r);
-  }
-  return r;
-}
-const idle = (time: number): Pose => ({ walk: 0, moving: 0, time, action: "idle", actionT: 0 });
-
-/** Silhouette humaine de 1,75 m (px modèle, origine aux pieds). */
-function human(): Prim[] {
-  const e = (x: number, y: number, rx: number, ry: number): Prim => ({ k: "e", x, y, rx, ry, m: M.Stone, z: 4, h: 4 });
-  const c = (ax: number, ay: number, bx: number, by: number, ra: number, rb: number): Prim => ({ k: "c", ax, ay, bx, by, ra, rb, m: M.Stone, z: 2, h: 3 });
-  const H = 1.75 * PX_PER_M / 52.5;
-  return [
-    e(0, -48, 3.6, 4.4), c(0, -43, 0, -26, 4.4, 3.6),
-    c(-1.7, -26, -2.3, -1, 2, 1.6), c(1.7, -26, 2.3, -1, 2, 1.6),
-    c(-4.4, -41, -5.6, -26, 1.4, 1.1), c(4.4, -41, 5.6, -26, 1.4, 1.1),
-  ].map((p) => scalePrim(p, H));
-}
-
-const lerp = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-
-/** Fond « papier » réglé du carnet sur le calque monde. */
-function paper(th: Theme, world: Frame) {
-  const u = th.ui;
-  const bg = th.style === "dark" ? lerp(u.panel, u.panelAlt, 0.6) : lerp(u.panel, u.panelAlt, 0.5);
-  clearWorld(world, bg);
-  const line = lerp(bg, u.border, th.style === "dark" ? 0.35 : 0.18);
-  for (let y = 5; y < world.rows; y += 9) {
-    for (let x = 0; x < world.cols; x++) {
-      const i = y * world.cols + x;
-      world.ch[i] = 95; // _
-      const k = i * 4;
-      world.fg[k] = line[0]; world.fg[k + 1] = line[1]; world.fg[k + 2] = line[2];
-    }
-  }
-}
-
-/** Cadre ASCII sans fond (le dessin du calque monde reste visible). */
-function box(ui: Frame, th: Theme, x: number, y: number, w: number, h: number, col: RGB, title?: string) {
-  for (let i = x; i < x + w; i++) { put(ui, i, y, 45, col); put(ui, i, y + h - 1, 45, col); }
-  for (let j = y; j < y + h; j++) { put(ui, x, j, 124, col); put(ui, x + w - 1, j, 124, col); }
-  for (const [cx, cy] of [[x, y], [x + w - 1, y], [x, y + h - 1], [x + w - 1, y + h - 1]]) put(ui, cx, cy, 43, col);
-  if (title) text(ui, x + 2, y, ` ${title} `, th.ui.hi, th.ui.panel, th.ui.alpha);
-}
-
-/** Conversion cellules d'interface -> cellules monde. */
-const RW = () => metrics.uiW / metrics.cellW;
-const RH = () => metrics.uiH / metrics.cellH;
-
-/** Dessine un modèle centré dans un rectangle d'interface (calque monde), mis à l'échelle pour tenir. */
-function fitSprite(world: Frame, th: Theme, key: string, model: (p: Pose) => Prim[], x: number, y: number, w: number, h: number, time: number, maxK: number, tint?: RGB) {
-  const rw = RW(), rh = RH();
-  const aw = w * rw, ah = h * rh;
-  const r1 = cached(`${key}|1`, () => model(idle(0)));
-  const k = Math.max(0.3, Math.min(maxK, (aw * 0.92) / r1.w, (ah * 0.9) / r1.h));
-  const kq = Math.round(k * 8) / 8;
-  const tq = Math.floor(time * 5) % 6;
-  const r = cached(`${key}|${kq}|${tq}`, () => model(idle(tq / 5)).map((p) => scalePrim(p, kq)));
-  const ox = Math.round(x * rw + aw / 2 - (r.cx + r.w / 2));
-  const oy = Math.round(y * rh + ah / 2 - (r.cy + r.h / 2));
-  drawRaster(world, th, r, ox, oy, tint ? { tint, light: th.style === "dark" ? 0.55 : 0.4 } : {});
-}
-
-// ---------------------------------------------------------------------------
 // Pages
 // ---------------------------------------------------------------------------
 
+/** Grille du sommaire à la dernière image (colonnes), pour la navigation au clavier. */
+let gridCols = 2;
+
+/**
+ * Grille du sommaire : le plus grand nombre de lignes de cartes qui tiennent sans défiler (cartes de 8 à
+ * 18 lignes, 28 colonnes au moins) ; sinon on garde des cartes de 9 lignes et la grille défile.
+ */
+function grid(cols: number, avail: number, n: number) {
+  let best: { ncol: number; cw: number; ch: number } | undefined;
+  for (let ncol = 2; ncol <= 6; ncol++) {
+    const cw = Math.floor((cols - 4 - (ncol - 1) * 2) / ncol);
+    if (cw < 28) break;
+    const nrow = Math.ceil(n / ncol);
+    const ch = Math.floor((avail - (nrow - 1)) / nrow);
+    if (ch >= 8) return { ncol, cw, ch: Math.min(18, ch), scroll: false };
+    best = { ncol, cw, ch: 9 };
+  }
+  best ??= { ncol: 1, cw: cols - 4, ch: 9 };
+  return { ...best, scroll: true };
+}
+
 function summary(s: GameState, th: Theme, world: Frame, ui: Frame) {
-  const u = th.ui;
+  const u = th.ui, j = s.journal;
   const p = s.progress;
-  text(ui, 2, 2, "Carnet de terrain", u.hi);
-  text(ui, 2, 3, "Hell Creek, fin du Crétacé, il y a 66 millions d'années (inspiré de faits réels)", u.dim);
   const total = SPECIES_LIST.reduce((n, sp) => n + sp.facts.length, 0);
   const got = SPECIES_LIST.reduce((n, sp) => n + sp.facts.filter((f) => hasF(s, sp.id, f.id)).length, 0);
   const xl = `Extras (${p.extras.length})`;
-  const bx = ui.cols - xl.length - 6;
-  button(ui, th, "journal:extras", bx, 2, xl);
-  const ft = `Faits découverts : ${got}/${total}`;
-  text(ui, bx - ft.length - 3, 2, ft, u.text);
+  const bx = ui.cols - buttonW(xl) - SP.pad;
+  button(ui, th, "journal:extras", bx, UI_TOP - 1, xl, { tip: "Fossiles bonus et petite faune" });
+  const ft = `Faits decouverts : ${got}/${total}`;
+  if (bx - ft.length - 3 > 56) text(ui, bx - ft.length - 3, UI_TOP - 1, ft, u.text);
 
   const n = SPECIES_LIST.length;
-  const ncol = ui.cols >= 150 ? 3 : 2;
+  const top = UI_TOP + 1, bottom = ui.rows - 2;
+  const g = grid(ui.cols, bottom - top, n);
+  gridCols = g.ncol;
+  const { ncol, cw, ch } = g;
   const nrow = Math.ceil(n / ncol);
-  const cw = Math.floor((ui.cols - 4 - (ncol - 1) * 2) / ncol);
-  const ch = Math.max(9, Math.min(18, Math.floor((ui.rows - 8 - (nrow - 1)) / nrow)));
+  const vis = Math.max(1, Math.floor((bottom - top + 1) / (ch + 1)));
+  // Défilement par rangée : la carte qui a le focus reste visible.
+  const fr = Math.floor(j.focus / ncol);
+  if (fr < j.scroll) j.scroll = fr;
+  if (fr >= j.scroll + vis) j.scroll = fr - vis + 1;
+  j.scroll = Math.max(0, Math.min(Math.max(0, nrow - vis), j.scroll));
   SPECIES_LIST.forEach((sp, idx) => {
-    const x = 2 + (idx % ncol) * (cw + 2), y = 5 + Math.floor(idx / ncol) * (ch + 1);
+    const row = Math.floor(idx / ncol) - j.scroll;
+    if (row < 0 || row >= vis) return;
+    const x = 2 + (idx % ncol) * (cw + 2), y = top + row * (ch + 1);
     const isKnown = known(s, sp.id);
-    const hot = isKnown && (over(x, y, cw, ch) || s.journal.focus === idx);
+    const hot = isKnown && (over(x, y, cw, ch) || j.focus === idx);
     box(ui, th, x, y, cw, ch, hot ? u.hi : isKnown ? u.border : u.dim);
     const spriteH = ch - 5;
     fitSprite(world, th, `card:${sp.id}`, sp.model, x + 1, y + 1, cw - 2, spriteH, isKnown && hot ? s.time : 0, 1.6, isKnown ? undefined : th.style === "dark" ? u.border : u.text);
@@ -240,17 +201,21 @@ function summary(s: GameState, th: Theme, world: Frame, ui: Frame) {
     }
     const facts = sp.facts.filter((f) => hasF(s, sp.id, f.id)).length;
     const nw = newCount(s, sp);
-    const nl = text(ui, x + 2, ty, sp.name, hot ? u.hi : u.text, u.panel, u.alpha);
-    if (nw) text(ui, x + 4 + nl, ty, ` Nouveau ! (${nw}) `, u.panel, u.hi, 1);
-    text(ui, x + 2, ty + 1, sp.latin, u.dim, u.panel, u.alpha);
+    const name = clip(sp.name, cw - 4 - (nw ? 16 : 0));
+    const nl = text(ui, x + 2, ty, name, hot ? u.hi : u.text, u.panel, u.alpha);
+    if (nw) text(ui, x + 3 + nl, ty, clip(` Nouveau ! (${nw}) `, cw - 5 - nl), u.panel, u.hi, 1);
+    text(ui, x + 2, ty + 1, clip(sp.latin, cw - 4), u.dim, u.panel, u.alpha);
     const bones = p.bones[sp.id]?.length ?? 0;
-    const asm = p.assembled.includes(sp.id) ? "Squelette assemblé" : `Os ${bones}/${sp.bones.length}`;
+    const asm = p.assembled.includes(sp.id) ? "Assemblé" : `Os ${bones}/${sp.bones.length}`;
     const pop = p.population[sp.id] ?? 0;
     const info = `Faits ${facts}/${sp.facts.length}   ${asm}${pop ? `   Réserve : ${pop}` : ""}`;
-    text(ui, x + 2, ty + 2, info.slice(0, cw - 4), u.text, u.panel, u.alpha);
-    region(`journal:sp:${sp.id}`, x, y, cw, ch);
+    text(ui, x + 2, ty + 2, clip(info, cw - 4), u.text, u.panel, u.alpha);
+    region(`journal:sp:${sp.id}`, x, y, cw, ch, { focus: true, tip: `Ouvrir la fiche : ${sp.name}` });
   });
-  text(ui, 2, ui.rows - 1, "Clic ou Flèches + Entrée : ouvrir une fiche", u.dim, u.panel, 0.7);
+  if (nrow > vis) {
+    const t = ` Rangees ${j.scroll + 1}-${Math.min(nrow, j.scroll + vis)} sur ${nrow} : molette `;
+    text(ui, ui.cols - t.length - 2, bottom, t, u.dim, u.panel, u.alpha);
+  }
 }
 
 interface Line { t: string; c: RGB; tag?: string }
@@ -286,14 +251,14 @@ function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Spe
   const left = Math.round(ax + Math.max(0, (aw - used) / 2));
   const hx = left - hm.cx;
   const dx = left + hm.w + gap - ref.cx;
-  for (let x = Math.round(ax); x < ax + aw; x++) {
-    if (groundY >= world.rows || x >= world.cols) break;
-    const i = groundY * world.cols + x;
-    world.ch[i] = x % 3 ? 45 : 61; // - =
-    const kk = i * 4;
-    world.fg[kk] = u.dim[0]; world.fg[kk + 1] = u.dim[1]; world.fg[kk + 2] = u.dim[2];
-  }
+  groundLine(world, th, ax, ax + aw, groundY);
   drawRaster(world, th, hm, hx, groundY, { tint: th.style === "dark" ? u.text : u.border, light: 0.8 });
+  // Son œuf, dans le coin haut droit du studio (le mosasaure, lui, mettait bas des petits vivants).
+  if (!liveBirth(spec) && L >= 50) {
+    const ex = L - 12, ey = top + 2;
+    text(ui, ex, ey, "Son oeuf", u.dim);
+    fitSprite(world, th, `egg:${spec.id}`, () => eggModel(spec.id, 0), ex, ey + 1, 9, 4, 0, 4);
+  }
   if (j.skeleton) {
     const have = new Set(p.bones[spec.id] ?? []);
     const asm = p.assembled.includes(spec.id);
@@ -337,6 +302,9 @@ function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Spe
   add(`Régime : ${diet}${B.scavenger ? " (mange aussi les carcasses)" : ""}`, u.text);
   add(`Défense : ${DEFENSE[B.defense]}`, u.text);
   add(`Vie sociale : ${B.herd[1] <= 1 ? "solitaire" : `groupes de ${B.herd[0]} à ${B.herd[1]}`}`, u.text);
+  add(`Naissance : ${liveBirth(spec) ? `des petits vivants${spec.habitat === "sea" ? ", nés dans l'eau" : ""} (pas d'œuf)` : "dans un œuf, pondu dans un nid"}`, u.text);
+  const eggs = p.eggs[spec.id] ?? 0;
+  if (eggs > 0) add(`Oeufs fossiles à l'atelier : ${eggs} (à incuber)`, u.hi);
   const bones = p.bones[spec.id]?.length ?? 0;
   add(`Atelier : ${p.assembled.includes(spec.id) ? "squelette assemblé" : `${bones}/${spec.bones.length} os trouvés`}`, u.text);
   lines.push({ t: "", c: u.text });
@@ -355,13 +323,12 @@ function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Spe
   }
   drawLines(ui, th, j, lines, px + 2, top + 1, H - 2, tw);
 
-  // --- Navigation ---
-  const ny = ui.rows - 2;
-  let nx = 2;
-  nx += button(ui, th, "journal:prev", nx, ny, "< Précédent") + 1;
-  nx += button(ui, th, "journal:back", nx, ny, "Retour au sommaire") + 1;
-  button(ui, th, "journal:next", nx, ny, "Suivant >");
-  text(ui, ui.cols - 40, ny, "Flèches : changer d'espèce / défiler", u.dim, u.panel, 0.7);
+  // --- Navigation (bas à droite, l'action principale « Suivant » tout à droite) ---
+  actions(ui, th, 2, ui.rows - 2, ui.cols - 4, [
+    { id: "journal:back", label: "Sommaire", key: "Echap", tip: "Retour au sommaire du carnet" },
+    { id: "journal:prev", label: "< Precedent", key: "<-", tip: "Espece precedente (fleche gauche)" },
+    { id: "journal:next", label: "Suivant >", key: "->", variant: "primary", tip: "Espece suivante (fleche droite)" },
+  ]);
 }
 
 /** Écrit une liste de lignes avec défilement (molette, flèches haut/bas). */
@@ -382,9 +349,6 @@ function drawLines(ui: Frame, th: Theme, j: JournalState, lines: Line[], x: numb
   }
 }
 
-function fmtM(m: number) { return `${String(m).replace(".", ",")} m`; }
-function fmtKg(kg: number) { return kg >= 1000 ? `${String(Math.round(kg / 100) / 10).replace(".", ",")} t` : `${Math.round(kg)} kg`; }
-
 /** Comparaison à l'échelle humaine (longueur en adultes allongés, masse en adultes ou éléphants). */
 function compare(spec: Species): string {
   const len = spec.lengthM / 1.75;
@@ -402,8 +366,8 @@ function humanize(id: string): string {
 
 function extrasPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
   const u = th.ui, j = s.journal;
-  text(ui, 2, 2, "Extras", u.hi);
-  text(ui, 2, 3, "Fossiles bonus trouvés en fouille et notes sur la petite faune de la réserve.", u.dim);
+  text(ui, 2, UI_TOP, "Extras", u.hi);
+  text(ui, 2, UI_TOP + 1, "Fossiles bonus trouvés en fouille et notes sur la petite faune de la réserve.", u.dim);
   const top = UI_TOP + 3, bottom = ui.rows - 3, H = bottom - top;
   const x = 2, W = ui.cols - 4, iconW = 14;
   box(ui, th, x, top, W, H, u.border);
@@ -453,7 +417,13 @@ function extrasPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
     yy += h;
   });
   if (max > 0) text(ui, x + W - 22, bottom - 1, " Molette : défiler ", u.dim, u.panel, u.alpha);
-  button(ui, th, "journal:back", 2, ui.rows - 2, "Retour au sommaire");
+  actions(ui, th, 2, ui.rows - 2, ui.cols - 4, [{ id: "journal:back", label: "Sommaire", key: "Echap", variant: "primary", tip: "Retour au sommaire du carnet" }]);
+}
+
+/** Sous-onglets du carnet, sur la ligne d'air sous l'en-tête. */
+function subTabs(s: GameState, th: Theme, ui: Frame) {
+  let x = 2;
+  for (const t of SUBTABS) x += button(ui, th, `journal:tab:${t.id}`, x, UI_TOP - 1, t.label, { active: s.journal.tab === t.id, tip: t.tip }) + SP.gap;
 }
 
 export const journalScene: Scene = {
@@ -464,18 +434,29 @@ export const journalScene: Scene = {
   update(s, input: Input) {
     const j = s.journal;
     const page = j.species ? `sp:${j.species}` : j.extras ? "extras" : "summary";
-    if (page !== j.opened) openPage(s);
+    // Une fiche ouverte depuis ailleurs (la réserve) ramène à l'onglet « Espèces ».
+    if (page !== j.opened) { openPage(s); if (j.species) j.tab = "species"; }
+    for (const id of input.ui) {
+      if (id.startsWith("journal:tab:")) { j.tab = id.slice(12) as JournalTab; j.scroll = 0; }
+      // Une vignette de la frise (ou d'ailleurs) ouvre la fiche de l'espèce.
+      else if (id.startsWith("journal:sp:")) { go(s, id.slice(11) as SpeciesId); j.skeleton = false; j.tab = "species"; }
+    }
+    if (j.tab === "timeline") return timelineUpdate(s, input);
+    if (j.tab === "quiz") return quizUpdate(s, input);
+    if (j.tab === "sizes") return sizesUpdate(s, input);
     const list = SPECIES_LIST;
     for (const id of input.ui) {
-      if (id.startsWith("journal:sp:")) { go(s, id.slice(11) as SpeciesId); j.skeleton = false; }
-      else if (id === "journal:extras") go(s, undefined, true);
+      if (id === "journal:extras") go(s, undefined, true);
       else if (id === "journal:back") go(s, undefined);
       else if (id === "journal:prev") step(s, -1);
       else if (id === "journal:next") step(s, 1);
       else if (id === "journal:flesh") j.skeleton = false;
       else if (id === "journal:skel") j.skeleton = true;
     }
-    if (input.mouse.wheel) j.scroll += Math.sign(input.mouse.wheel) * 3;
+    // Molette : défile la fiche ou les extras ; dans le sommaire, change de rangée de cartes.
+    const summaryPage = !j.species && !j.extras;
+    if (input.mouse.wheel && !summaryPage) j.scroll += Math.sign(input.mouse.wheel) * 3;
+    if (input.mouse.wheel && summaryPage) j.focus = Math.max(0, Math.min(list.length - 1, j.focus + Math.sign(input.mouse.wheel) * gridCols));
     for (const k of input.pressed) {
       if (j.species) {
         if (k === "ArrowLeft") step(s, -1);
@@ -488,7 +469,7 @@ export const journalScene: Scene = {
         else if (k === "ArrowDown") j.scroll += 2;
         else if (k === "ArrowLeft") go(s, undefined);
       } else {
-        const ncol = metrics.ucols >= 150 ? 3 : 2;
+        const ncol = gridCols;
         const move = k === "ArrowLeft" ? -1 : k === "ArrowRight" ? 1 : k === "ArrowUp" ? -ncol : k === "ArrowDown" ? ncol : 0;
         if (move) j.focus = (j.focus + move + list.length) % list.length;
         if ((k === "Enter" || k === "Space") && list[j.focus] && known(s, list[j.focus].id)) go(s, list[j.focus].id);
@@ -497,9 +478,48 @@ export const journalScene: Scene = {
     j.scroll = Math.max(0, j.scroll);
   },
 
+  hints(s) {
+    const j = s.journal;
+    if (j.tab === "timeline") return j.tl.game ? [["Glisser", "poser l'animal sur la frise"], ["Clic", "choisir une periode"], ["Entree", "espece suivante"]] : [["Clic", "ouvrir une fiche"], ["Echap", "retour aux especes"]];
+    if (j.tab === "quiz") return [["Clic", "repondre"], ["Entree", "question suivante"], ["Echap", "retour aux especes"]];
+    if (j.tab === "sizes") return [["Haut/Bas", "changer d'espece"], ["Clic", "choisir la comparaison"], ["Echap", "retour aux especes"]];
+    if (j.species) return [["Gauche/Droite", "changer d'espece"], ["Haut/Bas", "defiler"], ["Espace", "chair / squelette"], ["Echap", "sommaire"]];
+    if (j.extras) return [["Haut/Bas", "defiler"], ["Echap", "sommaire"]];
+    return [["Fleches", "choisir une fiche"], ["Entree", "ouvrir"], ["Molette", "defiler"]];
+  },
+
+  help(s) {
+    const h: Hint[] = [
+      ["Clic", "les sous-onglets Especes, Frise du temps, Quiz, Tailles (ou Tab pour les atteindre)"],
+      ["Fleches", "sommaire : choisir une fiche ; fiche : gauche/droite change d'espece, haut/bas defile"],
+      ["Entree", "sommaire : ouvrir la fiche choisie ; quiz et frise : question / espece suivante"],
+      ["Espace", "fiche : basculer chair / squelette"],
+      ["Echap", "revenir au sommaire, puis aux especes, puis le menu"],
+    ];
+    void s;
+    return h;
+  },
+
+  back(s) {
+    const j = s.journal;
+    if (j.tab !== "species") { j.tab = "species"; j.scroll = 0; return true; }
+    if (j.species || j.extras) {
+      // Le focus du sommaire revient sur la fiche qu'on quitte.
+      const i = SPECIES_LIST.findIndex((sp) => sp.id === j.species);
+      go(s, undefined);
+      if (i >= 0) j.focus = i;
+      return true;
+    }
+    return false;
+  },
+
   compose(s, th, world, ui) {
     const j = s.journal;
     paper(th, world);
+    subTabs(s, th, ui);
+    if (j.tab === "timeline") return timelinePage(s, th, world, ui);
+    if (j.tab === "quiz") return quizPage(s, th, world, ui);
+    if (j.tab === "sizes") return sizesPage(s, th, world, ui);
     const spec = j.species ? SPECIES[j.species] : undefined;
     if (spec) speciesPage(s, th, world, ui, spec);
     else if (j.extras) extrasPage(s, th, world, ui);

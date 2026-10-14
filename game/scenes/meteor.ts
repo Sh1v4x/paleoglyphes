@@ -4,8 +4,9 @@ import { emptyProgress, saveProgress } from "../progress";
 import { createFrame, setBg, setFg, type Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
 import { hash2 } from "../rng";
+import { calm } from "../settings";
 import { worldFor, type GameState } from "../state";
-import { resetUi, text } from "../ui/kit";
+import { resetUi, text, wrap } from "../ui/kit";
 import { toast } from "../ui/toast";
 import { knockTree, regrowAll } from "../world/trees";
 import { drawSpace, SPACE_DURATION } from "./meteor-space";
@@ -96,7 +97,8 @@ export const meteorScene: Scene = {
       }
     }
     // Secousses pendant le passage de l'onde.
-    const shake = tp > T.shock && tp < T.dust + 1 ? (1 - clamp01((tp - T.shock) / 4)) * 14 : 0;
+    // Secousses (aucune si les animations sont réduites).
+    const shake = !calm() && tp > T.shock && tp < T.dust + 1 ? (1 - clamp01((tp - T.shock) / 4)) * 14 : 0;
     p.cam.x += (Math.random() - 0.5) * shake;
     p.cam.y += (Math.random() - 0.5) * shake * 0.6;
     p.cam.x = Math.max(0, Math.min(WORLD_W - metrics.cols * CELL_W, p.cam.x));
@@ -117,7 +119,7 @@ export const meteorScene: Scene = {
     if (tp < 0) {
       drawSpace(world, Math.min(SPACE_DURATION, m.t));
       resetUi(ui);
-      caption(ui, th.ui.text, "Echap : passer");
+      caption(ui, [225, 220, 205], "Echap : passer");
       return;
     }
     parkScene.compose(s, th, world, ui);
@@ -125,13 +127,15 @@ export const meteorScene: Scene = {
     overlay(s, world, tp);
     if (tp > T.dawn + 1 && tp < T.end) caption(ui, [255, 255, 255], "66 millions d'annees plus tard... la vie reprend ses droits.", true);
     else if (tp > T.shock && tp < T.black) caption(ui, [255, 230, 200], "L'onde de choc balaie Hell Creek. La poussiere va cacher le soleil pendant des annees.", true);
+    if (!m.done) caption(ui, [225, 220, 205], "Echap : passer");
   },
 };
 
-/** Ligne de texte centrée en bas (calque d'interface). */
+/** Texte centré en bas (calque d'interface), sur un fond sombre pour rester lisible sur le blanc ; coupé en lignes si besoin. */
 function caption(ui: Frame, c: RGB, str: string, big = false) {
-  const y = ui.rows - (big ? 4 : 2);
-  text(ui, Math.floor((ui.cols - str.length) / 2), y, str, c, big ? [0, 0, 0] : null, 0.55);
+  const lines = wrap(str, ui.cols - 4);
+  const y = ui.rows - (big ? 4 : 2) - (lines.length - 1);
+  lines.forEach((l, i) => text(ui, Math.floor((ui.cols - l.length) / 2), y + i, l, c, [0, 0, 0], 0.55));
 }
 
 /** Effets de la catastrophe par-dessus la réserve : ciel en feu, débris, onde, poussière, noir, aube. */
@@ -139,7 +143,9 @@ function overlay(s: GameState, f: Frame, tp: number) {
   const { cols, rows } = f;
   const fire: RGB = [255, 110, 40], dust: RGB = [92, 70, 58];
   // Intensités au cours du temps.
-  const white = 1 - clamp01(tp / 0.9);
+  // Sortie du blanc de la séquence spatiale (plus lente si les animations sont réduites).
+  const still = calm();
+  const white = 1 - clamp01(tp / (still ? 2 : 0.9));
   const glow = clamp01((tp - 0.3) / 1.5) * (1 - clamp01((tp - T.dust) / 2));
   const dusty = clamp01((tp - T.dust + 1.5) / 2.5) * (1 - clamp01((tp - T.dawn) / 4));
   const dark = clamp01((tp - T.black + 1.2) / 1.2) * (1 - clamp01((tp - T.dawn) / 1.6));
@@ -154,7 +160,7 @@ function overlay(s: GameState, f: Frame, tp: number) {
       // Ciel en feu : plus fort du côté de l'impact (en haut à droite).
       const side = clamp01((x / cols) * 0.7 + (1 - y / rows) * 0.5);
       // Le ciel en feu vacille (bouffées de chaleur).
-      const flick = 0.85 + 0.15 * Math.sin(tp * 9 + x * 0.05 + y * 0.08);
+      const flick = still ? 0.9 : 0.85 + 0.15 * Math.sin(tp * 9 + x * 0.05 + y * 0.08);
       const gl = glow * (0.45 + 0.55 * side) * flick;
       r += (fire[0] - r) * gl * 0.7; g += (fire[1] - g) * gl * 0.55; b += (fire[2] - b) * gl * 0.5;
       br += (fire[0] * 0.55 - br) * gl * 0.65; bg += (fire[1] * 0.35 - bg) * gl * 0.65; bb += (fire[2] * 0.25 - bb) * gl * 0.6;

@@ -2,10 +2,13 @@
  * Aperçu terminal du carnet (sans navigateur) : compose une page et l'affiche en ASCII.
  * Le calque d'interface est posé sur le calque monde (échantillonné à la résolution de l'interface),
  * ou le calque monde seul en pleine résolution avec « world ».
- * Usage : npx tsx scripts/preview-journal.ts [summary|extras|<espece>] [dark|cartoon] [skeleton] [world] [cols rows]
+ * Usage : npx tsx scripts/preview-journal.ts [summary|extras|timeline|quiz|sizes|<espece>] [dark|cartoon] [skeleton] [world] [cols rows]
+ *         options : « game » (frise : mini-jeu), « answer » (quiz : répond A), « nofacts » (quiz sans faits),
+ *                   « sizes:<espece> » et « ref:<cat|elephant|giraffe|bus|whale|none> » (tailles)
  * ex.   : npx tsx scripts/preview-journal.ts trike cartoon
  *         npx tsx scripts/preview-journal.ts ankylo dark skeleton world
  */
+import type { Input } from "../game/input";
 import { THEMES, type Style } from "../game/palette";
 import { createFrame } from "../game/render/frame";
 import { metrics } from "../game/render/metrics";
@@ -35,7 +38,12 @@ SPECIES_LIST.forEach((sp, i) => {
   sp.facts.slice(0, 2 + (i % 3)).forEach((f) => p.facts.push(`${sp.id}:${f.id}`));
 });
 p.extras.push("fauna:pterosaur", "fauna:dragonfly", "ambre-moustique");
+if (args.includes("nofacts")) p.facts = [];
 s.journal.species = SPECIES[page as SpeciesId] ? (page as SpeciesId) : undefined;
+if (page === "timeline" || page === "quiz" || page === "sizes") s.journal.tab = page;
+const opt = (k: string) => args.find((a) => a.startsWith(`${k}:`))?.slice(k.length + 1);
+if (opt("sizes")) s.journal.sizes.sp = opt("sizes") as SpeciesId;
+if (opt("ref")) s.journal.sizes.ref = opt("ref") as typeof s.journal.sizes.ref;
 s.journal.extras = page === "extras";
 s.journal.skeleton = args.includes("skeleton");
 s.mode = "journal";
@@ -44,6 +52,12 @@ s.time = 0.4;
 const world = createFrame(cols, rows), ui = createFrame(ucols, urows);
 beginUi(ui, -1, -1);
 journalScene.enter?.(s);
+// Un pas de logique sans entrée (le quiz tire sa première question), puis les clics simulés.
+const input = (ui: string[] = []): Input => ({ dx: 0, dy: 0, pressed: [], ui, worldClicks: [],
+  mouse: { x: -1, y: -1, inside: false, down: false, clicks: [], presses: [], releases: [], dragX: 0, dragY: 0, wheel: 0 } });
+journalScene.update(s, input(), 1 / 60);
+if (args.includes("game")) journalScene.update(s, input(["journal:tl:game"]), 1 / 60);
+if (args.includes("answer")) journalScene.update(s, input(["journal:q:opt:0"]), 1 / 60);
 journalScene.compose(s, THEMES[style], world, ui);
 
 const out: string[] = [];

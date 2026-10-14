@@ -414,6 +414,10 @@ export const QUETZAL: Species = {
       text: "Pour s'envoler, il s'accroupissait puis se propulsait avec ses bras puissants, comme un sauteur à la perche, avant d'ouvrir ses ailes en plein élan." },
     { id: "nom", title: "Le serpent à plumes", unlock: "defend",
       text: "Son nom vient de Quetzalcoatl, le dieu serpent à plumes des Aztèques. Ses fossiles ont été découverts au Texas en 1971." },
+    { id: "oeufs-souples", title: "Des œufs enterrés dans le sable", unlock: "nest",
+      text: "Les œufs de ptérosaures avaient une coquille souple et parcheminée, comme ceux de certains lézards. Chez Hamipterus, on en a trouvé des centaines : ils étaient sûrement enterrés dans le sable humide." },
+    { id: "flapling", title: "Voler dès la naissance ?", unlock: "baby",
+      text: "Les bébés ptérosaures, qu'on surnomme « flaplings », avaient déjà des ailes bien formées dans l'œuf. Ils pouvaient sans doute voler très tôt après l'éclosion, sans attendre leurs parents." },
   ],
   bones: [
     { id: "crane", name: "Crâne et bec" },

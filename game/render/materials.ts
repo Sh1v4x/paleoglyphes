@@ -37,6 +37,14 @@ export const M = {
  *   90-119  flore             (game/world/flora.mat.ts)
  *   120-149 fouille, atelier  (game/scenes/scenes.mat.ts)
  *   150-179 reptiles volants et marins (game/species/marine.mat.ts)
+ *   180-199 nids et œufs (game/species/nest.mat.ts)
+ *   200-207 Archelon (game/species/archelon.mat.ts)
+ *   208-213 Xiphactinus (game/species/xiphactinus.mat.ts)
+ *   214-221 Pteranodon (game/species/pteranodon.mat.ts)
+ *   222-228 Nyctosaurus (game/species/nyctosaurus.mat.ts)
+ *   229-236 Pectinodon (game/species/pectinodon.mat.ts)
+ *   237-245 Allosaurus (game/species/allosaurus.mat.ts)
+ *   246-254 Alamosaurus (game/species/alamosaurus.mat.ts)
  * Les couleurs et rampes de chaque matière dépendent du thème : voir palette.ts.
  */
 

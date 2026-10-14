@@ -248,6 +248,10 @@ export const MOSA: Species = {
       text: "Poissons, tortues, oiseaux plongeurs, ammonites… et même d'autres mosasaures ! Des coquilles d'ammonites portent encore les trous ronds laissés par ses dents." },
     { id: "queue", title: "Une queue de requin", unlock: "defend",
       text: "Des fossiles avec l'empreinte de la peau montrent que les mosasaures avaient une nageoire en croissant au bout de la queue, comme les requins. Le bout de la colonne se courbe vers le bas pour la porter." },
+    { id: "pas-de-nid", title: "Pas de nid, pas d'œuf", unlock: "nest",
+      text: "Le mosasaure ne construisait aucun nid : il était vivipare, comme les dauphins. Trop gros et sans vraies pattes, il n'aurait jamais pu ramper sur une plage pour pondre." },
+    { id: "bebe-large", title: "Bébés du grand large", unlock: "baby",
+      text: "On a trouvé des os de bébés mosasaures dans des roches de pleine mer, loin des côtes. Les petits naissaient donc au large et devaient vite se débrouiller pour nager et chasser." },
   ],
   bones: [
     { id: "crane", name: "Crâne" },
@@ -270,4 +274,5 @@ export const MOSA: Species = {
   stride: 3,
   behavior: { diet: "carnivore", herd: [1, 1], browse: null, prey: [], defense: "bite", sight: 500, scavenger: true },
   habitat: "sea",
+  birth: "live",
 };

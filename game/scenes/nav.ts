@@ -20,21 +20,64 @@ export const FOOT = 0.72;
 const WET = 0.45;
 
 /** Espèces assez massives pour renverser les arbres : les troncs ne les arrêtent pas. */
-export const BREAKERS: ReadonlySet<SpeciesId> = new Set<SpeciesId>(["trex"]);
+export const BREAKERS: ReadonlySet<SpeciesId> = new Set<SpeciesId>(["trex", "allosaurus", "alamosaurus"]);
+/**
+ * Plafond de la demi-emprise au sol (px) : un sauropode de 780 px ne trouverait aucune place libre
+ * sur toute sa longueur ; on ne teste que le tronc et les pattes (les arbres tombent de toute façon).
+ */
+const FOOT_MAX = 180;
+/** Bande de terre (px) le long de la côte où la tortue de mer (Archelon) peut ramper pour pondre. */
+export const BEACH = 250;
+
+/** Demi-emprise au sol de l'espèce (px). */
+export const footOf = (sp: SpeciesId) => { const spec = SPECIES[sp]; return spec ? Math.min(spec.halfLen * FOOT, FOOT_MAX) : 20; };
+
+const coasts = new WeakMap<World, Float32Array>();
+/**
+ * Abscisse de la côte (px) à la hauteur y : début de l'eau continue jusqu'au bord est du monde.
+ * Calculée une fois par monde (chaque ligne balayée depuis l'est).
+ */
+export function coastAt(w: World, y: number): number {
+  let c = coasts.get(w);
+  if (!c) {
+    c = new Float32Array(w.rows);
+    for (let r = 0; r < w.rows; r++) {
+      let x = w.cols - 1;
+      while (x > 0 && (w.terrain[r * w.cols + x] === T.Shallow || w.terrain[r * w.cols + x] === T.Deep)) x--;
+      c[r] = (x + 1) * CELL_W;
+    }
+    coasts.set(w, c);
+  }
+  return c[Math.max(0, Math.min(w.rows - 1, Math.floor(y / CELL_H)))];
+}
+
+/** Nageur : tout le corps en eau profonde, avec une marge au-dessus et au-dessous (pas d'échouage). */
+export function deepSea(w: World, sp: SpeciesId, x: number, y: number): boolean {
+  const half = footOf(sp);
+  if (x < half + 10 || x > WORLD_W - half - 10 || y < 100 || y > WORLD_H - 20) return false;
+  for (let dy = -CELL_H * 2; dy <= CELL_H * 2; dy += CELL_H * 2) {
+    const row = Math.floor((y + dy) / CELL_H) * w.cols;
+    for (let lx = -half; lx <= half; lx += CELL_W * 3) if (w.terrain[row + Math.floor((x + lx) / CELL_W)] !== T.Deep) return false;
+  }
+  return true;
+}
 
 /** L'espèce tient-elle debout à (x, y) ? Pas d'eau profonde ni d'obstacle (tronc, rocher) sous le corps. */
 export function standable(w: World, sp: SpeciesId, x: number, y: number): boolean {
   const breaks = BREAKERS.has(sp);
   const spec = SPECIES[sp];
-  const half = spec ? spec.halfLen * FOOT : 20;
-  // Nageurs : tout le corps en eau profonde, avec une marge au-dessus et au-dessous (pas d'échouage).
+  const half = footOf(sp);
   if (spec?.habitat === "sea") {
-    if (x < half + 10 || x > WORLD_W - half - 10 || y < 100 || y > WORLD_H - 20) return false;
-    for (const dy of [-CELL_H * 2, 0, CELL_H * 2]) {
-      const row = Math.floor((y + dy) / CELL_H) * w.cols;
-      for (let lx = -half; lx <= half; lx += CELL_W * 3) if (w.terrain[row + Math.floor((x + lx) / CELL_W)] !== T.Deep) return false;
+    // La tortue de mer rampe aussi sur la plage (ponte) : eau ou terre sans obstacle près de la côte.
+    if (sp === "archelon" && y > 100 && y < WORLD_H - 20) {
+      const c = coastAt(w, y);
+      if (x > c - BEACH && x < c + 200) {
+        const row = Math.floor(y / CELL_H) * w.cols;
+        for (let lx = -half; lx <= half; lx += CELL_W * 1.5) if (w.solid[row + Math.floor((x + lx) / CELL_W)]) return false;
+        return x < WORLD_W - half - 10;
+      }
     }
-    return true;
+    return deepSea(w, sp, x, y);
   }
   if (x < half + 10 || x > WORLD_W - half - 10 || y < 80 || y > WORLD_H - 6) return false;
   const row = Math.floor(y / CELL_H) * w.cols;
@@ -161,7 +204,7 @@ function pop(): number {
 const DIRS = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.414], [1, -1, 1.414], [-1, 1, 1.414], [-1, -1, 1.414]] as const;
 
 /** Compteur de calculs de chemins (budget par frame, voir `pathBudget`). */
-export const navStats = { paths: 0, budget: 0 };
+export const navStats = { paths: 0, budget: 0, partial: false };
 /** Remet le budget de chemins de la frame (quelques A* par pas au plus, le reste attend son tour). */
 export function pathBudget(n: number) { navStats.budget = n; }
 
@@ -205,7 +248,9 @@ export function findPath(w: World, sp: SpeciesId, ax: number, ay: number, bx: nu
       push(n);
     }
   }
-  // But inaccessible (île, berge isolée) : on va au plus près.
+  // But inaccessible (île, autre rive) ou trop loin : on va au plus près (`navStats.partial` si inaccessible).
+  // Seulement si la zone accessible est épuisée (vraiment inaccessible), pas si la recherche a été bornée.
+  navStats.partial = found < 0 && hn === 0;
   if (found < 0) found = bestN;
   const cells: number[] = [];
   for (let n = found; n >= 0; n = came[n]) cells.push(n);

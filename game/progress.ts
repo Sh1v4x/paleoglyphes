@@ -14,12 +14,20 @@ export interface Progress {
   extras: string[];
   /** Sites de fouille terminés. */
   digs: number;
+  /** Œufs fossiles trouvés en fouille, prêts à incuber à l'atelier (par espèce). */
+  eggs: Partial<Record<SpeciesId, number>>;
+  /** Indices de fouille gagnés au quiz du carnet (révèlent les fossiles cachés d'un site). Ancien format : absent. */
+  hints?: number;
+  /** Statistiques du quiz du carnet (bonnes réponses cumulées : un indice toutes les 3). */
+  quiz?: { correct: number; answered: number; bestStreak: number };
+  /** Espèces bien placées sur la frise du temps (une étoile chacune). */
+  timeline?: SpeciesId[];
 }
 
 const KEY = "ascii-dino-progress-v1";
 
 export function emptyProgress(): Progress {
-  return { bones: {}, assembled: [], population: {}, facts: [], extras: [], digs: 0 };
+  return { bones: {}, assembled: [], population: {}, facts: [], extras: [], digs: 0, eggs: {} };
 }
 
 export function loadProgress(): Progress {

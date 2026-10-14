@@ -1,3 +1,4 @@
+import { plantGrowth, thirstRate } from "../features/weather";
 import { isNight } from "../daycycle";
 import { CELL_H, CELL_W, WORLD_H, WORLD_W } from "../config";
 import { saveProgress } from "../progress";
@@ -10,7 +11,9 @@ import { toast } from "../ui/toast";
 import type { World } from "../world/generate";
 import { T, isWater } from "../world/tiles";
 import { initFauna, stepFauna, type Bug } from "./eco-fauna";
-import { liveAir, liveSea, type WildKit } from "./eco-wild";
+import { huntsSp, isFish, isFisher, liveNight, preyFits } from "./eco-special";
+import { liveAir, liveSea } from "./eco-wild";
+import { isBaby, isYoung, lifeBrain, lifeStats, stepLife, type NestKit } from "./eco-nest";
 import { knockTree } from "../world/trees";
 import { BREAKERS, clearLine, findPath, navStats, nearestFree, pathBudget } from "./nav";
 import { canStand, parkBrain, type Animal, type Task } from "./park";
@@ -49,6 +52,11 @@ let moved = false;
 let prevT = 0;
 
 const spOf = (a: Animal) => SPECIES[a.sp];
+/**
+ * Demi-longueur du corps pour l'évitement et l'écartement : le long cou et la queue d'un sauropode
+ * passent au-dessus des voisins, seul le tronc compte (sinon le troupeau ne tient plus dans les prairies).
+ */
+const body = (spec: Species) => Math.min(spec.halfLen, 250);
 const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, (a.y - b.y) * 1.3);
 
 function act(a: Animal, action: Action) {
@@ -86,6 +94,8 @@ function setTask(a: Animal, t: Task, mood = "wander") {
 function go(s: GameState, a: Animal, spec: Species, tx: number, ty: number, speed: number, dt: number, plan = false): number {
   const d = Math.hypot(tx - a.x, ty - a.y);
   if (d < 6) { a.path = null; return d; }
+  // Les vieux animaux marchent et courent moins vite.
+  speed *= 1 - a.age * 0.3;
   const w = worldFor(s);
   a.repath -= dt;
   const drift = Math.hypot(tx - a.pgx, ty - a.pgy);
@@ -95,6 +105,8 @@ function go(s: GameState, a: Animal, spec: Species, tx: number, ty: number, spee
     // Ligne droite praticable : inutile de lancer A* (sauf si l'on vient de buter : la grille est moins fine).
     const direct = a.blocked < 0.2 && a.stuckT < 1 && clearLine(w, a.sp, a.x, a.y, tx, ty);
     const found = direct ? [tx, ty] : findPath(w, a.sp, a.x, a.y, tx, ty);
+    // Chemin partiel (but sur une autre rive, détour trop long) : noté dans a.stall.
+    a.stall = !direct && found && navStats.partial ? 1 : 0;
     // Pas de chemin (cible isolée) : on tente tout droit, et l'on abandonnera vite si ça ne passe pas
     // (sans relancer A* à chaque frame, ce qui remettrait la vigie à zéro).
     if (!found) a.stuckT += 2.5;
@@ -108,7 +120,8 @@ function go(s: GameState, a: Animal, spec: Species, tx: number, ty: number, spee
   const P = a.path;
   if (P && a.pi * 2 < P.length) {
     const last = a.pi * 2 >= P.length - 2;
-    wx = last && drift < 40 ? tx : P[a.pi * 2]; wy = last && drift < 40 ? ty : P[a.pi * 2 + 1];
+    const real = last && drift < 40 && !a.stall;
+    wx = real ? tx : P[a.pi * 2]; wy = real ? ty : P[a.pi * 2 + 1];
     if (!last && Math.hypot(wx - a.x, wy - a.y) < Math.max(12, spec.walkSpeed * dt * 2)) {
       a.pi++; a.prog = Infinity; a.progT = 0;
       wx = P[a.pi * 2]; wy = P[a.pi * 2 + 1];
@@ -116,6 +129,8 @@ function go(s: GameState, a: Animal, spec: Species, tx: number, ty: number, spee
   }
   // Vigie : aucun progrès vers le point d'étape -> nouveau chemin ; trop longtemps -> abandon.
   const dw = Math.hypot(wx - a.x, wy - a.y);
+  // Au bout d'un chemin partiel, loin du but : inaccessible, l'appelant change d'objectif.
+  if (a.stall && P && a.pi * 2 >= P.length - 2 && dw < 16 && d > 60) { a.path = null; a.stall = 0; a.stuckT = 0; a.blocked = 1; return -1; }
   if (dw < a.prog - 2) { a.prog = dw; a.progT = 0; } else a.progT += dt;
   if (a.progT > 1.5) { a.repath = 0; a.prog = Infinity; a.progT = 0; a.stuckT += 1.5; a.side = a.side > 0 ? -1 : 1; }
   const r = step(s, a, spec, wx, wy, speed, dt);
@@ -142,7 +157,8 @@ function step(s: GameState, a: Animal, spec: Species, tx: number, ty: number, sp
     if (o === a || o.task === "dead" || o.id === a.targetId || o.targetId === a.id || apart(a, o)) continue;
     const os = spOf(o);
     if (!os) continue;
-    const rx = (spec.halfLen + os.halfLen) * 0.5 + 8, ry = 22;
+    // Les petits ont un corps plus court (a.growth) : ils se faufilent près de leurs parents.
+    const rx = (body(spec) * a.growth + body(os) * o.growth) * 0.5 + 8, ry = 22 * Math.max(a.growth, o.growth);
     const relx = o.x - a.x, rely = o.y - a.y;
     const e = Math.hypot(relx / rx, rely / ry);
     if (e > 1.8) continue;
@@ -229,14 +245,21 @@ function budget(a: Animal, spec: Species, tx: number, ty: number): true {
   a.tx = tx;
   a.ty = ty;
   a.chase = Math.hypot(tx - a.x, ty - a.y) / spec.walkSpeed * 1.8 + 10;
+  // Meilleure distance au but : le délai repart tant que l'animal s'en rapproche (voir reach).
+  a.best = Infinity;
   return true;
 }
 
 /** Marche jusqu'à la place choisie (a.tx, a.ty). Renvoie true une fois arrivé ; abandonne si le trajet traîne. */
 function reach(s: GameState, a: Animal, spec: Species, speed: number, dt: number): boolean {
   a.timer += dt;
+  // Plus aucun progrès vers le but depuis 12 s (rive opposée d'un étang, détour introuvable) : abandon.
+  const gap = Math.hypot(a.tx - a.x, a.ty - a.y);
+  if (gap < a.best - 15) { if (a.best !== Infinity) a.chase = Math.max(a.chase, a.timer + 12); else a.chase = Math.min(a.chase, a.timer + 12); a.best = gap; }
   const d = go(s, a, spec, a.tx, a.ty, speed, dt, true);
   if (d >= 0 && d < 8) return true;
+  // Place inaccessible (autre rive...) : abandon tout de suite.
+  if (d < 0 && Math.hypot(a.tx - a.x, a.ty - a.y) > Math.max(60, spec.halfLen)) { a.spot = -1; return false; }
   // Tout près mais on piétine (berge, voisin, rocher) : on fait avec.
   const near = Math.hypot(a.tx - a.x, a.ty - a.y);
   if (near < Math.max(40, spec.halfLen * 0.9) && (a.blocked > 0.6 || a.timer > a.chase * 0.5)) return true;
@@ -336,8 +359,12 @@ function pickWater(eco: EcoState, a: Animal): number {
 // Relations
 // ---------------------------------------------------------------------------
 
-/** `pred` chasse-t-il l'espèce `sp` ? */
-const hunts = (pred: Species, sp: SpeciesId) => pred.behavior.prey.includes(sp);
+/** `pred` (animal `pa`) chasse-t-il l'animal `b` ? Espèce au menu, et proie pas trop grosse (sauropode adulte). */
+const hunts = (pred: Species, pa: Animal, b: Animal) => {
+  if (!huntsSp(pred, b.sp)) return false;
+  const bs = spOf(b);
+  return !!bs && preyFits(pred, pa, bs, b);
+};
 const busyHunting = (t: Task) => t === "hunt" || t === "chase" || t === "attack";
 const calmTask = (t: Task) => t === "wander" || t === "graze" || t === "drink" || t === "rest";
 
@@ -347,7 +374,7 @@ function threatFor(a: Animal, spec: Species): Animal | undefined {
   for (const o of byId.values()) {
     if (o.task === "dead" || o.task === "stunned" || o.task === "retreat") continue;
     const os = spOf(o);
-    if (!os || !hunts(os, a.sp)) continue;
+    if (!os || !hunts(os, o, a)) continue;
     const d = dist(a, o);
     const menacing = (busyHunting(o.task) && d < spec.behavior.sight) || (d < spec.behavior.sight * 0.35 && o.task !== "feed" && o.task !== "rest");
     if (menacing && d < bd) { bd = d; best = o; }
@@ -358,7 +385,8 @@ function threatFor(a: Animal, spec: Species): Animal | undefined {
 function nearestCarcass(a: Animal, range: number): Animal | undefined {
   let best: Animal | undefined, bd = range;
   for (const o of byId.values()) {
-    if (o.task !== "dead" || o.meat <= 0.02 || o === a) continue;
+    // Une carcasse au large est hors de portée d'un animal terrestre (et inversement).
+    if (o.task !== "dead" || o.meat <= 0.02 || o === a || (spOf(o)?.habitat === "sea") !== (spOf(a)?.habitat === "sea")) continue;
     const d = dist(a, o);
     if (d < bd) { bd = d; best = o; }
   }
@@ -369,9 +397,10 @@ function nearestCarcass(a: Animal, range: number): Animal | undefined {
 function pickPrey(a: Animal, spec: Species): Animal | undefined {
   let best: Animal | undefined, bs = Infinity;
   for (const o of byId.values()) {
-    if (o.task === "dead" || !hunts(spec, o.sp)) continue;
+    if (o.task === "dead" || !hunts(spec, a, o)) continue;
     const d = dist(a, o);
-    const weak = (o.energy < 0.3 ? 150 : 0) + o.age * 120 + (o.herd <= 1 ? 120 : 0);
+    // Les petits (taille réduite) sont des proies de choix, comme les vieux et les isolés.
+    const weak = (o.energy < 0.3 ? 150 : 0) + o.age * 120 + (o.herd <= 1 ? 120 : 0) + (1 - o.growth) * 300;
     const sc = d - weak + Math.random() * 100;
     if (sc < bs) { bs = sc; best = o; }
   }
@@ -397,7 +426,8 @@ function startCall(a: Animal, answer: boolean) {
 function react(a: Animal, spec: Species, pred: Animal) {
   a.targetId = pred.id;
   const d = spec.behavior.defense;
-  if (d === "club" || d === "horns" || d === "headbutt") {
+  const young = isYoung(a);
+  if (!young && (d === "club" || d === "horns" || d === "headbutt")) {
     if (a.task !== "defend") { setTask(a, "defend", "defend"); act(a, "defend"); a.cool = 0.4; }
     return;
   }
@@ -405,7 +435,7 @@ function react(a: Animal, spec: Species, pred: Animal) {
   setTask(a, "flee", "flee");
   a.targetId = pred.id;
   // Les grands troupeaux qui fuient donnent l'alerte : un cri, puis tout le monde court.
-  if (spec.behavior.herd[1] > 1) {
+  if (spec.behavior.herd[1] > 1 && !young) {
     a.alarm = 0.7;
     act(a, "call");
     herdMates(a, 650, (o) => { if (o.task !== "flee" && o.task !== "defend") { setTask(o, "flee", "flee"); o.targetId = pred.id; o.alarm = 0.2 + Math.random() * 0.4; } });
@@ -430,8 +460,9 @@ function kill(s: GameState, pred: Animal, prey: Animal) {
   act(prey, "dead");
   prey.hp = 0;
   prey.decay = DEAD_TIME;
-  prey.meat = 1;
+  prey.meat = prey.growth;
   prey.moving = 0;
+  lifeStats.predation++;
   setTask(pred, "feed", "scavenge");
   pred.targetId = prey.id;
   pred.spot = -1;
@@ -448,16 +479,17 @@ function kill(s: GameState, pred: Animal, prey: Animal) {
   toast(s, "Chaîne alimentaire", `Un ${ps?.name ?? prey.sp} a été chassé par un ${ds?.name ?? pred.sp}. C'est la chaîne alimentaire.`);
 }
 
-/** Succès d'une attaque : ~20-25 %, plus si la proie est fatiguée, vieille ou isolée. */
-function attackSucceeds(prey: Animal): boolean {
+/** Succès d'une attaque : ~20-25 %, plus si la proie est fatiguée, vieille, petite ou isolée ; moins pour un jeune chasseur. */
+function attackSucceeds(prey: Animal, pred: Animal): boolean {
   const ps = spOf(prey);
   if (!ps || (alive[prey.sp] ?? 0) <= 1) return false; // on ne fait jamais disparaître une espèce
   if (prey.task === "defend" && prey.action === "attack") return false;
   let p = 0.22;
   if (prey.energy < 0.3) p += 0.2;
   if (prey.herd <= 1 && ps.behavior.herd[1] > 1) p += 0.12;
-  p += prey.age * 0.12;
+  p += prey.age * 0.12 + (1 - prey.growth) * 0.4;
   if (ps.behavior.defense !== "flee" && ps.behavior.defense !== "bite") p *= 0.6;
+  if (pred.growth < 1) p *= pred.growth * 0.6;
   return Math.random() < p;
 }
 
@@ -496,14 +528,14 @@ function decide(s: GameState, eco: EcoState, a: Animal, spec: Species) {
     if (c) { setTask(a, "feed", "scavenge"); a.targetId = c.id; a.spot = -1; return; }
   }
   if (a.hunger > 0.55) {
-    if (B.prey.length && a.cool <= 0) {
+    if (B.prey.length && a.cool <= 0 && !isBaby(spec, a)) {
       const prey = pickPrey(a, spec);
       if (prey) {
         setTask(a, "hunt", "hunt");
         a.targetId = prey.id;
         a.chase = 0;
         // La meute se joint à la chasse.
-        herdMates(a, 500, (o) => { if (calmTask(o.task) && o.hunger > 0.3 && o.cool <= 0) { setTask(o, "hunt", "hunt"); o.targetId = prey.id; o.chase = 0; } });
+        herdMates(a, 500, (o) => { if (calmTask(o.task) && o.hunger > 0.3 && o.cool <= 0 && !isBaby(spec, o)) { setTask(o, "hunt", "hunt"); o.targetId = prey.id; o.chase = 0; } });
         return;
       }
     }
@@ -532,12 +564,17 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
   moved = false;
   const done = tick(a, dt);
   if (a.task === "dead") { a.moving = 0; a.alt = Math.max(0, a.alt - dt * 200); return; }
-  if (spec.habitat === "sea") return liveSea(kit(eco), s, a, spec, dt, done);
-  if (spec.habitat === "air") return liveAir(kit(eco), s, a, spec, dt, done);
+  if (spec.habitat === "sea" || spec.habitat === "air") {
+    // Cycle de vie d'abord (petits, nid, parade) ; sinon le cerveau de la mer ou des airs.
+    if (!lifeBrain(kit(eco), s, a, spec, dt)) return spec.habitat === "sea" ? liveSea(kit(eco), s, a, spec, dt, done) : liveAir(kit(eco), s, a, spec, dt, done);
+    a.moving = moved ? Math.min(1, a.moving + dt * 4) : Math.max(0, a.moving - dt * 4);
+    if (!moved && (a.action === "walk" || a.action === "run")) act(a, "idle");
+    return;
+  }
   const B = spec.behavior;
   const carn = B.diet === "carnivore";
   a.hunger = Math.min(1, a.hunger + dt / (carn ? 260 : 200));
-  a.thirst = Math.min(1, a.thirst + dt / 220);
+  a.thirst = Math.min(1, a.thirst + (dt * thirstRate(s)) / 220); // la chaleur de la saison sèche donne soif
   if (a.task === "rest") a.energy = Math.min(1, a.energy + dt / 22);
   else a.energy = Math.max(0, a.energy - dt / (a.action === "run" ? 40 : 320));
   a.cool = Math.max(0, a.cool - dt);
@@ -558,8 +595,10 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
   // Réponse différée à l'appel d'un congénère.
   if (a.answer > 0 && (a.answer -= dt) <= 0) { a.answer = 0; if (a.task === "wander") startCall(a, true); }
 
-  const run = spec.runSpeed * (a.energy < 0.15 ? 0.7 : 1) * (1 - a.age * 0.15);
-  switch (a.task) {
+  const run = spec.runSpeed * (a.energy < 0.15 ? 0.7 : 1);
+  // Cycle de vie (petits qui suivent, nid, parade, pillage) puis comportements propres (nocturne) :
+  // prioritaires sur l'IA ordinaire.
+  if (!lifeBrain(kit(eco), s, a, spec, dt) && !(a.sp === "pectinodon" && liveNight(kit(eco), s, a, spec, dt, done))) switch (a.task) {
     case "wander": {
       const ld = leader[a.sp];
       a.mood = a.herd > 1 ? "herd" : "wander";
@@ -577,15 +616,21 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
         let ty = ld.y + by * row * 28 + bx * up * row * 30;
         // Place inaccessible (eau, bosquet) : la case libre la plus proche.
         if (!canStand(s, a.sp, tx, ty)) {
+          // Pas sur l'autre rive : une place libre trop loin du chef est refusée (côté opposé du chef).
           const f = nearestFree(worldFor(s), a.sp, tx, ty, 8);
-          if (f) { tx = f.x; ty = f.y; } else { tx = ld.x - ld.facing * spec.halfLen; ty = ld.y; }
+          const want = Math.hypot(tx - ld.x, ty - ld.y) + 80;
+          const mx = 2 * ld.x - tx, my = 2 * ld.y - ty;
+          if (f && Math.hypot(f.x - ld.x, f.y - ld.y) < want) { tx = f.x; ty = f.y; }
+          else if (canStand(s, a.sp, mx, my)) { tx = mx; ty = my; }
+          else { tx = ld.x - ld.facing * spec.halfLen; ty = ld.y; }
         }
         const far = Math.hypot(tx - a.x, ty - a.y);
         // Hystérésis (a.vt = 1 : en route) : on repart au-delà de 50 px, on s'arrête sous 20 px.
-        if (far > 50) a.vt = 1;
+        // Après un blocage (go() < 0 met a.blocked à 2), on attend un peu avant de réessayer.
+        if (far > 50 && a.blocked < 1) a.vt = 1;
         else if (far < 20) a.vt = 0;
         if (a.vt && go(s, a, spec, tx, ty, spec.walkSpeed * (far > 320 ? 1.9 : far > 120 ? 1.15 : 0.9), dt) < 0) a.vt = 0;
-        if (!a.vt) { act(a, "idle"); if (ld.moving < 0.2) face(a, a.x + ld.facing); }
+        if (!a.vt) { act(a, "idle"); a.blocked = Math.max(0, a.blocked - dt * 0.4); if (ld.moving < 0.2) face(a, a.x + ld.facing); }
         a.timer -= dt;
         if (a.timer <= 0) { a.timer = 1.5 + Math.random() * 2; if (ld.moving < 0.5 || a.hunger > 0.6 || a.thirst > 0.65) decide(s, eco, a, spec); }
         break;
@@ -652,7 +697,8 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
       if (a.task === "hunt") {
         // Approche discrète, puis la poursuite.
         const q = slot(prey.x + sideX * spec.halfLen * 0.6, prey.y + offY);
-        go(s, a, spec, q.x, q.y, spec.walkSpeed * 1.1, dt);
+        // Proie hors d'atteinte (de l'autre côté d'une rivière...) : il renonce au lieu de piétiner.
+        if (go(s, a, spec, q.x, q.y, spec.walkSpeed * 1.1, dt) < 0) { setTask(a, "wander"); a.cool = 15; a.timer = 1; break; }
         if (d < B.sight * 0.45) { a.task = "chase"; a.chase = 0; }
         a.chase += dt;
         if (a.chase > 60) { setTask(a, "wander"); a.cool = 15; }
@@ -661,7 +707,7 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
       a.chase += dt;
       const range = (spec.halfLen + ps.halfLen) * 0.55;
       const q = slot(prey.x + sideX * range * 0.6, prey.y + offY * 0.5);
-      go(s, a, spec, q.x, q.y, run, dt);
+      if (go(s, a, spec, q.x, q.y, run, dt) < 0) { setTask(a, "wander"); a.cool = 25; a.timer = 2; break; }
       if (d < range) { a.task = "attack"; act(a, "attack"); face(a, prey.x); }
       else if (a.chase > 9 || d > B.sight * 1.4 || a.energy < 0.05) { setTask(a, "wander"); a.cool = 25; a.timer = 2; }
       break;
@@ -675,7 +721,7 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
       if (crossed(a, 0.55)) {
         const ps = spOf(prey);
         const range = ((ps?.halfLen ?? 30) + spec.halfLen) * 0.7;
-        if (dist(a, prey) < range && attackSucceeds(prey)) { kill(s, a, prey); break; }
+        if (dist(a, prey) < range && attackSucceeds(prey, a)) { kill(s, a, prey); break; }
         // Raté : une seule tentative par chasse, la proie a sa chance.
         a.chase = 99;
       }
@@ -713,6 +759,15 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
       let dx = a.x - pred.x, dy = (a.y - pred.y) * 1.3;
       const n = Math.hypot(dx, dy) || 1;
       dx /= n; dy /= n;
+      // Un petit se cache derrière son parent (de l'autre côté du prédateur).
+      const par = a.parentId ? byId.get(a.parentId) : undefined;
+      if (par && par.task !== "dead" && isYoung(a)) {
+        let px = par.x - pred.x, py = (par.y - pred.y) * 1.3;
+        const pn = Math.hypot(px, py) || 1;
+        px /= pn; py /= pn;
+        go(s, a, spec, par.x + px * 50, par.y + py * 30, run, dt);
+        break;
+      }
       go(s, a, spec, a.x + dx * 160, a.y + dy * 160, run, dt);
       break;
     }
@@ -761,10 +816,12 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
 const apart = (a: Animal, b: Animal) => (spOf(a)?.habitat === "sea") !== (spOf(b)?.habitat === "sea") || a.alt > 4 || b.alt > 4;
 
 /** Briques de déplacement prêtées aux cerveaux de la mer et des airs (eco-wild.ts). */
-let kitCache: { eco: EcoState; k: WildKit } | null = null;
-function kit(eco: EcoState): WildKit {
+let kitCache: { eco: EcoState; k: NestKit } | null = null;
+function kit(eco: EcoState): NestKit {
   if (kitCache?.eco === eco) return kitCache.k;
-  const k: WildKit = {
+  const k: NestKit = {
+    get: (id) => byId.get(id),
+    decide: (s, a, spec) => decide(s, eco, a, spec),
     go, reach, approach, canStand, act, setTask, face, waterSide,
     water: () => eco.water,
     pickWater: (a) => pickWater(eco, a),
@@ -777,6 +834,8 @@ function kit(eco: EcoState): WildKit {
       return false;
     },
     moved: () => moved,
+    kill: (s, pred, prey) => kill(s, pred, prey),
+    count: (sp) => alive[sp] ?? 0,
   };
   kitCache = { eco, k };
   return k;
@@ -801,7 +860,7 @@ function separate(s: GameState, list: Animal[], dt: number) {
       if (b.task === "dead" || a.targetId === b.id || b.targetId === a.id || apart(a, b)) continue;
       const sb = spOf(b);
       if (!sb) continue;
-      const rx = (sa.halfLen + sb.halfLen) * 0.45, ry = 18;
+      const rx = (body(sa) * a.growth + body(sb) * b.growth) * 0.45, ry = 18 * Math.max(a.growth, b.growth);
       const ox = b.x - a.x, oy = b.y - a.y;
       const e = Math.hypot(ox / rx, oy / ry);
       if (e >= 1) continue;
@@ -850,6 +909,8 @@ export function stepEcosystem(s: GameState, dt: number) {
     byId.set(a.id, a);
     if (a.task === "dead") continue;
     alive[a.sp] = (alive[a.sp] ?? 0) + 1;
+    // Un petit qui suit un parent n'est ni chef ni dans la formation du troupeau.
+    if (a.parentId) continue;
     const l = leader[a.sp];
     if (!l || a.id < l.id) leader[a.sp] = a;
   }
@@ -857,7 +918,7 @@ export function stepEcosystem(s: GameState, dt: number) {
   herdRank.clear(); huntRank.clear();
   const count: Record<string, number> = {};
   for (const a of p.animals) {
-    if (a.task === "dead") continue;
+    if (a.task === "dead" || a.parentId) continue;
     herdRank.set(a.id, (count[a.sp] = (count[a.sp] ?? -1) + 1));
     if (a.task === "hunt" || a.task === "chase" || a.task === "attack") {
       const key = `t${a.targetId}`;
@@ -866,7 +927,9 @@ export function stepEcosystem(s: GameState, dt: number) {
   }
   // Quelques chemins A* par pas au plus : les autres animaux attendent leur tour (ils avancent quand même).
   pathBudget(4);
-  for (const q of eco.plants) if (q.food < 1) q.food = Math.min(1, q.food + dt / 70);
+  // Les plantes repoussent vite en saison des pluies, lentement en saison sèche.
+  const grow = plantGrowth(s);
+  for (const q of eco.plants) if (q.food < 1) q.food = Math.min(1, q.food + (dt * grow) / 70);
   separate(s, p.animals, dt);
   const brain = parkBrain;
   for (const a of p.animals) {
@@ -900,6 +963,7 @@ export function stepEcosystem(s: GameState, dt: number) {
     p.animals = p.animals.filter((a) => a.task !== "dead" || a.decay > 0);
     if (p.selected !== undefined && !p.animals.some((a) => a.id === p.selected)) p.selected = undefined;
   }
+  stepLife(s, dt, kit(eco));
   stepFauna(s, eco, p.animals, dt);
 }
 
@@ -907,21 +971,50 @@ export function stepEcosystem(s: GameState, dt: number) {
 export function activity(a: Animal): string {
   const spec = SPECIES[a.sp];
   const still = a.moving < 0.3;
+  // Tortue de mer : ponte sur la plage, retour au large ; ses petits filent vers la mer.
+  if (a.sp === "archelon" && a.task !== "dead") {
+    if (a.mood === "nest") return a.action === "takeoff" ? "creuse le sable et pond ses œufs" : a.action === "land" ? "rampe sur la plage pour pondre" : "nage vers la plage pour pondre";
+    if (a.mood === "hatch") return "court vers la mer !";
+    if (a.mood === "return") return a.action === "land" ? "rampe vers la mer" : "regagne le large";
+    switch (a.task) {
+      case "hunt": return "cherche des méduses";
+      case "attack": return "happe une méduse";
+      case "feed": return "mange une méduse";
+    }
+  }
+  // Cycle de vie : nid, petits, parade, pillage.
+  if (a.task === "wander" || a.task === "call") {
+    if (a.mood === "nest") return a.action === "eat" ? "creuse un nid" : a.action === "rest" ? "couve ses œufs" : a.action === "call" ? "appelle à l'aide pour son nid" : !still ? "rejoint son nid" : "garde son nid";
+    if (a.mood === "young") return a.action === "eat" ? "mange avec son parent" : a.action === "drink" ? "boit avec son parent" : a.action === "rest" ? "dort près de son parent" : !still ? "suit son parent" : "reste près de son parent";
+    if (a.mood === "court") return still ? "fait sa parade" : "rejoint un partenaire";
+  }
+  if (a.task === "feed" && a.targetId === 0 && a.mood === "scavenge") return a.action === "eat" ? "gobe des œufs dans un nid !" : "s'approche d'un nid";
+  // Pectinodon : chasseur de nuit, dort caché le jour.
+  if (a.sp === "pectinodon" && a.mood === "den" && a.task === "rest") return still ? "dort caché dans la forêt" : "rejoint sa cachette dans la forêt";
+  if (a.sp === "pectinodon" && a.task === "graze") return a.action === "eat" ? "avale une petite proie" : a.action === "attack" ? "happe une proie dans le noir" : "chasse dans la nuit";
   if (spec?.habitat === "sea" && a.task !== "dead") {
+    const fish = isFish(spec);
     switch (a.task) {
       case "hunt": return "fonce sur un banc de poissons";
-      case "attack": return "attaque un poisson !";
+      case "chase": { const p = byId.get(a.targetId); return `poursuit ${p?.sp === "archelon" ? "une tortue" : "un poisson"} !`; }
+      case "attack": return a.targetId ? "attaque !" : "attaque un poisson !";
       case "feed": return "avale sa proie";
       case "rest": return "derive en se reposant";
-      case "call": return "remonte respirer a la surface";
+      case "call": return fish ? "bondit hors de l'eau !" : "remonte respirer a la surface";
       default: return still ? "flotte entre deux eaux" : "nage au large";
     }
   }
   if (spec?.habitat === "air" && a.task !== "dead") {
     if (a.action === "takeoff") return "prend son envol";
-    if (a.action === "land") return "se pose";
-    if (a.alt > 0 || a.mood === "fly") return a.task === "wander" ? (a.moving > 0.5 ? "bat des ailes" : "plane dans le ciel") : "descend pour se poser";
+    if (a.action === "land") return isFisher(a.sp) ? "se pose sur la plage" : "se pose";
+    if (a.alt > 0 || a.mood === "fly" || a.mood === "fish") {
+      if (a.task === "attack") return "plonge pour pêcher !";
+      if (a.task === "hunt") return "repère un poisson et descend";
+      if (a.task !== "wander") return "descend pour se poser";
+      return a.moving > 0.5 ? "bat des ailes" : isFisher(a.sp) ? "plane au-dessus de la mer" : "plane dans le ciel";
+    }
     if (a.task === "graze") return a.action === "eat" ? "avale une petite proie" : "chasse de petites betes au sol";
+    if (a.task === "rest" && isFisher(a.sp)) return "se repose sur la plage";
   }
   switch (a.task) {
     case "wander": return a.action === "idle" ? (a.herd > 1 ? "se tient avec son troupeau" : "observe les alentours") : a.herd > 1 ? "suit son troupeau" : "se promène";

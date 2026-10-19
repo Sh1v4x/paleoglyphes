@@ -12,7 +12,7 @@ import { isWater, T } from "../world/tiles";
 import { beachNester, beachSite, isFish, onLand, specialStats } from "./eco-special";
 import type { WildKit } from "./eco-wild";
 import { coastAt, deepSea, nearestFree, standable } from "./nav";
-import type { Animal, Nest } from "./park";
+import { migrationArrived, type Animal, type Nest } from "./park";
 
 /**
  * Cycle de vie de la réserve : vieillissement et mort de vieillesse, parades, nids gardés par un
@@ -558,6 +558,8 @@ function canBreed(spec: Species, a: Animal): boolean {
  * Le dernier couple d'une espèce se reproduit toujours : la réserve ne perd jamais une espèce.
  */
 function fedEnough(s: GameState, spec: Species, a: Animal): boolean {
+  // Un troupeau en migration ne niche pas en route : il attend d'être arrivé dans sa zone de saison.
+  if (spec.migration && !migrationArrived(s, spec.id, a.x, a.y)) return false;
   const eco = s.park.eco;
   const n = living(s, spec.id);
   if (!eco || n <= 2) return true;

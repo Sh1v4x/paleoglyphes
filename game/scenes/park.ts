@@ -8,14 +8,16 @@ import { metrics, uiCellAt, worldCellAt } from "../render/metrics";
 import { placed, RasterCache, type Raster } from "../render/raster";
 import { mulberry32 } from "../rng";
 import { SPECIES, SPECIES_LIST } from "../species";
-import type { Action, FactUnlock, SpeciesId } from "../species/types";
+import type { Action, FactUnlock, Species, SpeciesId } from "../species/types";
 import { worldFor, type GameState } from "../state";
 import { actions, bar, emptyState, hitAt, panel, put, region, SP, text, toolbar, wrap, type Hint, type ToolItem } from "../ui/kit";
 import { unlockTrigger } from "../unlock";
+import { polarSummer } from "../features/weather";
 import { BIOME, type BiomeId } from "../world/biomes";
-import { isWater } from "../world/tiles";
+import type { World } from "../world/generate";
+import { isWater, T } from "../world/tiles";
 import { faunaActors, faunaAt, faunaDef, noteFauna, type Bug } from "./eco-fauna";
-import { activity, stepEcosystem, type EcoState } from "./ecosystem";
+import { activity, migrating, stepEcosystem, type EcoState } from "./ecosystem";
 import { deName } from "./dig-fossils";
 import { activeTrees, treeRaster, updateTrees } from "../world/trees";
 import { drawDocuLog, drawDocumentary, missedCount, stopDocumentary, updateDocumentary } from "../features/documentary";
@@ -47,6 +49,8 @@ export interface Animal {
   /** Pieds, px monde. */
   x: number;
   y: number;
+  /** Chef d'un troupeau en migration : direction annoncée (« le nord », « le sud »). */
+  migrating?: string;
   facing: 1 | -1;
   walk: number;
   /** 0..1, fondu immobile -> en mouvement. */
@@ -288,7 +292,145 @@ export function atHome(s: GameState, sp: SpeciesId, x: number, y: number): boole
   const w = worldFor(s);
   const cx = Math.floor(x / CELL_W), cy = Math.floor(y / CELL_H);
   if (cx < 0 || cy < 0 || cx >= w.cols || cy >= w.rows) return false;
-  return (spec.biomes ?? HOME).includes(w.biome[cy * w.cols + cx] as BiomeId);
+  return homeBiomes(s, spec).includes(w.biome[cy * w.cols + cx] as BiomeId);
+}
+
+/** Biomes où l'espèce vit en ce moment : sa zone de saison si elle migre, sinon tous ses biomes. */
+export function homeBiomes(s: GameState, spec: Species): readonly BiomeId[] {
+  if (spec.migration) return polarSummer(s) ? spec.migration.summer : spec.migration.winter;
+  return spec.biomes ?? HOME;
+}
+
+// Points de repère par biome (grille de 300 px, sol praticable), pour trouver la zone de saison la plus proche.
+const landmarks = new WeakMap<World, { x: number; y: number; b: number }[]>();
+
+/**
+ * Itinéraires de migration : grille grossière (64 × 63 px) des passages assez larges pour un troupeau
+ * (falaises, eau profonde et bosquets exclus), et pour chaque zone de saison une carte des distances
+ * (parcours en largeur depuis la zone). Le troupeau descend cette carte : il passe par les cols et
+ * les gués au lieu de buter sur une crête.
+ */
+const MG = { cw: 16, ch: 9 };
+const routes = new WeakMap<World, { gw: number; gh: number; ok: Uint8Array; dist: Map<string, { depth: Int32Array; dist: Int32Array }> }>();
+/** Profondeur (cases de 64 px) à atteindre dans la zone de saison : le troupeau va au cœur, pas au bord. */
+const CORE = 10, ARRIVED = 6;
+
+function routeMap(w: World) {
+  let r = routes.get(w);
+  if (r) return r;
+  const gw = Math.ceil(w.cols / MG.cw), gh = Math.ceil(w.rows / MG.ch), ok = new Uint8Array(gw * gh);
+  for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+    let good = 0, n = 0;
+    for (let y = gy * MG.ch; y < Math.min(w.rows, (gy + 1) * MG.ch); y++) for (let x = gx * MG.cw; x < Math.min(w.cols, (gx + 1) * MG.cw); x++, n++) {
+      const i = y * w.cols + x;
+      if (!w.solid[i] && w.terrain[i] !== T.Deep) good++;
+    }
+    ok[gy * gw + gx] = good * 4 >= n * 3 ? 1 : 0;
+  }
+  routes.set(w, (r = { gw, gh, ok, dist: new Map() }));
+  return r;
+}
+
+/** Cartes d'une zone de saison : profondeur dans la zone (depuis son bord) et distance jusqu'à son cœur. */
+function zoneMaps(w: World, home: readonly BiomeId[]) {
+  const R = routeMap(w), key = home.join(",");
+  let m = R.dist.get(key);
+  if (m) return m;
+  const N = R.gw * R.gh, inZone = new Uint8Array(N), q = new Int32Array(N);
+  for (let k = 0; k < N; k++) {
+    const cx = (k % R.gw) * MG.cw + (MG.cw >> 1), cy = Math.floor(k / R.gw) * MG.ch + (MG.ch >> 1);
+    inZone[k] = home.includes(w.biome[Math.min(w.rows - 1, cy) * w.cols + Math.min(w.cols - 1, cx)] as BiomeId) ? 1 : 0;
+  }
+  // Parcours en largeur depuis `seeds` sur les cases praticables (et, si `within`, seulement dans la zone).
+  const bfs = (seed: (k: number) => boolean, within: boolean) => {
+    const d = new Int32Array(N).fill(-1);
+    let head = 0, tail = 0;
+    for (let k = 0; k < N; k++) if (seed(k)) { d[k] = 0; q[tail++] = k; }
+    while (head < tail) {
+      const c = q[head++], gx = c % R.gw, gy = (c / R.gw) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = gx + dx, ny = gy + dy;
+        if (nx < 0 || ny < 0 || nx >= R.gw || ny >= R.gh) continue;
+        const n = ny * R.gw + nx;
+        if (d[n] < 0 && R.ok[n] && (!within || inZone[n])) { d[n] = d[c] + 1; q[tail++] = n; }
+      }
+    }
+    return d;
+  };
+  // Profondeur : distance au bord de la zone (les cases hors zone valent 0).
+  const depth = bfs((k) => !inZone[k], true);
+  // Cœur de la zone (assez profond) ; s'il n'existe pas (zone étroite), toute la zone.
+  const core = (k: number) => inZone[k] === 1 && R.ok[k] === 1 && depth[k] >= CORE;
+  const hasCore = depth.some((v, k) => v >= CORE && inZone[k] === 1);
+  const dist = bfs(hasCore ? core : (k) => inZone[k] === 1 && R.ok[k] === 1, false);
+  R.dist.set(key, (m = { depth, dist }));
+  return m;
+}
+
+/** Le troupeau migrateur est-il arrivé au cœur de sa zone de saison ? (sinon il continue sa route) */
+export function migrationArrived(s: GameState, sp: SpeciesId, x: number, y: number): boolean {
+  const spec = SPECIES[sp];
+  if (!spec?.migration) return true;
+  const w = worldFor(s), R = routeMap(w), { depth } = zoneMaps(w, homeBiomes(s, spec));
+  const c = Math.floor(y / CELL_H / MG.ch) * R.gw + Math.floor(x / CELL_W / MG.cw);
+  return c >= 0 && c < depth.length && atHome(s, sp, x, y) && (depth[c] < 0 || depth[c] >= ARRIVED);
+}
+
+/** Prochaine étape (px monde, ~1 300 px plus loin) sur l'itinéraire vers le cœur de la zone de saison, ou null. */
+export function migrationStep(s: GameState, sp: SpeciesId, x: number, y: number): { x: number; y: number } | null {
+  const spec = SPECIES[sp];
+  if (!spec) return null;
+  const w = worldFor(s), R = routeMap(w), d = zoneMaps(w, homeBiomes(s, spec)).dist;
+  // Depuis la case de l'animal (ou la plus proche reliée), on descend la carte des distances.
+  let c = Math.floor(y / CELL_H / MG.ch) * R.gw + Math.floor(x / CELL_W / MG.cw);
+  if (c < 0 || c >= d.length || d[c] < 0) {
+    let best = -1, bd = Infinity;
+    const gx0 = Math.floor(x / CELL_W / MG.cw), gy0 = Math.floor(y / CELL_H / MG.ch);
+    for (let gy = gy0 - 3; gy <= gy0 + 3; gy++) for (let gx = gx0 - 3; gx <= gx0 + 3; gx++) {
+      if (gx < 0 || gy < 0 || gx >= R.gw || gy >= R.gh) continue;
+      const k = gy * R.gw + gx, dd = Math.hypot(gx - gx0, gy - gy0);
+      if (d[k] >= 0 && dd < bd) { bd = dd; best = k; }
+    }
+    if (best < 0) return nearestHome(s, sp, x, y);
+    c = best;
+  }
+  for (let step = 0; step < 20 && d[c] > 0; step++) {
+    const gx = c % R.gw, gy = (c / R.gw) | 0;
+    let next = c;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = gx + dx, ny = gy + dy;
+      if (nx < 0 || ny < 0 || nx >= R.gw || ny >= R.gh) continue;
+      const n = ny * R.gw + nx;
+      if (d[n] >= 0 && d[n] < d[next]) next = n;
+    }
+    if (next === c) break;
+    c = next;
+  }
+  return { x: ((c % R.gw) + 0.5) * MG.cw * CELL_W, y: (Math.floor(c / R.gw) + 0.5) * MG.ch * CELL_H };
+}
+
+/** Point praticable le plus proche (px monde) dans la zone où l'espèce vit en ce moment. */
+export function nearestHome(s: GameState, sp: SpeciesId, x: number, y: number): { x: number; y: number } | null {
+  const spec = SPECIES[sp];
+  if (!spec) return null;
+  const w = worldFor(s);
+  let pts = landmarks.get(w);
+  if (!pts) {
+    pts = [];
+    for (let py = 150; py < w.rows * CELL_H - 150; py += 300) for (let px = 150; px < w.cols * CELL_W - 150; px += 300) {
+      const i = Math.floor(py / CELL_H) * w.cols + Math.floor(px / CELL_W);
+      if (!w.solid[i] && !isWater(w.terrain[i])) pts.push({ x: px, y: py, b: w.biome[i] });
+    }
+    landmarks.set(w, pts);
+  }
+  const home = homeBiomes(s, spec);
+  let best: { x: number; y: number } | null = null, bd = Infinity;
+  for (const p of pts) {
+    if (!home.includes(p.b as BiomeId)) continue;
+    const d = Math.hypot(p.x - x, p.y - y);
+    if (d < bd && canStand(s, sp, p.x, p.y)) { bd = d; best = p; }
+  }
+  return best;
 }
 
 function spawn(s: GameState, sp: SpeciesId, near?: { x: number; y: number }) {
@@ -361,6 +503,7 @@ export function observe(s: GameState, a: Animal) {
   const t = byAction[a.action];
   if (t) unlockTrigger(s, a.sp, t);
   if (["herd", "hunt", "flee", "scavenge"].includes(a.mood)) unlockTrigger(s, a.sp, a.mood as FactUnlock);
+  if (migrating(a)) unlockTrigger(s, a.sp, "migrate");
   // Cycle de vie : un parent qui couve, un petit qui grandit.
   if (a.task !== "dead" && a.nestId) unlockTrigger(s, a.sp, "nest");
   if (a.task !== "dead" && a.growth < 1) unlockTrigger(s, a.sp, "baby");

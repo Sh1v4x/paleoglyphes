@@ -57,6 +57,7 @@ export type FactUnlock =
   | "flee" // cliquer une proie qui fuit
   | "scavenge" // cliquer un animal qui mange une carcasse
   | "nest" // cliquer un nid (ou un parent qui couve)
+  | "migrate" // cliquer un animal pendant une migration
   | "baby"; // cliquer un bébé ou un juvénile
 
 export interface Fact {
@@ -119,6 +120,11 @@ export interface Species {
    * et y fait ses promenades ; il peut en sortir pour boire, chasser ou fuir.
    */
   biomes?: BiomeId[];
+  /**
+   * Migration saisonnière (facultatif) : biomes où vit le troupeau pendant l'été polaire, puis pendant
+   * l'hiver (voir polarSummer). Ils doivent faire partie de `biomes`. Sans migration : sédentaire.
+   */
+  migration?: { summer: BiomeId[]; winter: BiomeId[] };
   /**
    * Reproduction (défaut : "eggs") : "eggs" = nid, couvée, éclosion ; "live" = gestation puis
    * naissance d'un petit à côté de la mère (pas de nid, pas d'œuf fossile).

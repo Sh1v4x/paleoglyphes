@@ -161,6 +161,14 @@ function seasonWet(s: GameState): number {
   return 0.5 + 0.5 * Math.cos(2 * Math.PI * (yearFrac(s) - 0.19));
 }
 const SEASONS = ["Saison des pluies", "Fin des pluies", "Saison sèche", "Retour des pluies"];
+/**
+ * Été polaire : la moitié humide de l'année (saison des pluies, fin des pluies). En Alaska, c'est le
+ * long jour d'été où la végétation explose ; le reste de l'année, la longue nuit d'hiver.
+ */
+export function polarSummer(s: GameState): boolean {
+  return seasonIndex(s) <= 1;
+}
+
 function seasonIndex(s: GameState): number {
   const f = yearFrac(s);
   return f < 0.36 ? 0 : f < 0.5 ? 1 : f < 0.86 ? 2 : 3;

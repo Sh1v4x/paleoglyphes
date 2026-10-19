@@ -1,5 +1,5 @@
 import { addAt, advance, createPlankton, createVegetation, fieldAt, tendPlankton, type Field } from "../features/lenia";
-import { plantGrowth, thirstRate } from "../features/weather";
+import { plantGrowth, polarSummer, thirstRate } from "../features/weather";
 import { isNight } from "../daycycle";
 import { CELL_H, CELL_W, WORLD_H, WORLD_W } from "../config";
 import { saveProgress } from "../progress";
@@ -18,7 +18,7 @@ import { liveAir, liveSea } from "./eco-wild";
 import { isBaby, isYoung, lifeBrain, lifeStats, stepLife, type NestKit } from "./eco-nest";
 import { knockTree } from "../world/trees";
 import { BREAKERS, clearLine, findPath, navStats, nearestFree, pathBudget } from "./nav";
-import { atHome, canStand, parkBrain, type Animal, type Task } from "./park";
+import { atHome, canStand, homeBiomes, migrationArrived, migrationStep, parkBrain, type Animal, type Task } from "./park";
 
 /**
  * Écosystème de la réserve : besoins (faim, soif, énergie), broutage, abreuvement, sommeil,
@@ -54,6 +54,14 @@ const herdRank = new Map<number, number>();
 const huntRank = new Map<number, number>();
 const leader: Partial<Record<SpeciesId, Animal>> = {};
 const alive: Partial<Record<SpeciesId, number>> = {};
+/** Zone de saison des espèces migratrices (mise à jour à chaque pas) : boire et brouter y restent. */
+const seasonHome: Partial<Record<SpeciesId, readonly number[]>> = {};
+/** Pénalité (px) d'une plante ou d'un point d'eau hors de la zone de saison d'un migrateur. */
+const offRange = (eco: EcoState, a: Animal, x: number, y: number) => {
+  const home = seasonHome[a.sp], w = eco.world;
+  if (!home || !w) return 0;
+  return home.includes(w.biome[Math.floor(y / CELL_H) * w.cols + Math.floor(x / CELL_W)]) ? 0 : 900;
+};
 let moved = false;
 let prevT = 0;
 
@@ -344,7 +352,7 @@ function pickPlant(eco: EcoState, a: Animal, browse: Species["behavior"]["browse
   for (let i = 0; i < eco.plants.length; i++) {
     const q = eco.plants[i];
     if (q.food < 0.35 || (browse !== "both" && q.level !== browse)) continue;
-    let sc = dist(a, q) + Math.random() * 120;
+    let sc = dist(a, q) + Math.random() * 120 + offRange(eco, a, q.x, q.y);
     if (sc - 120 > bs) continue;
     for (const o of byId.values()) if (o !== a && o.task === "graze" && o.spot === i) { sc += 300; break; }
     if (sc < bs) { bs = sc; best = i; }
@@ -357,7 +365,7 @@ function pickWater(eco: EcoState, a: Animal): number {
   let best = -1, bs = Infinity;
   for (let i = 0; i < eco.water.length; i++) {
     const q = eco.water[i];
-    let sc = dist(a, q) + Math.random() * 90;
+    let sc = dist(a, q) + Math.random() * 90 + offRange(eco, a, q.x, q.y);
     if (sc - 90 > bs) continue;
     for (const o of byId.values()) if (o !== a && o.task === "drink" && o.spot === i) { sc += 400; break; }
     if (sc < bs) { bs = sc; best = i; }
@@ -560,6 +568,18 @@ function decide(s: GameState, eco: EcoState, a: Animal, spec: Species) {
   // Errance : un point au hasard, pas trop loin.
   const r = spec.walkSpeed * 16;
   a.chase = 0;
+  // Migration : hors de sa zone de saison, le chef (ou le solitaire) suit l'itinéraire du troupeau (cols,
+  // gués) par étapes ; les suiveurs gardent leur place derrière lui.
+  if (spec.migration && !migrationArrived(s, a.sp, a.x, a.y)) {
+    const g = migrationStep(s, a.sp, a.x, a.y);
+    const f = g && nearestFree(worldFor(s), a.sp, g.x, g.y, 12);
+    if (f) {
+      a.tx = f.x; a.ty = f.y; a.chase = 0; a.timer = 2;
+      a.migrating = spec.migration.summer.includes(BIOME.Tundra) === polarSummer(s) ? "le nord" : "le sud";
+      return;
+    }
+  }
+  a.migrating = undefined;
   // Il reste dans ses biomes d'origine (la toundra pour les espèces du froid...), sauf s'il en est sorti.
   for (let k = 0; k < 8; k++) {
     const tx = a.x + (Math.random() - 0.5) * r * 2, ty = a.y + (Math.random() - 0.5) * r;
@@ -920,7 +940,10 @@ export function stepEcosystem(s: GameState, dt: number) {
   const w = worldFor(s);
   const eco = ensureEco(s);
   byId.clear();
-  for (const sp of SPECIES_LIST) { leader[sp.id] = undefined; alive[sp.id] = 0; }
+  for (const sp of SPECIES_LIST) {
+    leader[sp.id] = undefined; alive[sp.id] = 0;
+    seasonHome[sp.id] = sp.migration ? homeBiomes(s, sp) : undefined;
+  }
   for (const a of p.animals) {
     byId.set(a.id, a);
     if (a.task === "dead") continue;
@@ -998,6 +1021,12 @@ export function stepEcosystem(s: GameState, dt: number) {
   stepFauna(s, eco, p.animals, dt);
 }
 
+/** Direction de la migration en cours (chef, ou suiveur d'un chef qui migre), sinon undefined. */
+export function migrating(a: Animal): string | undefined {
+  if (a.task !== "wander") return undefined;
+  return a.migrating ?? (a.herd > 1 ? leader[a.sp]?.migrating : undefined);
+}
+
 /** Ce que fait l'animal, en français simple (« broute », « fuit un prédateur »...). */
 export function activity(a: Animal): string {
   const spec = SPECIES[a.sp];
@@ -1048,7 +1077,11 @@ export function activity(a: Animal): string {
     if (a.task === "rest" && isFisher(a.sp)) return "se repose sur la plage";
   }
   switch (a.task) {
-    case "wander": return a.action === "idle" ? (a.herd > 1 ? "se tient avec son troupeau" : "observe les alentours") : a.herd > 1 ? "suit son troupeau" : "se promène";
+    case "wander": {
+      const m = migrating(a);
+      if (m && a.action !== "idle") return `migre vers ${m} avec son troupeau`;
+      return a.action === "idle" ? (a.herd > 1 ? "se tient avec son troupeau" : "observe les alentours") : a.herd > 1 ? "suit son troupeau" : "se promène";
+    }
     case "graze": return a.action === "eat" ? (spec?.behavior.browse === "high" ? "broute les feuilles des arbres" : "broute") : "cherche des plantes à brouter";
     case "drink": return a.action === "drink" ? "boit" : "va boire";
     case "rest": return "dort";

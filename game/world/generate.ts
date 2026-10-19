@@ -214,8 +214,9 @@ export function generateWorld(style: Style, seed = 7): World {
       let f = 0;
       for (const fu of fords) f = Math.max(f, Math.exp(-(((u - fu) / 0.012) ** 2)));
       const h = hw * (0.85 + 0.3 * n2(u * 21, 3.3)) * (1 + 0.6 * f);
-      const sc = 1 - 0.86 * f;
       const [sx, sy] = smp[k];
+      // Gués, et torrents de montagne peu profonds dans la toundra : les troupeaux traversent à gué.
+      const sc = sy < H * 0.3 ? Math.min(1 - 0.86 * f, 0.22) : 1 - 0.86 * f;
       const R = h * 2.2;
       const y0 = Math.max(0, Math.floor((sy - R) / CELL_H)), y1 = Math.min(rows - 1, Math.ceil((sy + R) / CELL_H));
       const x0 = Math.max(0, Math.floor((sx - R) / CELL_W)), x1 = Math.min(cols - 1, Math.ceil((sx + R) / CELL_W));
@@ -252,6 +253,19 @@ export function generateWorld(style: Style, seed = 7): World {
   const biomeOfPx = (px: number, py: number) =>
     biomeAt((px + (hash2(Math.floor(px), Math.floor(py), 61) - 0.5) * 60) / W, (py + (hash2(Math.floor(px), Math.floor(py), 62) - 0.5) * 60) / H, coast(py) / W, n2);
   /**
+   * Cols : couloirs nord-sud sinueux qui coupent les crêtes (elles courent d'est en ouest). Ce sont les
+   * routes des troupeaux qui migrent entre la toundra et Hell Creek. 1 hors des cols, ~0 en leur milieu.
+   */
+  const PASSES = [0.09, 0.22, 0.47, 0.58, 0.79];
+  const pass = (px: number, py: number) => {
+    let f = 1;
+    for (const u of PASSES) {
+      const d = Math.abs(px - (W * u + 320 * n2(py * 0.0006, u * 17))) / 230;
+      if (d < 1) f = Math.min(f, d * d);
+    }
+    return f;
+  };
+  /**
    * Relief des montagnes d'Alaska (0..1) : crêtes (bruit « ridge ») d'autant plus hautes qu'on monte
    * vers le nord. Au-dessus de ~0,5 : falaises infranchissables, cols entre les crêtes.
    */
@@ -260,7 +274,7 @@ export function generateWorld(style: Style, seed = 7): World {
     const north = Math.max(0, Math.min(1, (0.26 - v) / 0.18));
     if (north <= 0) return 0;
     const ridge = 1 - Math.abs(n2(px * 0.0005 + 3, py * 0.0011 - 7));
-    return ridge ** 6 * (0.5 + 0.7 * north) + 0.1 * n2(px * 0.004, py * 0.004);
+    return (ridge ** 6 * (0.5 + 0.7 * north) + 0.1 * n2(px * 0.004, py * 0.004)) * pass(px, py);
   };
   // Mesas et chaos rocheux du désert.
   const mesa = (px: number, py: number) => Math.max(0, n2(px * 0.0012 + 31, py * 0.0016 + 8)) ** 2 + 0.08 * n2(px * 0.01, py * 0.01);
@@ -317,6 +331,7 @@ export function generateWorld(style: Style, seed = 7): World {
       w.terrain[i] = cv ? T.Grass : ground;
     }
   }
+  sealPockets(w);
   for (let x = 0; x < cols; x++) {
     let top = -1;
     for (let y = 0; y < rows; y++) {
@@ -542,6 +557,54 @@ export function generateWorld(style: Style, seed = 7): World {
   // Contours à l'encre (cartoon). Les tiges fines n'en reçoivent pas : elles deviendraient des pâtés d'encre.
   haloRect(w, 0, 0, cols, rows);
   return w;
+}
+
+/**
+ * Poches fermées : une cuvette de toundra ou de désert entourée de falaises, coupée du reste de la
+ * carte, devient de la roche. Aucun animal n'y naît prisonnier, aucun troupeau ne s'y égare.
+ * Grille de 4 × 4 cellules ; on garde la plus grande zone praticable (et les rives, îlots et
+ * marais, que l'eau isole naturellement).
+ */
+function sealPockets(w: World) {
+  const S = 4, GW = Math.ceil(w.cols / S), GH = Math.ceil(w.rows / S);
+  const ok = new Uint8Array(GW * GH);
+  for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
+    let bad = 0, n = 0;
+    for (let y = gy * S; y < Math.min(w.rows, gy * S + S); y++) for (let x = gx * S; x < Math.min(w.cols, gx * S + S); x++, n++) {
+      const t = w.terrain[y * w.cols + x];
+      if (t === T.Rock || t === T.Deep) bad++;
+    }
+    ok[gy * GW + gx] = bad * 2 < n ? 1 : 0;
+  }
+  const comp = new Int32Array(GW * GH).fill(-1);
+  const sizes: number[] = [];
+  const q = new Int32Array(GW * GH);
+  for (let s0 = 0; s0 < ok.length; s0++) {
+    if (!ok[s0] || comp[s0] >= 0) continue;
+    const id = sizes.length;
+    let head = 0, tail = 0;
+    q[tail++] = s0; comp[s0] = id;
+    while (head < tail) {
+      const c = q[head++], x = c % GW, y = (c / GW) | 0;
+      if (x > 0 && ok[c - 1] && comp[c - 1] < 0) { comp[c - 1] = id; q[tail++] = c - 1; }
+      if (x < GW - 1 && ok[c + 1] && comp[c + 1] < 0) { comp[c + 1] = id; q[tail++] = c + 1; }
+      if (y > 0 && ok[c - GW] && comp[c - GW] < 0) { comp[c - GW] = id; q[tail++] = c - GW; }
+      if (y < GH - 1 && ok[c + GW] && comp[c + GW] < 0) { comp[c + GW] = id; q[tail++] = c + GW; }
+    }
+    sizes.push(tail);
+  }
+  const main = sizes.indexOf(Math.max(...sizes));
+  for (let k = 0; k < ok.length; k++) {
+    if (comp[k] < 0 || comp[k] === main) continue;
+    const gx = k % GW, gy = (k / GW) | 0;
+    const b = w.biome[Math.min(w.rows - 1, gy * S) * w.cols + Math.min(w.cols - 1, gx * S)];
+    if (b !== BIOME.Tundra && b !== BIOME.Desert) continue;
+    for (let y = gy * S; y < Math.min(w.rows, gy * S + S); y++) for (let x = gx * S; x < Math.min(w.cols, gx * S + S); x++) {
+      const i = y * w.cols + x;
+      if (isWater(w.terrain[i])) continue;
+      w.terrain[i] = T.Rock; w.cover[i] = 0; w.solid[i] = 1; w.depth[i] = 150;
+    }
+  }
 }
 
 function stampShadow(w: World, ox: number, oy: number, r: number) {

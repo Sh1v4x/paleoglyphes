@@ -72,6 +72,7 @@ export const UNLOCK_HINT: Record<FactUnlock, string> = {
   hunt: "Observe-le pendant qu'il chasse.",
   flee: "Observe-le pendant qu'il fuit un prédateur.",
   scavenge: "Observe-le pendant qu'il mange une carcasse.",
+  migrate: "Observe-le pendant qu'il migre avec son troupeau.",
   nest: "Observe un de ses nids (ou un parent qui le garde) dans la réserve.",
   baby: "Observe un de ses petits dans la réserve.",
 };

@@ -248,6 +248,8 @@ export const EDMONTO: Species = {
       text: "Il n'avait pas de crête creuse comme d'autres hadrosaures. Mais un grand creux autour de ses narines abritait peut-être un sac de peau gonflable pour lancer des appels." },
     { id: "colonie", title: "Des nids en colonie", unlock: "nest",
       text: "Son cousin Maiasaura, « la bonne mère lézard », nichait en colonies : des dizaines de nids en terre, espacés d'environ une longueur d'adulte. Les œufs étaient couverts de plantes qui chauffaient en pourrissant." },
+    { id: "migration", title: "Migrateur ou résident ?", unlock: "migrate",
+      text: "Des édmontosaures vivaient en Alaska, près du pôle, où l'hiver plongeait tout dans la nuit pendant des mois. Ont-ils migré vers le sud chaque hiver, comme les caribous ? Des calculs montrent qu'un troupeau pouvait parcourir ces distances. Mais on a aussi trouvé là-bas des os de bébés dinosaures : certains restaient peut-être toute l'année. Le débat continue !" },
     { id: "croissance-eclair", title: "Une croissance éclair", unlock: "baby",
       text: "À l'éclosion, un bébé hadrosaure n'était pas plus long qu'un bras. Il grandissait très vite et atteignait presque sa taille adulte en quelques années, à l'abri du troupeau." },
   ],
@@ -273,6 +275,9 @@ export const EDMONTO: Species = {
   runSpeed: 82,
   stride: 6.5,
   behavior: { diet: "herbivore", herd: [4, 7], browse: "both", prey: [], defense: "flee", sight: 340, scavenger: false },
-  // Ses troupeaux montaient jusqu'en Alaska (os de la formation de Prince Creek).
+  // Ses troupeaux montaient jusqu'en Alaska (os de la formation de Prince Creek) : en été polaire, le
+  // troupeau monte en toundra, et redescend passer l'hiver dans les forêts et les marais (hypothèse
+  // de migration, voir le fait « Migrateur ou résident ? »).
   biomes: [BIOME.HellCreek, BIOME.Swamp, BIOME.Tundra],
+  migration: { summer: [BIOME.Tundra], winter: [BIOME.HellCreek, BIOME.Swamp] },
 };

@@ -30,6 +30,11 @@ export interface Palette {
   ink: RGB;
   dirt: RGB[];
   grass: RGB[];
+  /** Sols des biomes : neige (toundra), sable (désert), vase (marais), roche (montagnes), 4 nuances chacun. */
+  snow: RGB[];
+  sand: RGB[];
+  mud: RGB[];
+  rock: RGB[];
   /** Teinte des brins au passage d'une rafale. */
   grassGust: RGB;
   waterDeep: RGB;
@@ -116,6 +121,10 @@ const DARK_PAL: Palette = {
   ink: hex("#0b0a0f"),
   dirt: [hex("#2c2620"), hex("#3a3129"), hex("#4a4036"), hex("#45423c")],
   grass: [hex("#2f3828"), hex("#3b4530"), hex("#4a5236"), hex("#5c6142")],
+  snow: [hex("#5d6672"), hex("#727c89"), hex("#8a94a1"), hex("#a3adb9")],
+  sand: [hex("#4a3d2a"), hex("#5a4a32"), hex("#6b583b"), hex("#7c6745")],
+  mud: [hex("#221e16"), hex("#2b261b"), hex("#353022"), hex("#3f3a2a")],
+  rock: [hex("#2a2a30"), hex("#38383f"), hex("#47474f"), hex("#585861")],
   grassGust: hex("#7a7840"),
   waterDeep: hex("#070b14"),
   waterMid: hex("#0f1a2a"),
@@ -193,6 +202,10 @@ const CARTOON_PAL: Palette = {
   ink: hex("#1b1f2e"),
   dirt: [hex("#9c7a58"), hex("#a8784c"), hex("#b8875a"), hex("#c79a68")],
   grass: [hex("#3c9638"), hex("#4aab45"), hex("#5ac052"), hex("#6fd266")],
+  snow: [hex("#c9dbe8"), hex("#dbe8f2"), hex("#e9f2f8"), hex("#f7fbfd")],
+  sand: [hex("#d9b46a"), hex("#e3c07a"), hex("#ebcb88"), hex("#f2d79a")],
+  mud: [hex("#5e5233"), hex("#6b5e3b"), hex("#786a44"), hex("#85764d")],
+  rock: [hex("#77736e"), hex("#8a857f"), hex("#9d9891"), hex("#b1aca5")],
   grassGust: hex("#c4f27a"),
   waterDeep: hex("#1c5aa6"),
   waterMid: hex("#2d82cf"),

@@ -8,11 +8,14 @@ export const UI_CELL_W = 8;
 export const UI_CELL_H = 15;
 export const UI_FONT_SIZE = 13;
 
-/** Taille du monde en cellules. */
-/** Terres (le paysage historique) + une bande de mer à l'est : la Voie maritime intérieure de l'Ouest. */
-export const LAND_COLS = 900;
-export const WORLD_COLS = 1180;
-export const WORLD_ROWS = 520;
+/**
+ * Taille du monde en cellules : les terres et leurs biomes (toundra au nord, Hell Creek au centre,
+ * désert et marais au sud, voir world/biomes.ts) + une bande de mer à l'est, la Voie maritime
+ * intérieure de l'Ouest.
+ */
+export const LAND_COLS = 3040;
+export const WORLD_COLS = 3540;
+export const WORLD_ROWS = 1560;
 
 export const WORLD_W = WORLD_COLS * CELL_W;
 export const WORLD_H = WORLD_ROWS * CELL_H;

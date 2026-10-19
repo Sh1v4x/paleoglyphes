@@ -17,7 +17,7 @@ import { actions, button, buttonW, hitAt, overlay, panel, put as uiPut, SP, text
 import { toast } from "../ui/toast";
 import { unlockTrigger } from "../unlock";
 import { bonePrims, clipCols, deName, IDLE_POSE, outlineRaster, primBounds, rasterMid, scaleAll, skeletonPrims } from "./dig-fossils";
-import { canStand, centerOn, observeNest, parkScene, syncPopulation } from "./park";
+import { atHome, canStand, centerOn, observeNest, parkScene, syncPopulation } from "./park";
 import { SM } from "./scenes.mat";
 import { UI_TOP, type Scene } from "./types";
 
@@ -281,7 +281,7 @@ function incubate(s: GameState, spec: Species) {
     const a = kin.length && k < 250 ? kin[k % kin.length] : undefined;
     const x = a ? a.x + (Math.random() - 0.5) * 320 : 200 + Math.random() * (WORLD_W - 400);
     const y = a ? a.y + (Math.random() - 0.5) * 150 : 200 + Math.random() * (WORLD_H - 400);
-    if (free(x, y)) pos = { x, y };
+    if (free(x, y) && (a || atHome(s, spec.id, x, y))) pos = { x, y };
   }
   if (!pos) return hint(s, "Pas de place pour un nid dans la reserve, reessaie plus tard.");
   p.eggs[spec.id] = (p.eggs[spec.id] ?? 1) - 1;

@@ -17,7 +17,7 @@ import { liveAir, liveSea } from "./eco-wild";
 import { isBaby, isYoung, lifeBrain, lifeStats, stepLife, type NestKit } from "./eco-nest";
 import { knockTree } from "../world/trees";
 import { BREAKERS, clearLine, findPath, navStats, nearestFree, pathBudget } from "./nav";
-import { canStand, parkBrain, type Animal, type Task } from "./park";
+import { atHome, canStand, parkBrain, type Animal, type Task } from "./park";
 
 /**
  * Écosystème de la réserve : besoins (faim, soif, énergie), broutage, abreuvement, sommeil,
@@ -559,9 +559,10 @@ function decide(s: GameState, eco: EcoState, a: Animal, spec: Species) {
   // Errance : un point au hasard, pas trop loin.
   const r = spec.walkSpeed * 16;
   a.chase = 0;
+  // Il reste dans ses biomes d'origine (la toundra pour les espèces du froid...), sauf s'il en est sorti.
   for (let k = 0; k < 8; k++) {
     const tx = a.x + (Math.random() - 0.5) * r * 2, ty = a.y + (Math.random() - 0.5) * r;
-    if (canStand(s, a.sp, tx, ty)) { a.tx = tx; a.ty = ty; break; }
+    if (canStand(s, a.sp, tx, ty) && (k >= 6 || atHome(s, a.sp, tx, ty))) { a.tx = tx; a.ty = ty; break; }
   }
   a.timer = 3 + Math.random() * 6;
 }
@@ -948,7 +949,8 @@ export function stepEcosystem(s: GameState, dt: number) {
     if (q.level === "low") q.food = fieldAt(eco.veg, q.x, q.y);
     else if (q.food < 1) q.food = Math.min(1, q.food + (dt * grow) / 70);
   }
-  advance(eco.plankton, dt, 2);
+  // Le plancton avance au rythme réel (2 pas/s) quelle que soit la vitesse du temps : un pas coûte cher.
+  advance(eco.plankton, dt, 2 / Math.max(1, s.clockSpeed));
   if (Math.random() < dt / 10) tendPlankton(eco.plankton);
   separate(s, p.animals, dt);
   const brain = parkBrain;

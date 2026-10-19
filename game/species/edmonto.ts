@@ -1,3 +1,4 @@
+import { BIOME } from "../world/biomes";
 import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
@@ -272,4 +273,6 @@ export const EDMONTO: Species = {
   runSpeed: 82,
   stride: 6.5,
   behavior: { diet: "herbivore", herd: [4, 7], browse: "both", prey: [], defense: "flee", sight: 340, scavenger: false },
+  // Ses troupeaux montaient jusqu'en Alaska (os de la formation de Prince Creek).
+  biomes: [BIOME.HellCreek, BIOME.Swamp, BIOME.Tundra],
 };

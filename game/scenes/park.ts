@@ -12,6 +12,7 @@ import type { Action, FactUnlock, SpeciesId } from "../species/types";
 import { worldFor, type GameState } from "../state";
 import { actions, bar, emptyState, hitAt, panel, put, region, SP, text, toolbar, wrap, type Hint, type ToolItem } from "../ui/kit";
 import { unlockTrigger } from "../unlock";
+import { BIOME, type BiomeId } from "../world/biomes";
 import { isWater } from "../world/tiles";
 import { faunaActors, faunaAt, faunaDef, noteFauna, type Bug } from "./eco-fauna";
 import { activity, stepEcosystem, type EcoState } from "./ecosystem";
@@ -233,13 +234,25 @@ export function canStand(s: GameState, sp: SpeciesId, x: number, y: number): boo
   return standable(worldFor(s), sp, x, y);
 }
 
+const HOME: readonly BiomeId[] = [BIOME.HellCreek, BIOME.Swamp];
+
+/** Le point est-il dans un biome d'origine de l'espèce ? (nageurs et volants : partout où ils tiennent) */
+export function atHome(s: GameState, sp: SpeciesId, x: number, y: number): boolean {
+  const spec = SPECIES[sp];
+  if (!spec || (spec.habitat ?? "land") !== "land") return true;
+  const w = worldFor(s);
+  const cx = Math.floor(x / CELL_W), cy = Math.floor(y / CELL_H);
+  if (cx < 0 || cy < 0 || cx >= w.cols || cy >= w.rows) return false;
+  return (spec.biomes ?? HOME).includes(w.biome[cy * w.cols + cx] as BiomeId);
+}
+
 function spawn(s: GameState, sp: SpeciesId, near?: { x: number; y: number }) {
   const p = s.park;
   const rng = mulberry32(p.nextId * 7919 + 13);
   for (let k = 0; k < 400; k++) {
     const x = near && k < 300 ? near.x + (rng() - 0.5) * 360 : 200 + rng() * (WORLD_W - 400);
     const y = near && k < 300 ? near.y + (rng() - 0.5) * 160 : 200 + rng() * (WORLD_H - 400);
-    if (!canStand(s, sp, x, y)) continue;
+    if (!canStand(s, sp, x, y) || (!(near && k < 300) && !atHome(s, sp, x, y))) continue;
     const a: Animal = {
       id: p.nextId++, sp, x, y, facing: rng() < 0.5 ? 1 : -1, walk: 0, moving: 0, action: "idle", actionT: 0,
       phase: rng() * 10, inWater: false, tx: x, ty: y, timer: rng() * 3, hunger: rng() * 0.5, thirst: rng() * 0.5,

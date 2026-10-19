@@ -5,6 +5,7 @@ import type { Palette, RGB, Theme } from "../palette";
 import { hash2, mulberry32 } from "../rng";
 import type { World } from "../world/generate";
 import { F } from "../world/flora.mat";
+import { BIOME } from "../world/biomes";
 import { COVER, T } from "../world/tiles";
 import { setBg, setFg, type Frame } from "./frame";
 import { computeLight, type PointLight } from "./lighting";
@@ -347,6 +348,13 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
           P.void[0] * (1 - bk) + m.color[0] * bk * lr + P.accent[0] * acc * 0.1,
           P.void[1] * (1 - bk) + m.color[1] * bk * lg + P.accent[1] * acc * 0.1,
           P.void[2] * (1 - bk) + m.color[2] * bk * lb + P.accent[2] * acc * 0.1);
+        // Toundra : la neige tient sur le haut du feuillage et des rochers (deux rangées sous le ciel).
+        if (!isHero && si >= 2 * w.cols && w.biome[si] === BIOME.Tundra && (!w.decorMat[si - w.cols] || (!w.decorMat[si - 2 * w.cols] && hash2(wx, wy, 14) < 0.6))) {
+          const sn = P.snow[3], k = Math.min(1.2, 0.5 + 0.75 * L);
+          f.ch[i] = hash2(wx, wy, 15) < 0.5 ? 95 : 126; // _ ~
+          setFg(f, i, sn[0] * k * lr, sn[1] * k * lg, sn[2] * k * lb);
+          setBg(f, i, sn[0] * k * 0.85 * lr, sn[1] * k * 0.85 * lg, sn[2] * k * 0.85 * lb);
+        }
         // Sous la surface : l'eau teinte le corps, et des vaguelettes passent par-dessus.
         if (isHero && aSub[i] && (terr === T.Deep || terr === T.Shallow)) {
           const k = i * 4, wsh = 0.22 + 0.08 * Math.sin(wx * 0.3 + wy * 0.5 + t * 1.6);
@@ -426,6 +434,8 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
         R += (P.grassGust[0] - R) * gw; G += (P.grassGust[1] - G) * gw; B += (P.grassGust[2] - B) * gw;
         const k = (0.7 + 0.6 * grain) * (tr > 0.25 ? 0.55 : 1) * sh * th.grassGain;
         ground(f, i, P, th, R, G, B, k, lr, lg, lb, sl, acc);
+      } else if (terr >= T.Snow) {
+        biomeGround(f, i, P, th, w, wi, wx, wy, terr, tone, grain, t, sh, sl, lr, lg, lb, acc, v.trample && v.trample[wi] ? ((v.trampleNow ?? 0) - v.trample[wi] & 0xffff) < 20 : false);
       } else {
         const gl = (0.15 + 0.85 * grain) * Math.min(1.1, sl * 1.4);
         f.ch[i] = code(th.dirtRamp, Math.floor(gl * th.dirtRamp.length));
@@ -440,6 +450,60 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
   crittersPass(v, th, f);
   fogPass(v, th, f);
   windPass(v, th, f);
+}
+
+const SNOW = " .'`:";
+const SAND = " .-~";
+const MUD = ".,~";
+const ROCK = "#%^/\\";
+
+/**
+ * Sols des biomes : neige (scintille, garde la trace des pas), dunes (rides du vent, versants éclairés),
+ * vase (flaques qui luisent), falaises (relief stocké dans `depth`, sommets enneigés en toundra).
+ */
+function biomeGround(f: Frame, i: number, P: Palette, th: Theme, w: World, wi: number, wx: number, wy: number, terr: number,
+  tone: number, grain: number, t: number, sh: number, sl: number, lr: number, lg: number, lb: number, acc: number, trampled: boolean) {
+  const ti = Math.min(3, Math.floor(tone * 4));
+  let c: number, col: RGB, k: number;
+  if (terr === T.Snow) {
+    c = trampled ? 111 : code(SNOW, Math.floor(grain * grain * SNOW.length)); // o : empreintes
+    // Éclats de givre qui scintillent au soleil (ou à la lune).
+    if (!trampled && hash2(wx, wy, Math.floor(t * 1.2 + hash2(wx, wy, 21) * 7)) > 0.985) c = 42; // *
+    col = P.snow[ti];
+    k = (0.85 + 0.25 * grain) * sh * (trampled ? 0.75 : 1);
+  } else if (terr === T.Sand) {
+    // Rides : bandes obliques déformées par le bruit, crête claire, creux sombre.
+    const r = Math.sin(wx * 0.22 + wy * 0.5 + noise(wx * 0.01, wy * 0.02) * 6);
+    c = trampled ? 46 : code(SAND, Math.floor((r * 0.5 + 0.5) * 3.99));
+    col = P.sand[ti];
+    k = (0.8 + 0.3 * r * 0.5 + 0.2 * grain) * sh;
+  } else if (terr === T.Mud) {
+    const wet = noise(wx * 0.03, wy * 0.05);
+    c = code(MUD, Math.floor(grain * 2.99));
+    col = P.mud[ti];
+    k = (0.75 + 0.4 * grain) * sh;
+    // Flaques : un reflet qui luit doucement.
+    if (wet > 0.55 && Math.sin(t * 1.3 + wx * 0.3 + wy * 0.2) > 0.3) {
+      c = 126;
+      col = P.waterShore;
+      k *= 1.3;
+    }
+  } else {
+    // Falaise : glyphes de roche, de plus en plus clairs vers les crêtes, neige au sommet en toundra.
+    const h = w.depth[wi] * INV255;
+    const cap = w.biome[wi] === BIOME.Tundra && h > 0.68 + 0.08 * grain;
+    c = cap ? (grain > 0.5 ? 94 : 126) : code(ROCK, Math.floor(grain * ROCK.length)); // ^ ~
+    col = cap ? P.snow[3] : P.rock[Math.min(3, Math.floor(h * 4))];
+    k = (0.6 + 0.6 * h) * (0.8 + 0.3 * grain) * sh;
+  }
+  if (sl < 0.3 && hash2(wx, wy, 8) > sl * 2.6) c = 32; // le noir respire, comme ailleurs
+  f.ch[i] = c;
+  ground(f, i, P, th, col[0], col[1], col[2], k * th.dirtGain, lr, lg, lb, sl, acc);
+  // La neige renvoie la lumière : son fond aussi est clair (sinon elle paraît grise).
+  if (terr === T.Snow) {
+    const q = i * 4, m = 0.5 * Math.min(1, sl);
+    f.bg[q] += (col[0] * lr - f.bg[q]) * m; f.bg[q + 1] += (col[1] * lg - f.bg[q + 1]) * m; f.bg[q + 2] += (col[2] * lb - f.bg[q + 2]) * m;
+  }
 }
 
 /** Quel animal possède la cellule `si` ? (pour colorer le contour de l'animal sélectionné) */

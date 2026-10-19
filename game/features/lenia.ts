@@ -71,14 +71,15 @@ function makeField(w: World, x0: number, cols: number, cw: number, ch: number, k
  * fait varier la couverture d'environ 40 % (sécheresse) à 55 % (pluies).
  */
 export function createVegetation(w: World, scorched = false): Field {
-  const f = makeField(w, 0, w.cols, 8, 5, (t) => !isWater(t), { R: 5, mu: 0.3, sigma: 0.1, wrapY: false });
+  // Cases de 48 × 49 px : sur la grande carte, ~66 000 cases (un pas ≈ 6 ms).
+  const f = makeField(w, 0, w.cols, 12, 7, (t) => !isWater(t) && t !== T.Rock, { R: 5, mu: 0.3, sigma: 0.1, wrapY: false });
   const rng = mulberry32(9);
   if (scorched) {
     // Après la météorite : quelques taches de spores survivent, la végétation repart de là.
     for (let k = 0; k < 40; k++) seed(f, rng() * f.W, rng() * f.H, 3, 1);
   } else {
     for (let i = 0; i < f.A.length; i++) f.A[i] = f.mask[i] && rng() < 0.5 ? rng() : 0;
-    for (let k = 0; k < 120; k++) stepField(f); // un paysage déjà installé, pas du bruit
+    for (let k = 0; k < 60; k++) stepField(f); // un paysage déjà installé, pas du bruit
   }
   return f;
 }
@@ -86,7 +87,8 @@ export function createVegetation(w: World, scorched = false): Field {
 /** Plancton : quelques Orbium qui dérivent dans l'eau profonde de la mer. */
 export function createPlankton(w: World): Field {
   const x0 = Math.max(0, Math.floor(w.seaX / CELL_W) - 20);
-  const f = makeField(w, x0, w.cols - x0, 8, 4, (t) => t === T.Deep, { R: 13, mu: 0.15, sigma: 0.015, wrapY: true });
+  // Cases de 64 × 56 px : un Orbium (20 cases) forme une nuée d'environ 1 300 px.
+  const f = makeField(w, x0, w.cols - x0, 16, 8, (t) => t === T.Deep, { R: 13, mu: 0.15, sigma: 0.015, wrapY: true });
   for (let k = 0; k < PLANKTON_BLOOMS; k++) spawnOrbium(f, Math.random);
   return f;
 }

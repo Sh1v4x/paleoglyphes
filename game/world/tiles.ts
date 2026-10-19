@@ -4,6 +4,14 @@ export const T = {
   Grass: 1,
   Shallow: 2,
   Deep: 3,
+  /** Toundra (Alaska) : neige tassée, praticable. */
+  Snow: 4,
+  /** Désert (Gobi) : dunes de sable. */
+  Sand: 5,
+  /** Marais : vase gorgée d'eau, praticable. */
+  Mud: 6,
+  /** Montagnes : falaises et éboulis infranchissables (aussi marqués `solid`). */
+  Rock: 7,
 } as const;
 
 /** Nature du couvert végétal d'une cellule T.Grass (World.cover). */

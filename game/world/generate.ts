@@ -1,5 +1,5 @@
 import { createNoise2D } from "simplex-noise";
-import { CELL_H, CELL_W, LAND_COLS, WORLD_COLS, WORLD_H, WORLD_ROWS } from "../config";
+import { CELL_H, CELL_W, LAND_COLS, WORLD_COLS, WORLD_H, WORLD_ROWS, WORLD_W } from "../config";
 import { hash2, mulberry32 } from "../rng";
 import { M } from "../render/materials";
 import { rasterize, type Prim } from "../render/raster";
@@ -8,6 +8,7 @@ import {
   araucaria, bones, cycad, deadTree, fernClump, fossilOutcrop, ginkgo, herbs, horsetails, magnolia, palm, rock, runeStone,
   sequoia, treeFern,
 } from "../sprites/decor";
+import { BIOME, biomeAt } from "./biomes";
 import { COVER, T, isWater } from "./tiles";
 import { haloRect, stampTree, type Tree } from "./trees";
 
@@ -44,13 +45,15 @@ export interface Pond {
   ry: number;
 }
 
-/** Monde statique : généré une fois, jamais modifié (sauf `plants[].food`). */
+/** Monde statique : généré une fois ; seuls les arbres (trees.ts) et `plants[].food` changent ensuite. */
 export interface World {
   cols: number;
   rows: number;
   terrain: Uint8Array;
   /** Couvert végétal des cellules T.Grass (voir COVER). */
   cover: Uint8Array;
+  /** Biome de chaque cellule (voir biomes.ts). */
+  biome: Uint8Array;
   /**
    * Bruit basse fréquence (teinte) et haute fréquence (texture), profondeur de l'eau : 0..1 stockés
    * sur un octet (0..255, lire avec `* INV255`). La carte est grande : chaque octet par case compte.
@@ -89,15 +92,17 @@ export interface World {
   waterPoints: WaterPoint[];
 }
 
-type Spot = "water" | "forest" | "edge" | "meadow";
+type Spot = "water" | "forest" | "edge" | "meadow" | "taiga" | "oasis";
 type Kind = "sequoia" | "araucaria" | "palm" | "tree-fern" | "magnolia" | "ginkgo" | "cycad" | "snag";
 
-/** Essences par milieu : [espèce, poids]. */
+/** Essences par milieu : [espèce, poids]. Taïga d'Alaska : conifères ; oasis du Gobi : palmiers et cycas. */
 const MIX: Record<Spot, [Kind, number][]> = {
   water: [["palm", 0.3], ["tree-fern", 0.25], ["sequoia", 0.2], ["magnolia", 0.15], ["cycad", 0.1]],
   forest: [["sequoia", 0.38], ["araucaria", 0.22], ["tree-fern", 0.12], ["magnolia", 0.1], ["ginkgo", 0.1], ["snag", 0.08]],
   edge: [["araucaria", 0.25], ["magnolia", 0.2], ["ginkgo", 0.15], ["cycad", 0.15], ["palm", 0.1], ["snag", 0.15]],
   meadow: [["araucaria", 0.3], ["cycad", 0.3], ["palm", 0.2], ["magnolia", 0.1], ["snag", 0.1]],
+  taiga: [["sequoia", 0.45], ["araucaria", 0.25], ["ginkgo", 0.1], ["snag", 0.2]],
+  oasis: [["palm", 0.55], ["cycad", 0.3], ["snag", 0.15]],
 };
 
 /** Modèle, empreinte solide (px), rayon d'ombre (px), étage de nourriture. */
@@ -111,6 +116,9 @@ const TREES: Record<Exclude<Kind, "snag">, [(r: () => number, dark: boolean) => 
   cycad: [cycad, 8, 26, "low"],
 };
 
+/** La grande carte compte ~9 fois la surface de l'ancienne : les tirages du décor sont multipliés d'autant. */
+const AREA = 9;
+
 /**
  * Génère le monde pour un style donné. Les positions viennent toutes du même tirage :
  * les deux styles partagent la même carte, seules les formes du décor changent (`shape()`).
@@ -123,14 +131,28 @@ export function generateWorld(style: Style, seed = 7): World {
   const dark = style === "dark";
   const n2 = createNoise2D(rng);
   const cols = WORLD_COLS, rows = WORLD_ROWS, N = cols * rows;
-  // Le paysage des terres est calé sur LAND_W (la mer s'ajoute à l'est sans rien déplacer).
+  const W = WORLD_W, H = WORLD_H;
+  // La terre ferme s'arrête à LW (la côte ondule autour) ; au-delà, la mer.
   const LW = LAND_COLS * CELL_W;
-  const pond: Pond = { x: LW * 0.6, y: WORLD_H * 0.56, rx: 560, ry: 380 };
-  const mare: Pond = { x: LW * 0.17, y: WORLD_H * 0.25, rx: 240, ry: 165 };
+  // Grand étang et mare de Hell Creek (bande centrale).
+  const pond: Pond = { x: W * 0.42, y: H * 0.47, rx: 1100, ry: 700 };
+  const mare: Pond = { x: W * 0.13, y: H * 0.41, rx: 420, ry: 290 };
+  const lakes: Pond[] = [
+    // Lacs de la toundra, entre les montagnes.
+    { x: W * 0.2, y: H * 0.16, rx: 520, ry: 300 }, { x: W * 0.56, y: H * 0.21, rx: 400, ry: 250 }, { x: W * 0.73, y: H * 0.13, rx: 320, ry: 210 },
+    // Oasis du désert.
+    { x: W * 0.17, y: H * 0.8, rx: 200, ry: 130 }, { x: W * 0.31, y: H * 0.91, rx: 150, ry: 100 },
+  ];
+  // Mares et bras morts du marais.
+  for (let k = 0; k < 22; k++) {
+    const rx = 140 + rng() * 300;
+    lakes.push({ x: W * (0.45 + rng() * 0.36), y: H * (0.68 + rng() * 0.29), rx, ry: rx * (0.55 + rng() * 0.25) });
+  }
   const w: World = {
     cols, rows,
     terrain: new Uint8Array(N),
     cover: new Uint8Array(N),
+    biome: new Uint8Array(N),
     tone: new Uint8Array(N),
     grain: new Uint8Array(N),
     depth: new Uint8Array(N),
@@ -148,8 +170,8 @@ export function generateWorld(style: Style, seed = 7): World {
     trees: [],
     lights: [],
     pond,
-    ponds: [pond, mare],
-    spawn: { x: LW * 0.3, y: WORLD_H * 0.62 },
+    ponds: [pond, mare, ...lakes],
+    spawn: { x: W * 0.25, y: H * 0.52 },
     seaX: LW,
     plants: [],
     waterPoints: [],
@@ -190,8 +212,8 @@ export function generateWorld(style: Style, seed = 7): World {
     for (let k = 0; k < smp.length; k++) {
       const u = k / (smp.length - 1);
       let f = 0;
-      for (const fu of fords) f = Math.max(f, Math.exp(-(((u - fu) / 0.025) ** 2)));
-      const h = hw * (0.85 + 0.3 * n2(u * 7, 3.3)) * (1 + 0.6 * f);
+      for (const fu of fords) f = Math.max(f, Math.exp(-(((u - fu) / 0.012) ** 2)));
+      const h = hw * (0.85 + 0.3 * n2(u * 21, 3.3)) * (1 + 0.6 * f);
       const sc = 1 - 0.86 * f;
       const [sx, sy] = smp[k];
       const R = h * 2.2;
@@ -205,9 +227,8 @@ export function generateWorld(style: Style, seed = 7): World {
       }
     }
   };
-  const W = LW, H = WORLD_H;
   // Mer à l'est : côte découpée (baies, caps), plage peu profonde puis le large.
-  const coast = (py: number) => LW * 0.985 + 90 * n2(py * 0.0012, 51) + 40 * n2(py * 0.004, 77);
+  const coast = (py: number) => LW * 0.985 + 220 * n2(py * 0.0005, 51) + 70 * n2(py * 0.003, 77);
   for (let y = 0; y < rows; y++) {
     const cx = coast((y + 0.5) * CELL_H);
     for (let x = Math.max(0, Math.floor((cx - 600) / CELL_W)); x < cols; x++) {
@@ -218,12 +239,31 @@ export function generateWorld(style: Style, seed = 7): World {
   }
   lake(pond, 0);
   lake(mare, 4.7);
-  // Affluent qui descend du nord jusqu'au grand étang, puis exutoire vers le sud-est (estuaire sur la mer).
-  river([[W * 0.36, -90], [W * 0.4, H * 0.1], [W * 0.32, H * 0.22], [W * 0.38, H * 0.33], [W * 0.48, H * 0.4], [pond.x - pond.rx * 0.45, pond.y - pond.ry * 0.4]], 34, [0.3, 0.66]);
-  river([[pond.x + pond.rx * 0.5, pond.y + pond.ry * 0.5], [W * 0.84, H * 0.76], [W * 0.78, H * 0.88], [W * 0.86, H + 90]], 28, [0.55]);
+  lakes.forEach((o, k) => lake(o, 9 + k * 2.3));
+  // Le grand fleuve descend des montagnes d'Alaska, traverse Hell Creek jusqu'au grand étang, puis
+  // les marais jusqu'à l'estuaire. Un second fleuve coule de la toundra droit vers la mer.
+  river([[W * 0.4, -90], [W * 0.37, H * 0.12], [W * 0.31, H * 0.24], [W * 0.34, H * 0.34], [W * 0.38, H * 0.4], [pond.x - pond.rx * 0.45, pond.y - pond.ry * 0.4]], 40, [0.25, 0.5, 0.78]);
+  river([[pond.x + pond.rx * 0.5, pond.y + pond.ry * 0.5], [W * 0.55, H * 0.66], [W * 0.66, H * 0.76], [W * 0.78, H * 0.84], [LW + 200, H * 0.9]], 34, [0.2, 0.55]);
+  river([[W * 0.66, -90], [W * 0.69, H * 0.15], [W * 0.66, H * 0.3], [W * 0.74, H * 0.44], [LW + 200, H * 0.52]], 32, [0.35, 0.7]);
 
   // Lisières de forêt (>0), prairies (<0).
   const forestAt = (px: number, py: number) => n2(px * 0.0009 + 17, py * 0.0011 - 5) + 0.35 * n2(px * 0.003, py * 0.003 + 9);
+  // Biome d'un point : frontières qui ondulent, tramées sur quelques cellules (pas de ligne nette).
+  const biomeOfPx = (px: number, py: number) =>
+    biomeAt((px + (hash2(Math.floor(px), Math.floor(py), 61) - 0.5) * 60) / W, (py + (hash2(Math.floor(px), Math.floor(py), 62) - 0.5) * 60) / H, coast(py) / W, n2);
+  /**
+   * Relief des montagnes d'Alaska (0..1) : crêtes (bruit « ridge ») d'autant plus hautes qu'on monte
+   * vers le nord. Au-dessus de ~0,5 : falaises infranchissables, cols entre les crêtes.
+   */
+  const relief = (px: number, py: number) => {
+    const v = py / H;
+    const north = Math.max(0, Math.min(1, (0.26 - v) / 0.18));
+    if (north <= 0) return 0;
+    const ridge = 1 - Math.abs(n2(px * 0.0005 + 3, py * 0.0011 - 7));
+    return ridge ** 6 * (0.5 + 0.7 * north) + 0.1 * n2(px * 0.004, py * 0.004);
+  };
+  // Mesas et chaos rocheux du désert.
+  const mesa = (px: number, py: number) => Math.max(0, n2(px * 0.0012 + 31, py * 0.0016 + 8)) ** 2 + 0.08 * n2(px * 0.01, py * 0.01);
 
   // --- Terrain et couvert ---
   for (let y = 0; y < rows; y++) {
@@ -231,6 +271,8 @@ export function generateWorld(style: Style, seed = 7): World {
       const i = y * cols + x;
       const px = (x + 0.5) * CELL_W, py = (y + 0.5) * CELL_H;
       const d = wd[i];
+      const b = biomeOfPx(px, py);
+      w.biome[i] = b;
       w.tone[i] = Math.round(127.5 + 127.5 * n2(px * 0.004, py * 0.004));
       w.grain[i] = Math.round(127.5 + 127.5 * n2(px * 0.08, py * 0.05));
       if (d < 1) {
@@ -241,16 +283,38 @@ export function generateWorld(style: Style, seed = 7): World {
       }
       const g = n2(px * 0.0035, py * 0.005);
       let cv: number = COVER.None;
-      if (d < 1.07) cv = g > 0.3 ? COVER.Horsetail : COVER.None; // berge de vase
-      else if (d < 1.55 + 0.25 * g) cv = g > -0.45 ? COVER.Horsetail : COVER.None;
-      else if (Math.abs(n2(px * 0.0016 + 40, py * 0.0021)) < 0.035) cv = COVER.None; // pistes des troupeaux
-      else if (forestAt(px, py) > 0.25) {
-        const h = n2(px * 0.012, py * 0.016);
-        cv = h > 0.25 ? COVER.Moss : h > -0.3 ? COVER.Fern : COVER.None;
-      } else if (g > -0.5) cv = n2(px * 0.009 + 9, py * 0.011) > 0.45 ? COVER.Herb : COVER.Fern;
-      else cv = g > -0.7 ? COVER.Moss : COVER.None;
+      let ground: number = T.Dirt;
+      if (b === BIOME.Tundra) {
+        // Neige ; mousses dégagées près de l'eau ; falaises en montagne (la hauteur va dans `depth`).
+        const h = d > 1.25 ? relief(px, py) : 0;
+        if (h > 0.5) {
+          w.terrain[i] = T.Rock; w.solid[i] = 1; w.depth[i] = Math.round(Math.min(1, h) * 255);
+          continue;
+        }
+        if (d < 1.4 && g > -0.2) cv = COVER.Moss;
+        else ground = T.Snow;
+      } else if (b === BIOME.Desert) {
+        if (d < 1.9 + 0.3 * g) cv = g > 0 ? COVER.Horsetail : COVER.Fern; // l'oasis
+        else if (mesa(px, py) > 0.42) { w.terrain[i] = T.Rock; w.solid[i] = 1; w.depth[i] = Math.round(Math.min(1, mesa(px, py)) * 255); continue; }
+        else ground = T.Sand;
+      } else if (b === BIOME.Swamp) {
+        // Vase, prêles et mousses ; peu de prairie.
+        if (d < 1.6 + 0.3 * g) cv = g > -0.3 ? COVER.Horsetail : COVER.None;
+        else if (g < -0.15) ground = T.Mud;
+        else cv = n2(px * 0.012, py * 0.016) > 0.1 ? COVER.Moss : COVER.Fern;
+        if (!cv && ground === T.Dirt) ground = T.Mud;
+      } else {
+        if (d < 1.07) cv = g > 0.3 ? COVER.Horsetail : COVER.None; // berge de vase
+        else if (d < 1.55 + 0.25 * g) cv = g > -0.45 ? COVER.Horsetail : COVER.None;
+        else if (Math.abs(n2(px * 0.0016 + 40, py * 0.0021)) < 0.035) cv = COVER.None; // pistes des troupeaux
+        else if (forestAt(px, py) > 0.25) {
+          const h = n2(px * 0.012, py * 0.016);
+          cv = h > 0.25 ? COVER.Moss : h > -0.3 ? COVER.Fern : COVER.None;
+        } else if (g > -0.5) cv = n2(px * 0.009 + 9, py * 0.011) > 0.45 ? COVER.Herb : COVER.Fern;
+        else cv = g > -0.7 ? COVER.Moss : COVER.None;
+      }
       w.cover[i] = cv;
-      w.terrain[i] = cv ? T.Grass : T.Dirt;
+      w.terrain[i] = cv ? T.Grass : ground;
     }
   }
   for (let x = 0; x < cols; x++) {
@@ -273,6 +337,10 @@ export function generateWorld(style: Style, seed = 7): World {
     const cx = Math.floor(x / CELL_W), cy = Math.floor(y / CELL_H);
     return cx < 0 || cy < 0 || cx >= cols || cy >= rows ? 0 : wd[cy * cols + cx];
   };
+  const cellOf = (x: number, y: number) => Math.min(rows - 1, Math.max(0, Math.floor(y / CELL_H))) * cols + Math.min(cols - 1, Math.max(0, Math.floor(x / CELL_W)));
+  const biomeAtPx = (x: number, y: number) => w.biome[cellOf(x, y)];
+  // Pas de décor sur les falaises.
+  const rocky = (x: number, y: number) => w.terrain[cellOf(x, y)] === T.Rock;
   // Emprises déjà prises (grille de seaux) : ne dépend que des positions, donc identique dans les deux styles.
   const B = 64, nbx = Math.ceil(W / B) + 1, nby = Math.ceil(H / B) + 1;
   const buckets: [number, number, number][][] = Array.from({ length: nbx * nby }, () => []);
@@ -295,7 +363,7 @@ export function generateWorld(style: Style, seed = 7): World {
     if (tree) {
       // Arbre : objet vivant (il peut tomber et repousser), voir trees.ts. Sa plante nourricière est
       // ajoutée juste après par l'appelant, d'où l'index w.plants.length.
-      const t: Tree = { id: w.trees.length, x: ox, y: oy, flip, prims, solidW, plant: w.plants.length, cells: [], under: [], solid: [], state: "up", t: 0, dir: 1 };
+      const t: Tree = { id: w.trees.length, x: ox, y: oy, flip, prims, solidW, plant: w.plants.length, cells: new Int32Array(0), under: new Int16Array(0), solid: [], state: "up", t: 0, dir: 1 };
       w.trees.push(t);
       stampTree(w, t);
       stampShadow(w, ox, oy, shadowR);
@@ -330,12 +398,12 @@ export function generateWorld(style: Style, seed = 7): World {
   const tries = (count: number, fn: (x: number, y: number, u: number, v: number) => boolean) => {
     for (let k = 0, made = 0; k < count * 40 && made < count; k++) {
       const x = rng() * W, y = rng() * H, u = rng(), v = rng();
-      if (inside(x, y) && fn(x, y, u, v)) made++;
+      if (inside(x, y) && !rocky(x, y) && fn(x, y, u, v)) made++;
     }
   };
 
   // Monuments : pierres runiques (dark) ou affleurements fossilifères (cartoon), sur les rives.
-  for (const [o, a] of [[pond, -2.1], [pond, 2.9], [mare, 0.4]] as const) {
+  for (const [o, a] of [[pond, -2.1], [pond, 2.9], [pond, 0.9], [mare, 0.4]] as const) {
     let f = 1.05, x = 0, y = 0;
     do { x = o.x + Math.cos(a) * o.rx * f; y = o.y + Math.sin(a) * o.ry * f; f += 0.03; } while (wdAt(x, y) < 1.18 && f < 2);
     const sr = shape();
@@ -353,13 +421,20 @@ export function generateWorld(style: Style, seed = 7): World {
     claim(x, y, 60);
   }
 
-  // Arbres : forêts denses, lisières, quelques isolés dans les prairies, palmiers et fougères au bord de l'eau.
-  tries(240, (x, y, u, v) => {
+  // Arbres : forêts denses, lisières, quelques isolés dans les prairies, palmiers et fougères au bord
+  // de l'eau ; conifères clairsemés dans la toundra ; palmiers des oasis ; rien dans les dunes.
+  tries(240 * AREA, (x, y, u, v) => {
     const d = wdAt(x, y);
     if (d < 1.3 || nearSpawn(x, y, 190)) return false;
+    const b = biomeAtPx(x, y);
     const fo = forestAt(x, y);
-    const spot: Spot = d < 2.4 ? "water" : fo > 0.25 ? "forest" : fo > 0.02 ? "edge" : "meadow";
-    const [p, r] = spot === "forest" ? [0.9, 24] : spot === "edge" ? [0.35, 30] : spot === "water" ? [0.3, 30] : [0.06, 44];
+    let spot: Spot;
+    if (b === BIOME.Tundra) spot = "taiga";
+    else if (b === BIOME.Desert) { if (d > 2.6) return false; spot = "oasis"; }
+    else if (b === BIOME.Swamp) spot = d < 3.2 ? "water" : "forest";
+    else spot = d < 2.4 ? "water" : fo > 0.25 ? "forest" : fo > 0.02 ? "edge" : "meadow";
+    const [p, r] = spot === "forest" ? [b === BIOME.Swamp ? 0.6 : 0.9, 24] : spot === "edge" ? [0.35, 30] : spot === "water" ? [0.3, 30]
+      : spot === "taiga" ? [fo > 0.1 ? 0.45 : 0.08, 30] : spot === "oasis" ? [0.6, 26] : [0.06, 44];
     if (u > p || !room(x, y, r)) return false;
     let kind: Kind = "snag";
     for (const [k, wt] of MIX[spot]) { if ((v -= wt) < 0) { kind = k; break; } }
@@ -378,47 +453,57 @@ export function generateWorld(style: Style, seed = 7): World {
     plant(x, y, kind, level);
     return true;
   });
-  // Cycas des lisières et des prairies.
-  tries(120, (x, y, u) => {
+  // Cycas des lisières et des prairies (pas dans la neige ni les dunes).
+  tries(120 * AREA, (x, y, u) => {
+    const b = biomeAtPx(x, y);
     const fo = forestAt(x, y);
+    if (b === BIOME.Tundra || (b === BIOME.Desert && wdAt(x, y) > 2.4)) return false;
     if (wdAt(x, y) < 1.4 || fo > 0.35 || u > 0.7 || nearSpawn(x, y, 120) || !room(x, y, 16)) return false;
     claim(x, y, 16);
     place(cycad(shape(), dark), x, y, 8, 26, undefined, true);
     plant(x, y, "cycad", "low");
     return true;
   });
-  // Prêles au bord de l'eau.
-  tries(170, (x, y) => {
+  // Prêles au bord de l'eau (partout : elles poussaient jusqu'en Alaska), en masse dans le marais.
+  tries(170 * AREA, (x, y) => {
     const d = wdAt(x, y);
-    if (d < 1.03 || d > 1.9 || !room(x, y, 10)) return false;
+    if (d < 1.03 || d > (biomeAtPx(x, y) === BIOME.Swamp ? 2.6 : 1.9) || !room(x, y, 10)) return false;
     claim(x, y, 10);
     place(horsetails(shape()), x, y, 0, 0);
     plant(x, y, "horsetail", "low");
     return true;
   });
-  // Touffes de fougères, surtout en sous-bois.
-  tries(240, (x, y, u) => {
+  // Touffes de fougères, surtout en sous-bois (forêts et marais).
+  tries(240 * AREA, (x, y, u) => {
+    const b = biomeAtPx(x, y);
+    if (b === BIOME.Tundra || b === BIOME.Desert) return false;
     if (wdAt(x, y) < 1.1 || (forestAt(x, y) < 0 && u > 0.45) || !room(x, y, 10)) return false;
     claim(x, y, 10);
     place(fernClump(shape(), dark), x, y, 0, 0);
     plant(x, y, "fern", "low");
     return true;
   });
-  // Herbacées à fleurs dans les prairies.
-  tries(150, (x, y) => {
+  // Herbacées à fleurs dans les prairies de Hell Creek.
+  tries(150 * AREA, (x, y) => {
+    if (biomeAtPx(x, y) !== BIOME.HellCreek) return false;
     if (wdAt(x, y) < 1.4 || forestAt(x, y) > 0.05 || !room(x, y, 8)) return false;
     claim(x, y, 8);
     place(herbs(shape()), x, y, 0, 0);
     plant(x, y, "herbs", "low");
     return true;
   });
-  tries(110, (x, y, u) => {
+  // Rochers : partout, plus nombreux dans le désert et la toundra.
+  tries(110 * AREA, (x, y, u, v) => {
+    const b = biomeAtPx(x, y);
+    if (b !== BIOME.Desert && b !== BIOME.Tundra && v > 0.55) return false;
     if (wdAt(x, y) < 1.15 || nearSpawn(x, y, 150) || !room(x, y, 18)) return false;
     claim(x, y, 18);
     place(rock(shape(), 0.7 + u * 0.8), x, y, 12, 18);
     return true;
   });
-  tries(16, (x, y) => {
+  // Ossements : le Gobi est célèbre pour ses squelettes affleurants.
+  tries(16 * AREA, (x, y, u) => {
+    if (biomeAtPx(x, y) !== BIOME.Desert && u > 0.35) return false;
     if (wdAt(x, y) < 1.2 || !room(x, y, 40)) return false;
     claim(x, y, 40);
     place(bones(shape()), x, y, 0, 26);
@@ -426,14 +511,15 @@ export function generateWorld(style: Style, seed = 7): World {
   });
 
   // Couvert broutable : un point de nourriture par carré de ~110 px de fougères, prêles ou fleurs.
-  const PATCH: Partial<Record<number, string>> = { [COVER.Fern]: "fern-meadow", [COVER.Horsetail]: "horsetail-bed", [COVER.Herb]: "herb-patch" };
+  const PATCH: Partial<Record<number, string>> = { [COVER.Fern]: "fern-meadow", [COVER.Horsetail]: "horsetail-bed", [COVER.Herb]: "herb-patch", [COVER.Moss]: "moss" };
   for (let gy = 0; gy < H; gy += 110) {
     for (let gx = 0; gx < W; gx += 110) {
       const x = gx + 20 + hash2(gx, gy, 31) * 70, y = gy + 20 + hash2(gx, gy, 32) * 70;
       if (!inside(x, y)) continue;
-      const i = Math.floor(y / CELL_H) * cols + Math.floor(x / CELL_W);
+      const i = cellOf(x, y);
       const kind = PATCH[w.cover[i]];
-      if (kind && !w.solid[i]) plant(x, y, kind, "low");
+      // La mousse ne nourrit qu'en toundra (le reste du temps, les fougères suffisent).
+      if (kind && !w.solid[i] && (kind !== "moss" || w.biome[i] === BIOME.Tundra)) plant(x, y, kind, "low");
     }
   }
   // Points d'eau : rive peu profonde, un par carré de 56 px.

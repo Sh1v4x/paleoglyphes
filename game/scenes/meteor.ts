@@ -87,7 +87,7 @@ export const meteorScene: Scene = {
     const w = worldFor(s);
     // L'onde de choc balaie la réserve : arbres couchés, dinosaures renversés.
     if (tp > T.shock && tp < T.black) {
-      const r = (tp - T.shock) * 1100;
+      const r = (tp - T.shock) * 3300; // la grande carte : le souffle la traverse entière
       for (const t of w.trees) {
         if (t.state !== "up" || Math.abs(t.x - m.ox) > r + 100) continue;
         if (Math.hypot(t.x - m.ox, (t.y - m.oy) * 1.2) < r) knockTree(w, t, t.x >= m.ox ? 1 : -1);
@@ -152,7 +152,7 @@ function overlay(s: GameState, f: Frame, tp: number) {
   const glow = clamp01((tp - 0.3) / 1.5) * (1 - clamp01((tp - T.dust) / 2));
   const dusty = clamp01((tp - T.dust + 1.5) / 2.5) * (1 - clamp01((tp - T.dawn) / 4));
   const dark = clamp01((tp - T.black + 1.2) / 1.2) * (1 - clamp01((tp - T.dawn) / 1.6));
-  const shockR = (tp - T.shock) * 1100;
+  const shockR = (tp - T.shock) * 3300;
   const camX = Math.floor(s.park.cam.x / CELL_W), camY = Math.floor(s.park.cam.y / CELL_H);
 
   for (let y = 0; y < rows; y++) {

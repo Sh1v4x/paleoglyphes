@@ -1,3 +1,4 @@
+import type { BiomeId } from "../world/biomes";
 import type { Material } from "../render/materials";
 import type { Prim } from "../render/raster";
 
@@ -111,6 +112,11 @@ export interface Species {
   behavior: Behavior;
   /** Milieu de vie (défaut : "land"). */
   habitat?: Habitat;
+  /**
+   * Biomes d'origine des espèces terrestres (défaut : forêts de Hell Creek et marais). L'animal y naît
+   * et y fait ses promenades ; il peut en sortir pour boire, chasser ou fuir.
+   */
+  biomes?: BiomeId[];
   /**
    * Reproduction (défaut : "eggs") : "eggs" = nid, couvée, éclosion ; "live" = gestation puis
    * naissance d'un petit à côté de la mère (pas de nid, pas d'œuf fossile).

@@ -24,9 +24,13 @@ export interface Tree {
   solidW: number;
   /** Plante nourricière associée (index dans world.plants), -1 sinon. */
   plant: number;
-  /** Cellules gagnées dans la couche décor, et ce qu'il y avait dessous (restauré à la chute). */
-  cells: number[];
-  under: { mat: number; lum: number; glyph: number; base: number; owner: number }[];
+  /**
+   * Cellules gagnées dans la couche décor, et ce qu'il y avait dessous (restauré à la chute) :
+   * 5 valeurs par cellule (matière, luminosité, glyphe, pied, propriétaire). Tableaux typés : la
+   * grande carte compte des milliers d'arbres de centaines de cellules chacun.
+   */
+  cells: Int32Array;
+  under: Int16Array;
   solid: number[];
   state: TreeState;
   /** Temps passé dans l'état courant (s) et sens de la chute. */
@@ -40,7 +44,7 @@ export const TREE_TIMES = { falling: 1.3, down: 25, stump: 150, growing: 7 };
 /** Pose l'arbre dans la couche décor (en notant ce qu'il recouvre) et dans les collisions. */
 export function stampTree(w: World, t: Tree) {
   const r = rasterize(t.prims, t.x, t.y, t.flip);
-  t.cells = []; t.under = [];
+  const cells: number[] = [], under: number[] = [];
   for (let j = 0; j < r.h; j++) {
     for (let i = 0; i < r.w; i++) {
       const k = j * r.w + i;
@@ -49,12 +53,13 @@ export function stampTree(w: World, t: Tree) {
       if (x < 0 || y < 0 || x >= w.cols || y >= w.rows) continue;
       const wi = y * w.cols + x;
       if (t.y < w.decorBase[wi]) continue;
-      t.cells.push(wi);
-      t.under.push({ mat: w.decorMat[wi], lum: w.decorLum[wi], glyph: w.decorGlyph[wi], base: w.decorBase[wi], owner: w.decorOwner[wi] });
+      cells.push(wi);
+      under.push(w.decorMat[wi], w.decorLum[wi], w.decorGlyph[wi], w.decorBase[wi], w.decorOwner[wi]);
       w.decorMat[wi] = r.mat[k]; w.decorLum[wi] = Math.round(r.lum[k] * 255); w.decorGlyph[wi] = r.glyph[k];
       w.decorBase[wi] = Math.round(t.y); w.decorOwner[wi] = t.id;
     }
   }
+  t.cells = Int32Array.from(cells); t.under = Int16Array.from(under);
   t.solid = [];
   if (t.solidW > 0) {
     for (let x = Math.floor((t.x - t.solidW) / CELL_W); x <= Math.floor((t.x + t.solidW) / CELL_W); x++) {
@@ -77,8 +82,8 @@ function unstampTree(w: World, t: Tree) {
   for (let n = t.cells.length - 1; n >= 0; n--) {
     const wi = t.cells[n];
     if (w.decorOwner[wi] !== t.id) continue; // recouvert depuis par un objet plus proche
-    const u = t.under[n];
-    w.decorMat[wi] = u.mat; w.decorLum[wi] = u.lum; w.decorGlyph[wi] = u.glyph; w.decorBase[wi] = u.base; w.decorOwner[wi] = u.owner;
+    const u = t.under, k = n * 5;
+    w.decorMat[wi] = u[k]; w.decorLum[wi] = u[k + 1]; w.decorGlyph[wi] = u[k + 2]; w.decorBase[wi] = u[k + 3]; w.decorOwner[wi] = u[k + 4];
     const x = wi % w.cols, y = Math.floor(wi / w.cols);
     x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
   }

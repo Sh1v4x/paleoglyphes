@@ -435,7 +435,8 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
         const k = (0.7 + 0.6 * grain) * (tr > 0.25 ? 0.55 : 1) * sh * th.grassGain;
         ground(f, i, P, th, R, G, B, k, lr, lg, lb, sl, acc);
       } else if (terr >= T.Snow) {
-        biomeGround(f, i, P, th, w, wi, wx, wy, terr, tone, grain, t, sh, sl, lr, lg, lb, acc, v.trample && v.trample[wi] ? ((v.trampleNow ?? 0) - v.trample[wi] & 0xffff) < 20 : false);
+        biomeGround(f, i, P, th, w, wi, wx, wy, terr, tone, grain, t, sh, sl, lr, lg, lb, acc,
+          v.trample && v.trample[wi] ? ((v.trampleNow ?? 0) - v.trample[wi] & 0xffff) < 20 : false, v.veg ? sample(v.veg, wx + 0.5, wy + 0.5) : 0);
       } else {
         const gl = (0.15 + 0.85 * grain) * Math.min(1.1, sl * 1.4);
         f.ch[i] = code(th.dirtRamp, Math.floor(gl * th.dirtRamp.length));
@@ -453,6 +454,11 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
 }
 
 const SNOW = " .'`:";
+/** Lichens (Xanthoria orangé, lichens gris-vert) : mêmes teintes dans les deux styles, la lumière fait le reste. */
+const LICHEN: RGB = [214, 140, 52];
+const LICHEN_GREY: RGB = [150, 168, 128];
+/** Teinte de la croûte du désert (recalculée par cellule, sans allocation). */
+const CRUST: [number, number, number] = [0, 0, 0];
 const SAND = " .-~";
 const MUD = ".,~";
 const ROCK = "#%^/\\";
@@ -462,7 +468,10 @@ const ROCK = "#%^/\\";
  * vase (flaques qui luisent), falaises (relief stocké dans `depth`, sommets enneigés en toundra).
  */
 function biomeGround(f: Frame, i: number, P: Palette, th: Theme, w: World, wi: number, wx: number, wy: number, terr: number,
-  tone: number, grain: number, t: number, sh: number, sl: number, lr: number, lg: number, lb: number, acc: number, trampled: boolean) {
+  tone: number, grain: number, t: number, sh: number, sl: number, lr: number, lg: number, lb: number, acc: number, trampled: boolean,
+  vd: number) {
+  // Végétation vivante (Lenia) de ce sol : présente ici si la densité l'emporte sur un tramage stable.
+  const alive = vd > 0.25 && hash2(wx, wy, 23) < vd * 1.1;
   const ti = Math.min(3, Math.floor(tone * 4));
   let c: number, col: RGB, k: number;
   if (terr === T.Snow) {
@@ -471,17 +480,23 @@ function biomeGround(f: Frame, i: number, P: Palette, th: Theme, w: World, wi: n
     if (!trampled && hash2(wx, wy, Math.floor(t * 1.2 + hash2(wx, wy, 21) * 7)) > 0.985) c = 42; // *
     col = P.snow[ti];
     k = (0.85 + 0.25 * grain) * sh * (trampled ? 0.75 : 1);
+    // Lichens : petites croûtes orangées ou vert-de-gris qui percent la neige.
+    if (alive && !trampled && hash2(wx, wy, 29) < 0.7) { const orange = hash2(wx, wy, 24) < 0.35; c = orange ? 37 : 38; col = orange ? LICHEN : LICHEN_GREY; k = (0.55 + 0.25 * vd) * sh; } // % &
   } else if (terr === T.Sand) {
     // Rides : bandes obliques déformées par le bruit, crête claire, creux sombre.
     const r = Math.sin(wx * 0.22 + wy * 0.5 + noise(wx * 0.01, wy * 0.02) * 6);
     c = trampled ? 46 : code(SAND, Math.floor((r * 0.5 + 0.5) * 3.99));
     col = P.sand[ti];
     k = (0.8 + 0.3 * r * 0.5 + 0.2 * grain) * sh;
+    // Croûte biologique (cyanobactéries, lichens) et touffes sèches qui fixent le sable.
+    if (alive && !trampled) { c = vd > 0.7 && hash2(wx, wy, 25) < 0.3 ? 34 : hash2(wx, wy, 25) < 0.5 ? 58 : 59; mix(P.sand[0], P.grass[0], 0.45); CRUST[0] = R; CRUST[1] = G; CRUST[2] = B; col = CRUST; k = 0.75 * sh; } // " : ;
   } else if (terr === T.Mud) {
     const wet = noise(wx * 0.03, wy * 0.05);
     c = code(MUD, Math.floor(grain * 2.99));
     col = P.mud[ti];
     k = (0.75 + 0.4 * grain) * sh;
+    // Tapis de mousses et d'hépatiques sur la vase.
+    if (alive) { c = hash2(wx, wy, 26) < 0.5 ? 34 : 44; col = P.grass[Math.min(3, 1 + Math.floor(vd * 2.5))]; k = (0.65 + 0.35 * grain) * sh; } // " ,
     // Flaques : un reflet qui luit doucement.
     if (wet > 0.55 && Math.sin(t * 1.3 + wx * 0.3 + wy * 0.2) > 0.3) {
       c = 126;
@@ -636,6 +651,16 @@ function waterPass(v: WorldView, th: Theme, f: Frame) {
             const rk = (0.3 + 0.5 * fade) * L * (th.cel ? 1.6 : 1);
             fr = P.specular[0] * rk; fg = P.specular[1] * rk; fb = P.specular[2] * rk;
           }
+        }
+      }
+
+      // Lentilles d'eau (végétation Lenia du marais) sur les eaux calmes et peu profondes.
+      if (v.veg && terr === T.Shallow && src === -1 && w.biome[wi] === BIOME.Swamp) {
+        const vd = sample(v.veg, wx + 0.5, wy + 0.5);
+        if (vd > 0.3 && hash2(wx, wy, 27) < vd * 1.15) {
+          c = hash2(wx, wy, 28) < 0.4 ? 111 : 46; // o .
+          const g = P.grass[Math.min(3, 2 + Math.floor(vd * 1.9))], kk = (th.cel ? 1.1 : 1.5) * (0.8 + 0.3 * vd);
+          fr = g[0] * kk * lr; fg = g[1] * kk * lg; fb = g[2] * kk * lb;
         }
       }
 

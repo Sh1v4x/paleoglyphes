@@ -943,7 +943,8 @@ export function stepEcosystem(s: GameState, dt: number) {
   // est un champ Lenia : la pluie élargit sa tolérance (sigma), elle couvre plus de terrain ; la
   // sécheresse la fragmente. Elle repousse très vite pendant l'aube qui suit la météorite.
   const grow = plantGrowth(s);
-  eco.veg.sigma = Math.max(0.05, Math.min(0.2, 0.05 + 0.08 * grow));
+  // Facteur météo de la végétation (1 = normal) : chaque sorte y réagit selon sa sensibilité.
+  eco.veg.sigma = Math.max(0.5, Math.min(2, 0.5 + 0.8 * grow));
   advance(eco.veg, dt, (p.regrow ?? 1) > 1 ? 16 : 0.8);
   for (const q of eco.plants) {
     if (q.level === "low") q.food = fieldAt(eco.veg, q.x, q.y);

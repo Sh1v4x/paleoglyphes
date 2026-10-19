@@ -1,5 +1,6 @@
 import { CELL_H, CELL_W } from "../config";
 import { mulberry32 } from "../rng";
+import { BIOME } from "../world/biomes";
 import type { World } from "../world/generate";
 import { T, isWater } from "../world/tiles";
 
@@ -9,7 +10,8 @@ import { T, isWater } from "../world/tiles";
  * dépérit sinon : A <- clip(A + dt * G(u)), G(u) = 2 exp(-(u - mu)² / 2 sigma²) - 1.
  *
  * Deux champs dans la réserve, sur une grille grossière posée sur le monde :
- * - la végétation basse des terres (taches et bandes de fougères qui s'étalent, se referment, reculent) ;
+ * - la végétation basse, avec des réglages par biome (voir VEG) : bandes de fougères à Hell Creek,
+ *   tapis et lentilles d'eau dans le marais, lichens sur la neige, croûtes et buissons dans le désert ;
  * - le plancton de la mer : des Orbium, la « créature » de Lenia qui nage d'elle-même.
  */
 
@@ -37,7 +39,41 @@ export interface Field {
   kw: Float32Array;
   /** Pas en attente (le champ avance à son propre rythme, indépendant des images). */
   acc: number;
+  /**
+   * Réglages par case (facultatif) : indice dans `kinds`. Sans lui, `mu` et `sigma` valent partout.
+   * `sigma` sert alors de facteur météo, appliqué à chaque sorte selon sa sensibilité `wet`.
+   */
+  kind?: Uint8Array;
+  kinds?: readonly VegKind[];
 }
+
+/** Une sorte de végétation : réglages Lenia et sensibilité à la météo (0 = indifférente). */
+export interface VegKind {
+  name: string;
+  mu: number;
+  sigma: number;
+  wet: number;
+}
+
+/**
+ * Végétation par biome. Réglages trouvés en simulation : couverture (part des cases > 0,3) et allure.
+ * - fougères (Hell Creek, oasis, mousses) : bandes et taches immobiles, ~45 %, la pluie les étend ;
+ * - marais : tapis presque continus (~55 %), jusque sur l'eau peu profonde (lentilles d'eau) ;
+ * - lichens (toundra) : petites taches éparses (~20 %) qui « respirent » lentement ;
+ * - croûte du désert : taches éparses (~24 %), cyanobactéries et lichens qui fixent le sable.
+ */
+export const VEG = {
+  Fern: 0,
+  Swamp: 1,
+  Lichen: 2,
+  Crust: 3,
+} as const;
+const VEG_KINDS: readonly VegKind[] = [
+  { name: "fougeres", mu: 0.3, sigma: 0.1, wet: 1 },
+  { name: "marais", mu: 0.3, sigma: 0.2, wet: 0.6 },
+  { name: "lichens", mu: 0.15, sigma: 0.025, wet: 0.2 },
+  { name: "croute", mu: 0.15, sigma: 0.03, wet: 0.3 },
+];
 
 function kernel(R: number) {
   const x: number[] = [], y: number[] = [], w: number[] = [];
@@ -51,7 +87,7 @@ function kernel(R: number) {
   return { kx: Int32Array.from(x), ky: Int32Array.from(y), kw: Float32Array.from(w, (v) => v / s) };
 }
 
-function makeField(w: World, x0: number, cols: number, cw: number, ch: number, keep: (t: number) => boolean,
+function makeField(w: World, x0: number, cols: number, cw: number, ch: number, keep: (t: number, b: number) => boolean,
   p: { R: number; mu: number; sigma: number; wrapY: boolean }): Field {
   const W = Math.ceil(cols / cw), H = Math.ceil(w.rows / ch);
   const mask = new Uint8Array(W * H);
@@ -59,10 +95,18 @@ function makeField(w: World, x0: number, cols: number, cw: number, ch: number, k
   for (let gy = 0; gy < H; gy++) for (let gx = 0; gx < W; gx++) {
     let ok = 0, n = 0;
     for (let y = gy * ch; y < Math.min(w.rows, (gy + 1) * ch); y++)
-      for (let x = x0 + gx * cw; x < Math.min(w.cols, x0 + (gx + 1) * cw); x++, n++) if (keep(w.terrain[y * w.cols + x])) ok++;
+      for (let x = x0 + gx * cw; x < Math.min(w.cols, x0 + (gx + 1) * cw); x++, n++) if (keep(w.terrain[y * w.cols + x], w.biome[y * w.cols + x])) ok++;
     mask[gy * W + gx] = n && ok * 2 >= n ? 1 : 0;
   }
   return { W, H, cw, ch, x0, A: new Float32Array(W * H), B: new Float32Array(W * H), mask, dt: 0.1, acc: 0, ...p, ...kernel(p.R) };
+}
+
+/** Sorte de végétation d'une cellule monde, d'après son biome et son sol. */
+function vegKindOf(t: number, b: number): number {
+  if (b === BIOME.Swamp) return VEG.Swamp;
+  if (t === T.Snow) return VEG.Lichen;
+  if (t === T.Sand) return VEG.Crust;
+  return VEG.Fern; // fougères, prêles, mousses (y compris oasis et bords de lacs de la toundra)
 }
 
 /**
@@ -72,7 +116,16 @@ function makeField(w: World, x0: number, cols: number, cw: number, ch: number, k
  */
 export function createVegetation(w: World, scorched = false): Field {
   // Cases de 48 × 49 px : sur la grande carte, ~66 000 cases (un pas ≈ 6 ms).
-  const f = makeField(w, 0, w.cols, 12, 7, (t) => !isWater(t) && t !== T.Rock, { R: 5, mu: 0.3, sigma: 0.1, wrapY: false });
+  // Sur l'eau, seules les eaux calmes et peu profondes du marais portent une végétation (lentilles d'eau).
+  const f = makeField(w, 0, w.cols, 12, 7, (t, b) => t !== T.Rock && (!isWater(t) || (t === T.Shallow && b === BIOME.Swamp)),
+    { R: 5, mu: 0.3, sigma: 1, wrapY: false });
+  // Sorte de chaque case : celle de la cellule monde en son centre.
+  f.kinds = VEG_KINDS;
+  f.kind = new Uint8Array(f.W * f.H);
+  for (let gy = 0; gy < f.H; gy++) for (let gx = 0; gx < f.W; gx++) {
+    const ci = Math.min(w.rows - 1, gy * f.ch + (f.ch >> 1)) * w.cols + Math.min(w.cols - 1, gx * f.cw + (f.cw >> 1));
+    f.kind[gy * f.W + gx] = vegKindOf(w.terrain[ci], w.biome[ci]);
+  }
   const rng = mulberry32(9);
   if (scorched) {
     // Après la météorite : quelques taches de spores survivent, la végétation repart de là.
@@ -100,8 +153,12 @@ const ORBIUM_MASS = 71;
 
 /** Un pas de Lenia sur tout le champ. */
 export function stepField(f: Field): void {
-  const { W, H, R, kx, ky, kw, mask, wrapY } = f;
-  const A = f.A, Bf = f.B, n = kw.length, inv = 1 / (2 * f.sigma * f.sigma), mu = f.mu, dt = f.dt;
+  const { W, H, R, kx, ky, kw, mask, wrapY, kind, kinds } = f;
+  const A = f.A, Bf = f.B, n = kw.length, dt = f.dt;
+  // Réglages par sorte (sigma modulé par la météo selon la sensibilité de chaque sorte).
+  const kMu: number[] = [], kInv: number[] = [];
+  if (kinds) for (const k of kinds) { const sg = k.sigma * (1 + k.wet * (f.sigma - 1)); kMu.push(k.mu); kInv.push(1 / (2 * sg * sg)); }
+  const mu0 = f.mu, inv0 = 1 / (2 * f.sigma * f.sigma);
   for (let y = 0; y < H; y++) {
     // Bords nets (rien au-delà) sauf en boucle verticale ; les cases loin des bords sautent les tests.
     const inner = y >= R && y < H - R;
@@ -120,6 +177,7 @@ export function stepField(f: Field): void {
           u += A[yy * W + xx] * kw[k];
         }
       }
+      const mu = kind ? kMu[kind[i]] : mu0, inv = kind ? kInv[kind[i]] : inv0;
       const v = A[i] + dt * (2 * Math.exp(-(u - mu) * (u - mu) * inv) - 1);
       Bf[i] = v < 0 ? 0 : v > 1 ? 1 : v;
     }

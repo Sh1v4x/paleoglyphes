@@ -9,6 +9,7 @@ import { worldFor, type GameState } from "../state";
 import { calm } from "../settings";
 import { put, region, text } from "../ui/kit";
 import { toast } from "../ui/toast";
+import { BIOME } from "../world/biomes";
 import type { World } from "../world/generate";
 import { T, isWater } from "../world/tiles";
 import { knockTree, type Tree } from "../world/trees";
@@ -124,6 +125,14 @@ export interface WeatherState {
   season: number;
   /** Forçage de test (index dans FORCE), 0 = automatique. */
   force: number;
+  /**
+   * Ce que voit la caméra : la météo globale vue à travers le biome au centre de l'écran (neige au lieu
+   * de pluie en toundra, sécheresse et chaleur au désert, brume au marais), et la neige au sol vue.
+   * Sert au dessin et à la température ; la simulation (plantes, feux, animaux) garde `lv`.
+   */
+  view: Levels;
+  viewSnow: number;
+  viewBiome: number;
 }
 
 export function createWeatherState(): WeatherState {
@@ -131,6 +140,7 @@ export function createWeatherState(): WeatherState {
     ready: false, day: 0, prevClock: 0, kind: "clear", timer: 0,
     lv: { ...TARGET.clear }, seed: 1, snowCover: 0, wet: 0, floodT: -1, event: null, eventT: 0,
     fires: [], burned: 0, douse: 0, bolt: null, nextBolt: 0, boomAt: -1e9, season: -1, force: 0,
+    view: { ...TARGET.clear }, viewSnow: 0, viewBiome: BIOME.HellCreek,
   };
 }
 
@@ -165,7 +175,7 @@ const SEASON_NOTE = [
 /** Jaunissement de la végétation 0..1 (saison sèche + chaleur), effacé par la neige. */
 function dryness(s: GameState): number {
   const st = s.weather;
-  return clamp01(smooth(0.5, 0.12, seasonWet(s)) * 0.7 + st.lv.heat * 0.35) * (1 - st.snowCover);
+  return clamp01(smooth(0.5, 0.12, seasonWet(s)) * 0.7 + st.view.heat * 0.35) * (1 - st.viewSnow);
 }
 
 /** Niveau de crue 0..1 (montée, palier, décrue). */
@@ -363,6 +373,8 @@ export function updateWeather(s: GameState, dt: number): void {
   if (st.lv.rain > 0.2) st.wet = Math.min(1, st.wet + (dt * st.lv.rain * acc) / 60);
   else st.wet = Math.max(0, st.wet - (dt * acc * (1 + st.lv.heat * 2)) / 200);
 
+  localize(s, dt);
+
   // Foudre (temps réel : un éclair toutes les quelques secondes à l'écran).
   if (st.lv.storm > 0.55 && s.time >= st.nextBolt) {
     if (st.nextBolt > 0) strike(s, w);
@@ -373,6 +385,38 @@ export function updateWeather(s: GameState, dt: number): void {
 }
 
 /** Clic sur le panneau météo (DEV) : force tour à tour chaque ciel et chaque événement. Renvoie true si traité. */
+/** Niveaux vus par la caméra (voir WeatherState.view). */
+const seen = (s: GameState): Levels => s.weather.view;
+
+/** Météo locale : le biome au centre de l'écran transforme la météo globale (transition en douceur). */
+function localize(s: GameState, dt: number) {
+  const st = s.weather, L = st.lv, w = worldFor(s);
+  const cx = Math.floor((s.park.cam.x + (metrics.cols * metrics.cellW) / 2) / CELL_W);
+  const cy = Math.floor((s.park.cam.y + (metrics.rows * metrics.cellH) / 2) / CELL_H);
+  const b = cx >= 0 && cy >= 0 && cx < w.cols && cy < w.rows ? w.biome[cy * w.cols + cx] : BIOME.HellCreek;
+  st.viewBiome = b;
+  const tg: Levels = { ...L };
+  let snowCover = st.snowCover;
+  if (b === BIOME.Tundra) {
+    // Alaska : ce qui tombe tombe en neige ; jamais de canicule.
+    tg.snow = Math.max(L.snow, L.rain * 0.9, L.cloud * 0.25);
+    tg.rain = 0; tg.storm = 0; tg.heat = 0; tg.cloud = Math.max(L.cloud, 0.3);
+    snowCover = Math.max(st.snowCover, 0.35 + 0.65 * tg.snow); // poudrée par beau temps, blanche quand il neige
+  } else if (b === BIOME.Desert) {
+    // Gobi : presque pas de pluie, chaleur sèche (le soir, elle retombe vite : voir temperature()).
+    tg.rain = L.rain * 0.2; tg.storm = L.storm * 0.2; tg.snow = 0; tg.fog = 0;
+    tg.cloud = L.cloud * 0.5; tg.heat = Math.max(L.heat, 0.5);
+    snowCover = 0;
+  } else if (b === BIOME.Swamp) {
+    // Marais : brume sur l'eau, averses plus fortes.
+    tg.fog = Math.max(L.fog, 0.3); tg.rain = Math.min(1, L.rain * 1.2);
+  }
+  const a = Math.min(1, dt * 0.5), v = st.view;
+  v.cloud += (tg.cloud - v.cloud) * a; v.rain += (tg.rain - v.rain) * a; v.storm += (tg.storm - v.storm) * a;
+  v.snow += (tg.snow - v.snow) * a; v.fog += (tg.fog - v.fog) * a; v.heat += (tg.heat - v.heat) * a;
+  st.viewSnow += (snowCover - st.viewSnow) * a;
+}
+
 export function weatherClick(s: GameState, id: string): boolean {
   if (id !== "weather:panel" || !DEV) return false;
   forceWeather(s, FORCE[(s.weather.force + 1) % FORCE.length]);
@@ -410,7 +454,7 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 export function weatherTheme(s: GameState, th: Theme): Theme {
   const st = s.weather;
   if (!st.ready) return th;
-  const lv = st.lv;
+  const lv = seen(s);
   const over = clamp01(Math.max(lv.cloud * 0.55, lv.rain * 0.75, lv.storm * 0.95, lv.snow * 0.5, lv.fog * 0.45));
   const tint = th.lightTint;
   let r = lerp(tint[0], 0.78, over * 0.6), g = lerp(tint[1], 0.84, over * 0.6), b = lerp(tint[2], 0.95, over * 0.6);
@@ -509,8 +553,8 @@ export function drawWeather(s: GameState, th: Theme, world: Frame, camX: number,
  * neige au sol et sur les cimes, brouillard, ombres de nuages. Chaque effet est sauté s'il est nul.
  */
 function groundPass(s: GameState, th: Theme, w: World, fl: { low: Uint8Array; dist: Uint8Array }, f: Frame, camX: number, camY: number) {
-  const st = s.weather, lv = st.lv, t = s.time, P = th.pal;
-  const dry = dryness(s), snowC = st.snowCover, fog = lv.fog;
+  const st = s.weather, lv = seen(s), t = s.time, P = th.pal;
+  const dry = dryness(s), snowC = st.viewSnow, fog = lv.fog;
   const floodCells = floodLevel(st) * FLOOD_MAX;
   const lowWater = dry * 0.3 * (st.floodT < 0 ? 1 : 0);
   const puddle = st.wet > 0.05 ? 255 - st.wet * 55 : 999;
@@ -611,7 +655,7 @@ function groundPass(s: GameState, th: Theme, w: World, fl: { low: Uint8Array; di
 
 /** Chaleur : l'air tremble, certaines lignes du sol glissent d'une cellule. */
 function shimmerPass(s: GameState, f: Frame, camY: number) {
-  const heat = s.weather.lv.heat * daylight(s.clock);
+  const heat = seen(s).heat * daylight(s.clock);
   if (heat < 0.2) return;
   const t = s.time, { cols, rows } = f;
   for (let y = 0; y < rows; y++) {
@@ -632,7 +676,7 @@ function shimmerPass(s: GameState, f: Frame, camY: number) {
  * À chaque cycle, un nouveau point d'impact (hachage) : aucun état, aucune allocation.
  */
 function rainPass(s: GameState, w: World, fl: { low: Uint8Array; dist: Uint8Array }, f: Frame, camX: number, camY: number) {
-  const lv = s.weather.lv;
+  const lv = seen(s);
   const I = Math.max(lv.rain, lv.storm * 0.8);
   if (I < 0.03) return;
   const t = s.time, g = gust(t);
@@ -683,7 +727,7 @@ function rainPass(s: GameState, w: World, fl: { low: Uint8Array; dist: Uint8Arra
 
 /** Neige : flocons `* . +` qui descendent en zigzag, poussés par le vent, et fondent au sol. */
 function snowPass(s: GameState, f: Frame, camX: number, camY: number) {
-  const I = s.weather.lv.snow;
+  const I = seen(s).snow;
   if (I < 0.03) return;
   const t = s.time, g = gust(t);
   const TW = 40, TH = 30, FALL = 22;
@@ -708,7 +752,7 @@ function snowPass(s: GameState, f: Frame, camX: number, camY: number) {
 
 /** Saison sèche et chaleur : poussière qui file au vent et tourbillons (`@ o .`). */
 function dustPass(s: GameState, th: Theme, f: Frame, camX: number, camY: number) {
-  const I = Math.max(s.weather.lv.heat, dryness(s) * 0.6) * (1 - s.weather.lv.rain);
+  const I = Math.max(seen(s).heat, dryness(s) * 0.6) * (1 - seen(s).rain);
   if (I < 0.1) return;
   const t = s.time, P = th.pal;
   const dust: RGB = [P.dirt[3][0] * 1.15, P.dirt[3][1] * 1.1, P.dirt[3][2] * 0.95];
@@ -895,6 +939,10 @@ export function weatherLabel(s: GameState): string {
   if (st.floodT >= 0) return "Crue";
   if (st.event === "coldsnap") return "Coup de froid";
   if (st.event === "heatwave") return "Canicule";
+  // Le ciel vu depuis le biome à l'écran : la pluie tombe en neige en Alaska, à peine au Gobi.
+  const wet = st.kind === "rain" || st.kind === "storm";
+  if (st.viewBiome === BIOME.Tundra && wet) return SKY_LABEL.snow;
+  if (st.viewBiome === BIOME.Desert && wet) return SKY_LABEL.cloudy;
   return SKY_LABEL[st.kind];
 }
 
@@ -995,9 +1043,11 @@ export function isSnowing(s: GameState): boolean {
 
 /** Température de l'air (°C, entier, pour l'affichage) : saison, heure, ciel, événements. */
 export function temperature(s: GameState): number {
-  const st = s.weather, lv = st.lv;
-  const base = 24 + 8 * (1 - seasonWet(s));
-  const day = daylight(s.clock) * 6 - 3;
+  const st = s.weather, lv = seen(s);
+  // Biome vu : l'Alaska du Crétacé est frais (pas glacial), le Gobi brûlant le jour et froid la nuit.
+  const b = st.viewBiome;
+  const base = 24 + 8 * (1 - seasonWet(s)) + (b === BIOME.Tundra ? -20 : b === BIOME.Desert ? 6 : 0);
+  const day = (daylight(s.clock) * 6 - 3) * (b === BIOME.Desert ? 3 : 1);
   let c = base + day - lv.cloud * 2 - lv.rain * 3 - lv.storm * 1 + lv.heat * 6 - lv.fog * 2;
   c = lerp(c, -2 + day * 0.5, lv.snow);
   return Math.round(c);

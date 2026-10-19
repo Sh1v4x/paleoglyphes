@@ -9,6 +9,7 @@ import { SPECIES, SPECIES_LIST } from "../species";
 import type { Action, Species, SpeciesId } from "../species/types";
 import { worldFor, type GameState } from "../state";
 import { toast } from "../ui/toast";
+import { BIOME } from "../world/biomes";
 import type { World } from "../world/generate";
 import { T, isWater } from "../world/tiles";
 import { initFauna, stepFauna, type Bug } from "./eco-fauna";
@@ -584,7 +585,10 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
   const B = spec.behavior;
   const carn = B.diet === "carnivore";
   a.hunger = Math.min(1, a.hunger + dt / (carn ? 260 : 200));
-  a.thirst = Math.min(1, a.thirst + (dt * thirstRate(s)) / 220); // la chaleur de la saison sèche donne soif
+  // La chaleur de la saison sèche donne soif ; le désert bien plus, le froid de la toundra moins.
+  const bw = worldFor(s), bb = bw.biome[Math.min(bw.rows - 1, Math.max(0, Math.floor(a.y / CELL_H))) * bw.cols + Math.min(bw.cols - 1, Math.max(0, Math.floor(a.x / CELL_W)))];
+  const thirsty = bb === BIOME.Desert ? 1.6 : bb === BIOME.Tundra ? 0.75 : 1;
+  a.thirst = Math.min(1, a.thirst + (dt * thirstRate(s) * thirsty) / 220);
   if (a.task === "rest") a.energy = Math.min(1, a.energy + dt / 22);
   else a.energy = Math.max(0, a.energy - dt / (a.action === "run" ? 40 : 320));
   a.cool = Math.max(0, a.cool - dt);

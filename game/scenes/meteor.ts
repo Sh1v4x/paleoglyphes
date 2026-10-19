@@ -1,4 +1,5 @@
 import { CELL_H, CELL_W, WORLD_H, WORLD_W } from "../config";
+import { addAt } from "../features/lenia";
 import type { RGB } from "../palette";
 import { emptyProgress, saveProgress } from "../progress";
 import { createFrame, setBg, setFg, type Frame } from "../render/frame";
@@ -95,6 +96,8 @@ export const meteorScene: Scene = {
         if (a.task === "dead" || Math.hypot(a.x - m.ox, (a.y - m.oy) * 1.2) > r) continue;
         a.task = "dead"; a.action = "dead"; a.actionT = 0; a.moving = 0; a.decay = 999; a.meat = 0;
       }
+      // Le souffle brûle la végétation (en cases de 32 px de large).
+      if (p.eco) addAt(p.eco.veg, m.ox, m.oy, r / 32, -2);
     }
     // Secousses pendant le passage de l'onde.
     // Secousses (aucune si les animations sont réduites).

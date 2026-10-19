@@ -1,4 +1,5 @@
 import { CELL_H, CELL_W } from "../config";
+import { mass, meanAround } from "../features/lenia";
 import { saveProgress } from "../progress";
 import { mulberry32 } from "../rng";
 import { SPECIES } from "../species";
@@ -548,6 +549,28 @@ function canBreed(spec: Species, a: Animal): boolean {
   return calm(a) || (spec.habitat === "air" && a.task !== "flee");
 }
 
+/**
+ * Pas de petits sans nourriture, à chaque maillon de la chaîne alimentaire : un brouteur au sol a besoin
+ * d'un pâturage autour de lui (la végétation vivante), un nageur d'au moins une nuée de plancton, un
+ * chasseur d'assez de proies dans la réserve (3 par chasseur de son espèce). Les populations suivent
+ * ainsi leur nourriture (proies et prédateurs oscillent, comme dans la nature) sans déborder.
+ * Le dernier couple d'une espèce se reproduit toujours : la réserve ne perd jamais une espèce.
+ */
+function fedEnough(s: GameState, spec: Species, a: Animal): boolean {
+  const eco = s.park.eco;
+  const n = living(s, spec.id);
+  if (!eco || n <= 2) return true;
+  if (spec.habitat === "sea") return mass(eco.plankton) > 35;
+  const B = spec.behavior;
+  if (B.diet !== "carnivore" && (B.browse === "low" || B.browse === "both")) return meanAround(eco.veg, a.x, a.y, 400) > 0.3;
+  if (B.prey.length) {
+    let prey = 0;
+    for (const o of s.park.animals) if (o.task !== "dead" && B.prey.includes(o.sp)) prey++;
+    return prey >= 3 * n;
+  }
+  return true;
+}
+
 /** Individus actuels + attendus (œufs, chantiers, gestations) d'une espèce. */
 function family(s: GameState, sp: SpeciesId): number {
   let n = 0;
@@ -569,7 +592,7 @@ function breedScan(s: GameState, k: NestKit) {
     const spec = SPECIES[a0.sp];
     if (!spec) continue;
     elig.length = 0;
-    for (const o of s.park.animals) if (o.sp === a0.sp && canBreed(spec, o)) elig.push(o);
+    for (const o of s.park.animals) if (o.sp === a0.sp && canBreed(spec, o) && fedEnough(s, spec, o)) elig.push(o);
     if (elig.length < 2 || family(s, a0.sp) >= capOf(spec)) continue;
     const hab = spec.habitat ?? "land";
     // Volants et nageurs se retrouvent de loin (vol, chants sous l'eau) : pas besoin d'être voisins.

@@ -1,4 +1,5 @@
 import { WORLD_H, WORLD_W } from "../config";
+import { addAt, densest } from "../features/lenia";
 import { SPECIES } from "../species";
 import type { Species, SpeciesId } from "../species/types";
 import { worldFor, type GameState } from "../state";
@@ -44,6 +45,18 @@ function seaPoint(s: GameState, a: Animal, r: number): boolean {
     if (deepSea(w, a.sp, tx, ty)) { a.tx = tx; a.ty = ty; return true; }
   }
   return false;
+}
+
+/**
+ * La nuée de plancton la plus dense à portée : poissons, méduses et tortues s'y rassemblent, et les
+ * chasseurs les y suivent. Faute de nuée, la chasse part au hasard (seaPoint).
+ */
+function bloomPoint(s: GameState, a: Animal): boolean {
+  const pl = s.park.eco?.plankton;
+  const b = pl && densest(pl, a.x, a.y, 1500);
+  if (!b || !deepSea(worldFor(s), a.sp, b.x, b.y)) return false;
+  a.tx = b.x; a.ty = b.y;
+  return true;
 }
 
 /** Proies des grands nageurs : poissons et tortues du large (rarement attrapés adultes). */
@@ -112,11 +125,15 @@ export function liveSea(k: WildKit, s: GameState, a: Animal, spec: Species, dt: 
         k.setTask(a, "feed", "hunt"); k.act(a, "eat"); a.timer = 3;
       }
       break;
-    case "feed":
+    case "feed": {
       k.act(a, "eat");
       a.hunger = Math.max(0, a.hunger - dt / 4);
+      // Le festin entame la nuée (un Orbium trop entamé se disloque, une autre nuée prendra le relais).
+      const pl = s.park.eco?.plankton;
+      if (pl) addAt(pl, a.x, a.y, 2, -dt * 0.15);
       if (a.timer <= 0) { k.setTask(a, "wander"); a.timer = 2; }
       break;
+    }
     case "rest":
       k.act(a, "rest");
       if (a.energy > 0.95) { k.setTask(a, "wander"); a.timer = 1; }
@@ -138,7 +155,7 @@ export function liveSea(k: WildKit, s: GameState, a: Animal, spec: Species, dt: 
             const prey = seaPrey(s, a, spec);
             if (prey) { k.setTask(a, "chase", "hunt"); a.targetId = prey.id; specialStats.seaChases++; break; }
           }
-          if (a.hunger > 0.5 && seaPoint(s, a, 900)) { k.setTask(a, "hunt", "hunt"); a.timer = 0; a.targetId = 0; break; }
+          if (a.hunger > 0.5 && (bloomPoint(s, a) || seaPoint(s, a, 900))) { k.setTask(a, "hunt", "hunt"); a.timer = 0; a.targetId = 0; break; }
           // Le poisson bondit plus souvent qu'un reptile ne remonte respirer.
           if (Math.random() < (isFish(spec) ? 0.3 : 0.15)) { k.setTask(a, "call"); k.act(a, "call"); if (isFish(spec)) specialStats.leaps++; break; }
           seaPoint(s, a, 1100);

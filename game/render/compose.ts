@@ -1,5 +1,6 @@
 import { createNoise2D } from "simplex-noise";
 import { CELL_H, CELL_W } from "../config";
+import { sample, type Field } from "../features/lenia";
 import type { Palette, RGB, Theme } from "../palette";
 import { hash2, mulberry32 } from "../rng";
 import type { World } from "../world/generate";
@@ -17,6 +18,9 @@ const FERN_TALL = "{Y}";
 const FERN_MID = "(*)";
 const HORSETAIL = "\\|/";
 const MOSS = ".:oO";
+const PLANKTON = ".:;o*";
+/** Lueur du plancton (bleu-vert froid), visible surtout la nuit. */
+const GLOW: RGB = [110, 250, 215];
 
 const smooth = (a: number, b: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -69,6 +73,10 @@ export interface WorldView {
   critters: Critter[];
   /** Herbe couchée (par cellule monde), facultatif. */
   trample?: Float32Array;
+  /** Végétation vivante (Lenia) : là où elle recule, le sol se dénude. Facultatif. */
+  veg?: Field;
+  /** Plancton de la mer (Orbium de Lenia), bioluminescent la nuit. Facultatif. */
+  plankton?: Field;
   /** Animal sélectionné : son contour prend la couleur d'accent. */
   selected?: number;
 }
@@ -392,6 +400,11 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
           else if (kind < 0.72) c = code(FERN_MID, li);
           else c = kind < 0.88 ? 44 : 34; // , "
         }
+        // Végétation vivante : là où elle a reculé (sécheresse) ou été broutée, le sol se dénude,
+        // avec un liseré clairsemé à la lisière.
+        const vd = v.veg ? sample(v.veg, wx + 0.5, wy + 0.5) : 1;
+        const bare = vd < 0.8 && hash2(wx, wy, 13) > vd * 1.25;
+        if (bare) { c = kind < 0.55 ? 46 : kind < 0.8 ? 44 : 32; gust = 0; } // . ,
         // Les zones sombres perdent des frondes : le noir respire.
         if (sl < 0.42 && hash2(wx, wy, 8) > sl * 2.1) c = sl < 0.2 ? 32 : 46;
         f.ch[i] = c;
@@ -400,6 +413,8 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
           const gi = Math.min(2.999, tone * 3);
           mix(P.grass[Math.floor(gi)], P.grass[Math.floor(gi) + 1], gi - Math.floor(gi));
         }
+        // Tondu ras : entre le vert des fougères et la terre.
+        if (bare) { const d0 = P.dirt[Math.min(3, Math.floor(tone * 4))]; R += (d0[0] - R) * 0.55; G += (d0[1] - G) * 0.55; B += (d0[2] - B) * 0.55; }
         const gw = gust * 0.55;
         R += (P.grassGust[0] - R) * gw; G += (P.grassGust[1] - G) * gw; B += (P.grassGust[2] - B) * gw;
         const k = (0.7 + 0.6 * grain) * (tr > 0.25 ? 0.55 : 1) * sh * th.grassGain;
@@ -550,6 +565,16 @@ function waterPass(v: WorldView, th: Theme, f: Frame) {
             const rk = (0.3 + 0.5 * fade) * L * (th.cel ? 1.6 : 1);
             fr = P.specular[0] * rk; fg = P.specular[1] * rk; fb = P.specular[2] * rk;
           }
+        }
+      }
+
+      // Plancton : les nuées d'Orbium scintillent au large ; la nuit, elles s'illuminent.
+      if (v.plankton && terr === T.Deep && src === -1) {
+        const pd = sample(v.plankton, wx + 0.5, wy + 0.5);
+        if (pd > 0.08 && hash2(wx, wy, Math.floor(t * 1.5 + hash2(wx, wy, 7) * 5)) < pd * 1.4) {
+          c = code(PLANKTON, Math.floor(pd * PLANKTON.length));
+          const g = Math.min(1, pd * (0.45 + 1.1 * (1 - L)));
+          fr += (GLOW[0] - fr) * g; fg += (GLOW[1] - fg) * g; fb += (GLOW[2] - fb) * g;
         }
       }
 

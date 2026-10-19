@@ -1,3 +1,4 @@
+import { addAt, advance, createPlankton, createVegetation, fieldAt, tendPlankton, type Field } from "../features/lenia";
 import { plantGrowth, thirstRate } from "../features/weather";
 import { isNight } from "../daycycle";
 import { CELL_H, CELL_W, WORLD_H, WORLD_W } from "../config";
@@ -33,6 +34,10 @@ export interface EcoState {
   plants: EcoPlant[];
   water: { x: number; y: number }[];
   fauna: Bug[];
+  /** Végétation basse vivante (Lenia) : nourriture des brouteurs au sol, broutée, fertilisée par les carcasses. */
+  veg: Field;
+  /** Plancton de la mer (Orbium de Lenia) : les bancs de poissons, et leurs chasseurs, le suivent. */
+  plankton: Field;
 }
 
 const ONE_SHOT: Partial<Record<Action, number>> = { attack: 0.9, call: 1.6, dead: 1.4, takeoff: 1.6, land: 1.4 };
@@ -281,7 +286,11 @@ function ensureEco(s: GameState): EcoState {
     ? ext.plants.map((q) => ({ x: q.x, y: q.y, level: q.level, food: q.food ?? 1 }))
     : fallbackPlants(w);
   const water = ext.waterPoints?.length ? ext.waterPoints.map((q) => ({ x: q.x, y: q.y })) : fallbackWater(w);
-  const eco: EcoState = { world: w, plants, water, fauna: p.eco?.fauna ?? [] };
+  // Juste après la météorite (repousse accélérée), la végétation repart de quelques taches de spores.
+  const eco: EcoState = {
+    world: w, plants, water, fauna: p.eco?.fauna ?? [],
+    veg: p.eco?.veg ?? createVegetation(w, (p.regrow ?? 1) > 1), plankton: p.eco?.plankton ?? createPlankton(w),
+  };
   p.eco = eco;
   if (!eco.fauna.length) initFauna(s, eco);
   return eco;
@@ -655,7 +664,9 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
         act(a, "eat");
       }
       a.hunger = Math.max(0, a.hunger - dt / 9);
-      q.food = Math.max(0, q.food - dt / 14);
+      // Au sol, il tond la végétation vivante (la trouée se refermera depuis ses bords).
+      if (q.level === "low") addAt(eco.veg, q.x, q.y, 1.2, -dt / 10);
+      else q.food = Math.max(0, q.food - dt / 14);
       if (a.hunger < 0.06) { setTask(a, "wander", a.mood); a.timer = 1 + Math.random() * 2; }
       break;
     }
@@ -927,9 +938,18 @@ export function stepEcosystem(s: GameState, dt: number) {
   }
   // Quelques chemins A* par pas au plus : les autres animaux attendent leur tour (ils avancent quand même).
   pathBudget(4);
-  // Les plantes repoussent vite en saison des pluies, lentement en saison sèche.
+  // Les plantes repoussent vite en saison des pluies, lentement en saison sèche. La végétation basse
+  // est un champ Lenia : la pluie élargit sa tolérance (sigma), elle couvre plus de terrain ; la
+  // sécheresse la fragmente. Elle repousse très vite pendant l'aube qui suit la météorite.
   const grow = plantGrowth(s);
-  for (const q of eco.plants) if (q.food < 1) q.food = Math.min(1, q.food + (dt * grow) / 70);
+  eco.veg.sigma = Math.max(0.05, Math.min(0.2, 0.05 + 0.08 * grow));
+  advance(eco.veg, dt, (p.regrow ?? 1) > 1 ? 16 : 0.8);
+  for (const q of eco.plants) {
+    if (q.level === "low") q.food = fieldAt(eco.veg, q.x, q.y);
+    else if (q.food < 1) q.food = Math.min(1, q.food + (dt * grow) / 70);
+  }
+  advance(eco.plankton, dt, 2);
+  if (Math.random() < dt / 10) tendPlankton(eco.plankton);
   separate(s, p.animals, dt);
   const brain = parkBrain;
   for (const a of p.animals) {
@@ -957,7 +977,11 @@ export function stepEcosystem(s: GameState, dt: number) {
     if (a.task !== "dead") continue;
     if (a.meat <= 0.02) a.decay = Math.min(a.decay, 20);
     a.decay -= dt;
-    if (a.decay <= 0) gone = true;
+    if (a.decay <= 0) {
+      gone = true;
+      // La carcasse a nourri le sol : la végétation explose autour de l'endroit où elle gisait.
+      addAt(eco.veg, a.x, a.y, 3, 1.5);
+    }
   }
   if (gone) {
     p.animals = p.animals.filter((a) => a.task !== "dead" || a.decay > 0);

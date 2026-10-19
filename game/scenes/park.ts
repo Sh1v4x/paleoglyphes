@@ -562,7 +562,7 @@ export const parkScene: Scene = {
     composeWorld(weatherTheme(s, litTheme(th, s.clock)), world, {
       world: w, time: s.time, camX, camY,
       glowX: p.cam.x + world.cols * CELL_W / 2, glowY: p.cam.y + world.rows * CELL_H / 2,
-      actors, critters: p.critters, trample: p.trample ?? undefined, selected: p.selected ?? (p.bug !== undefined ? 1_000_000 + p.bug : p.nestSel !== undefined ? nestActorId(p.nestSel) : undefined),
+      actors, critters: p.critters, trample: p.trample ?? undefined, veg: p.eco?.veg, plankton: p.eco?.plankton, selected: p.selected ?? (p.bug !== undefined ? 1_000_000 + p.bug : p.nestSel !== undefined ? nestActorId(p.nestSel) : undefined),
     });
 
     drawWeather(s, th, world, camX, camY);

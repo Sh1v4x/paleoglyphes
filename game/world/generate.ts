@@ -51,27 +51,31 @@ export interface World {
   terrain: Uint8Array;
   /** Couvert végétal des cellules T.Grass (voir COVER). */
   cover: Uint8Array;
-  /** Bruit basse fréquence (teinte) et haute fréquence (texture), 0..1. */
-  tone: Float32Array;
-  grain: Float32Array;
-  /** Profondeur de l'eau 0..1. */
-  depth: Float32Array;
+  /**
+   * Bruit basse fréquence (teinte) et haute fréquence (texture), profondeur de l'eau : 0..1 stockés
+   * sur un octet (0..255, lire avec `* INV255`). La carte est grande : chaque octet par case compte.
+   */
+  tone: Uint8Array;
+  grain: Uint8Array;
+  depth: Uint8Array;
   /** Ligne d'eau la plus haute de la colonne d'eau (pour les reflets). */
   surfTop: Int16Array;
   shore: Uint8Array;
   /** Couche décor pré-rastérisée. */
   decorMat: Uint8Array;
-  decorLum: Float32Array;
+  /** Luminosité du décor 0..1 sur un octet (lire avec `* INV255`). */
+  decorLum: Uint8Array;
   decorGlyph: Uint8Array;
-  /** Y monde (px) du pied de l'objet, pour trier la profondeur avec le joueur. */
-  decorBase: Float32Array;
-  shadow: Float32Array;
+  /** Y monde (px, arrondi) du pied de l'objet, pour trier la profondeur avec le joueur ; -1 sans décor. */
+  decorBase: Int16Array;
+  /** Ombre portée du décor 0..1 sur un octet (lire avec `* INV255`). */
+  shadow: Uint8Array;
   /** Cellules vides qui bordent le décor (contours à l'encre en cartoon). */
   decorHalo: Uint8Array;
   /** Objet propriétaire de chaque cellule décor / solide : id d'arbre, -1 sinon (voir trees.ts). */
-  decorOwner: Int32Array;
+  decorOwner: Int16Array;
   solid: Uint8Array;
-  solidOwner: Int32Array;
+  solidOwner: Int16Array;
   /** Arbres (renversables par le T. rex et la météorite, ils repoussent). */
   trees: Tree[];
   lights: Light[];
@@ -127,20 +131,20 @@ export function generateWorld(style: Style, seed = 7): World {
     cols, rows,
     terrain: new Uint8Array(N),
     cover: new Uint8Array(N),
-    tone: new Float32Array(N),
-    grain: new Float32Array(N),
-    depth: new Float32Array(N),
+    tone: new Uint8Array(N),
+    grain: new Uint8Array(N),
+    depth: new Uint8Array(N),
     surfTop: new Int16Array(N),
     shore: new Uint8Array(N),
     decorMat: new Uint8Array(N),
-    decorLum: new Float32Array(N),
+    decorLum: new Uint8Array(N),
     decorGlyph: new Uint8Array(N),
-    decorBase: new Float32Array(N).fill(-1),
-    shadow: new Float32Array(N).fill(1),
+    decorBase: new Int16Array(N).fill(-1),
+    shadow: new Uint8Array(N).fill(255),
     decorHalo: new Uint8Array(N),
-    decorOwner: new Int32Array(N).fill(-1),
+    decorOwner: new Int16Array(N).fill(-1),
     solid: new Uint8Array(N),
-    solidOwner: new Int32Array(N).fill(-1),
+    solidOwner: new Int16Array(N).fill(-1),
     trees: [],
     lights: [],
     pond,
@@ -227,11 +231,12 @@ export function generateWorld(style: Style, seed = 7): World {
       const i = y * cols + x;
       const px = (x + 0.5) * CELL_W, py = (y + 0.5) * CELL_H;
       const d = wd[i];
-      w.tone[i] = 0.5 + 0.5 * n2(px * 0.004, py * 0.004);
-      w.grain[i] = 0.5 + 0.5 * n2(px * 0.08, py * 0.05);
+      w.tone[i] = Math.round(127.5 + 127.5 * n2(px * 0.004, py * 0.004));
+      w.grain[i] = Math.round(127.5 + 127.5 * n2(px * 0.08, py * 0.05));
       if (d < 1) {
-        w.depth[i] = Math.min(1, (1 - d) * 1.8) * wsc[i];
-        w.terrain[i] = w.depth[i] < 0.28 ? T.Shallow : T.Deep;
+        const dep = Math.min(1, (1 - d) * 1.8) * wsc[i];
+        w.depth[i] = Math.round(dep * 255);
+        w.terrain[i] = dep < 0.28 ? T.Shallow : T.Deep;
         continue;
       }
       const g = n2(px * 0.0035, py * 0.005);
@@ -306,9 +311,9 @@ export function generateWorld(style: Style, seed = 7): World {
         const wi = y * cols + x;
         if (oy < w.decorBase[wi]) continue;
         w.decorMat[wi] = r.mat[k];
-        w.decorLum[wi] = r.lum[k];
+        w.decorLum[wi] = Math.round(r.lum[k] * 255);
         w.decorGlyph[wi] = r.glyph[k];
-        w.decorBase[wi] = oy;
+        w.decorBase[wi] = Math.round(oy);
         w.decorOwner[wi] = -1;
       }
     }
@@ -461,7 +466,7 @@ function stampShadow(w: World, ox: number, oy: number, r: number) {
       const d = dx * dx + dy * dy;
       if (d < 1) {
         const i = y * w.cols + x;
-        w.shadow[i] = Math.min(w.shadow[i], 0.45 + 0.55 * d);
+        w.shadow[i] = Math.min(w.shadow[i], Math.round((0.45 + 0.55 * d) * 255));
       }
     }
   }

@@ -51,8 +51,8 @@ export function stampTree(w: World, t: Tree) {
       if (t.y < w.decorBase[wi]) continue;
       t.cells.push(wi);
       t.under.push({ mat: w.decorMat[wi], lum: w.decorLum[wi], glyph: w.decorGlyph[wi], base: w.decorBase[wi], owner: w.decorOwner[wi] });
-      w.decorMat[wi] = r.mat[k]; w.decorLum[wi] = r.lum[k]; w.decorGlyph[wi] = r.glyph[k];
-      w.decorBase[wi] = t.y; w.decorOwner[wi] = t.id;
+      w.decorMat[wi] = r.mat[k]; w.decorLum[wi] = Math.round(r.lum[k] * 255); w.decorGlyph[wi] = r.glyph[k];
+      w.decorBase[wi] = Math.round(t.y); w.decorOwner[wi] = t.id;
     }
   }
   t.solid = [];

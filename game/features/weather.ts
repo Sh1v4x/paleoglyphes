@@ -531,7 +531,7 @@ function groundPass(s: GameState, th: Theme, w: World, fl: { low: Uint8Array; di
       const L = (f.lr[i] + f.lg[i] + f.lb[i]) / 3;
       if (terr === T.Shallow || terr === T.Deep) {
         // Saison sèche : les bords des mares se découvrent (boue craquelée).
-        if (lowWater > 0 && !obj && terr === T.Shallow && w.depth[wi] < lowWater) {
+        if (lowWater > 0 && !obj && terr === T.Shallow && w.depth[wi] / 255 < lowWater) {
           const h = hash2(wx, wy, 81);
           f.ch[i] = h < 0.35 ? 46 : h < 0.55 ? 44 : h < 0.65 ? 95 : 32; // . , _
           f.fg[k] = mud[0] * L * 1.2; f.fg[k + 1] = mud[1] * L * 1.2; f.fg[k + 2] = mud[2] * L * 1.2;

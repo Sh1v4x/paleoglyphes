@@ -26,6 +26,8 @@ const smooth = (a: number, b: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
+/** Les champs 0..1 du monde sont stockés sur un octet (voir World). */
+const INV255 = 1 / 255;
 const code = (s: string, i: number) => s.charCodeAt(Math.min(s.length - 1, Math.max(0, i)));
 
 // Registres de couleur réutilisés pour éviter toute allocation par cellule.
@@ -71,8 +73,12 @@ export interface WorldView {
   glowY: number;
   actors: Actor[];
   critters: Critter[];
-  /** Herbe couchée (par cellule monde), facultatif. */
-  trample?: Float32Array;
+  /**
+   * Herbe couchée : instant du dernier passage par cellule monde (dixièmes de seconde, modulo 65536,
+   * 0 = jamais), et l'instant présent. Une fronde se relève ~2 s après le passage. Facultatif.
+   */
+  trample?: Uint16Array;
+  trampleNow?: number;
   /** Végétation vivante (Lenia) : là où elle recule, le sol se dénude. Facultatif. */
   veg?: Field;
   /** Plancton de la mer (Orbium de Lenia), bioluminescent la nuit. Facultatif. */
@@ -290,7 +296,7 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
       const si = swaySource(w, wi, sk);
       const dm = si >= 0 ? w.decorMat[si] : 0;
       if (dm && (!(isHero || aHalo[i] >= 0) || w.decorBase[si] > aBase[i])) {
-        mat = dm; lum = w.decorLum[si]; glyph = w.decorGlyph[si]; isHero = false;
+        mat = dm; lum = w.decorLum[si] * INV255; glyph = w.decorGlyph[si]; isHero = false;
         // Reflet qui court sur le feuillage au passage d'une rafale.
         if (SWAY[dm]) lum = Math.min(1, lum + 0.14 * Math.max(0, Math.sin(wx * 0.045 + wy * 0.02 - t * 1.4)) * gust(t));
       }
@@ -368,14 +374,15 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
       }
 
       // Ombre portée : décor (précalculée) + animaux.
-      const sh = Math.min(w.shadow[wi], aShadow[i]);
+      const sh = Math.min(w.shadow[wi] * INV255, aShadow[i]);
       const sl = sh * L;
 
-      const tone = w.tone[wi], grain = w.grain[wi];
+      const tone = w.tone[wi] * INV255, grain = w.grain[wi] * INV255;
       if (terr === T.Grass) {
         // Couvert du Crétacé : fougères qui ondulent, prêles au bord de l'eau, mousse, fleurettes.
         const cv = w.cover[wi];
-        const tr = v.trample ? v.trample[wi] : 0;
+        const ts = v.trample ? v.trample[wi] : 0;
+        const tr = ts && ((v.trampleNow ?? 0) - ts & 0xffff) < 20 ? 1 : 0;
         const kind = hash2(wx, wy, 3);
         let c: number, gust = 0;
         let tint: RGB | null = null;
@@ -487,7 +494,7 @@ function waterPass(v: WorldView, th: Theme, f: Frame) {
       if ((terr !== T.Shallow && terr !== T.Deep) || f.obj[i]) continue;
       const lr = f.lr[i], lg = f.lg[i], lb = f.lb[i], acc = f.acc[i];
       const L = (lr + lg + lb) / 3;
-      const d = w.depth[wi];
+      const d = w.depth[wi] * INV255;
       const wave = Math.sin(wx * 0.31 + t * 1.1 + Math.sin(wy * 0.45 + t * 0.6) * 1.6) * 0.55
         + Math.sin(wy * 0.83 - t * 0.9 + wx * 0.11) * 0.45;
       if (d < 0.5) mix(P.waterShore, P.waterMid, d * 2);

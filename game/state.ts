@@ -53,7 +53,11 @@ export interface GameState {
 }
 
 export function worldFor(s: GameState, style: Style = s.style): World {
-  return (s.worlds[style] ??= generateWorld(style));
+  const w = s.worlds[style];
+  if (w) return w;
+  // Un seul monde en mémoire (la carte est grande) : l'autre style sera régénéré s'il revient.
+  s.worlds = { [style]: generateWorld(style) };
+  return s.worlds[style]!;
 }
 
 export function createState(): GameState {

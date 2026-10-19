@@ -146,7 +146,8 @@ export interface ParkState {
   /** Caméra qui suit l'animal sélectionné. */
   follow: boolean;
   critters: (Critter & { hx: number; hy: number })[];
-  trample: Float32Array | null;
+  /** Herbe couchée : instant du dernier passage par cellule (voir WorldView.trample). */
+  trample: Uint16Array | null;
   started: boolean;
   /** Vitesse de repousse des arbres (accélérée après la météorite). */
   regrow?: number;
@@ -189,6 +190,9 @@ export interface Nest {
   /** Éclos : coquilles vides, il disparaît après un moment (s restantes). */
   hatched?: number;
 }
+
+/** Horloge de l'herbe couchée : dixièmes de seconde modulo 65536, jamais 0 (0 = jamais piétiné). */
+const trampleNow = (s: GameState) => (Math.floor(s.time * 10) & 0xffff) || 1;
 
 export function createParkState(): ParkState {
   return { cam: { x: 0, y: 0 }, animals: [], nextId: 1, follow: false, critters: [], trample: null, started: false, eco: null, wheel: 0, nests: [], nextNest: 1 };
@@ -271,7 +275,7 @@ function start(s: GameState) {
   const p = s.park;
   const w = worldFor(s);
   p.started = true;
-  p.trample = new Float32Array(w.cols * w.rows);
+  p.trample = new Uint16Array(w.cols * w.rows);
   const rng = mulberry32(99);
   for (let i = 0; i < 28; i++) {
     const a = rng() * TAU, r = 0.8 + rng() * 0.5;
@@ -434,18 +438,16 @@ export const parkScene: Scene = {
     p.cam.x = Math.max(0, Math.min(w.cols * CELL_W - metrics.cols * CELL_W, p.cam.x));
     p.cam.y = Math.max(0, Math.min(w.rows * CELL_H - metrics.rows * CELL_H, p.cam.y));
 
-    // Herbe couchée sous les pas.
+    // Herbe couchée sous les pas : on note l'instant du passage (rien à faire décroître sur toute la carte).
     if (p.trample) {
-      const decay = Math.exp(-dt / 1.4);
-      const tr = p.trample;
-      for (let i = 0; i < tr.length; i++) if (tr[i] > 0.01) tr[i] *= decay; else tr[i] = 0;
+      const tr = p.trample, now = trampleNow(s);
       for (const a of p.animals) {
         if (a.moving < 0.3) continue;
         const spec = SPECIES[a.sp];
         if (!spec) continue;
         for (const fx of spec.feet) {
           const i = Math.floor(a.y / CELL_H) * w.cols + Math.floor((a.x + fx * a.facing) / CELL_W);
-          if (i > 0 && i < tr.length - 1) { tr[i] = 1; tr[i + 1] = 1; tr[i - 1] = 1; }
+          if (i > 0 && i < tr.length - 1) { tr[i] = now; tr[i + 1] = now; tr[i - 1] = now; }
         }
       }
     }
@@ -562,7 +564,7 @@ export const parkScene: Scene = {
     composeWorld(weatherTheme(s, litTheme(th, s.clock)), world, {
       world: w, time: s.time, camX, camY,
       glowX: p.cam.x + world.cols * CELL_W / 2, glowY: p.cam.y + world.rows * CELL_H / 2,
-      actors, critters: p.critters, trample: p.trample ?? undefined, veg: p.eco?.veg, plankton: p.eco?.plankton, selected: p.selected ?? (p.bug !== undefined ? 1_000_000 + p.bug : p.nestSel !== undefined ? nestActorId(p.nestSel) : undefined),
+      actors, critters: p.critters, trample: p.trample ?? undefined, trampleNow: trampleNow(s), veg: p.eco?.veg, plankton: p.eco?.plankton, selected: p.selected ?? (p.bug !== undefined ? 1_000_000 + p.bug : p.nestSel !== undefined ? nestActorId(p.nestSel) : undefined),
     });
 
     drawWeather(s, th, world, camX, camY);

@@ -6,9 +6,11 @@ const KEYS: Record<string, [number, number]> = {
  * Touches lues par le jeu (les autres restent au navigateur). Carte du clavier :
  * 1-6 onglets ; Tab / Maj+Tab focus suivant / précédent ; Entrée / Espace activer ; Échap retour puis menu ;
  * Retour arrière : retour ; H aide ; V documentaire ; P appareil photo ; C recensement ; M carte ; T temps ;
- * E/R/F outils de fouille ; N (dev) debug navigation ; flèches / ZQSD / WASD déplacements.
+ * E/R/F outils de fouille ; N (dev) debug navigation ; flèches / ZQSD / WASD déplacements ;
+ * zoom de la réserve : les deux touches à droite du 0 (« = » et « ) » en AZERTY, « = » et « - » en QWERTY),
+ * + et - du pavé numérique, pincement ou Ctrl + molette.
  */
-const PRESS = new Set(["Escape", "Enter", "Space", "Tab", "Backspace", "KeyH", "KeyT", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "KeyP", "KeyV", "KeyM", "KeyE", "KeyR", "KeyF", "KeyC", "KeyN", ...Object.keys(KEYS)]);
+const PRESS = new Set(["Equal", "Minus", "NumpadAdd", "NumpadSubtract", "Escape", "Enter", "Space", "Tab", "Backspace", "KeyH", "KeyT", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "KeyP", "KeyV", "KeyM", "KeyE", "KeyR", "KeyF", "KeyC", "KeyN", ...Object.keys(KEYS)]);
 
 export interface Click {
   /** Position en px CSS dans le canvas. */
@@ -41,6 +43,8 @@ export interface Input {
     dragY: number;
     /** Molette cumulée. */
     wheel: number;
+    /** Zoom cumulé (pincement du pavé tactile, Ctrl/Cmd + molette) : < 0 zoom avant. Absent = 0. */
+    zoom?: number;
   };
   /** Clics routés vers l'interface (ids des zones cliquées), remplis par le cœur des scènes. */
   ui: string[];
@@ -52,7 +56,7 @@ export interface Input {
 export function bindInput(canvas: HTMLCanvasElement): { read: () => Input; dispose: () => void } {
   const down = new Set<string>();
   let pressed: string[] = [];
-  const mouse: Input["mouse"] = { x: -1, y: -1, inside: false, down: false, clicks: [], presses: [], releases: [], dragX: 0, dragY: 0, wheel: 0 };
+  const mouse: Input["mouse"] = { x: -1, y: -1, inside: false, down: false, clicks: [], presses: [], releases: [], dragX: 0, dragY: 0, wheel: 0, zoom: 0 };
   let start: { x: number; y: number } | null = null;
   let moved = 0;
 
@@ -92,7 +96,12 @@ export function bindInput(canvas: HTMLCanvasElement): { read: () => Input; dispo
     start = null;
   };
   const onLeave = () => { mouse.inside = false; };
-  const onWheel = (e: WheelEvent) => { e.preventDefault(); mouse.wheel += e.deltaY; };
+  const onWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    // Le pincement d'un pavé tactile arrive comme une molette avec Ctrl.
+    if (e.ctrlKey || e.metaKey) mouse.zoom = (mouse.zoom ?? 0) + e.deltaY;
+    else mouse.wheel += e.deltaY;
+  };
   const onMenu = (e: Event) => e.preventDefault();
 
   window.addEventListener("keydown", onDown);
@@ -111,7 +120,7 @@ export function bindInput(canvas: HTMLCanvasElement): { read: () => Input; dispo
       const p = pressed;
       pressed = [];
       const m = { ...mouse, clicks: mouse.clicks, presses: mouse.presses, releases: mouse.releases };
-      mouse.clicks = []; mouse.presses = []; mouse.releases = []; mouse.dragX = 0; mouse.dragY = 0; mouse.wheel = 0;
+      mouse.clicks = []; mouse.presses = []; mouse.releases = []; mouse.dragX = 0; mouse.dragY = 0; mouse.wheel = 0; mouse.zoom = 0;
       return { dx: Math.sign(dx), dy: Math.sign(dy), pressed: p, mouse: m, ui: [], worldClicks: [] };
     },
     dispose: () => {

@@ -5,6 +5,8 @@ import { DEV, FONT_SIZE } from "@/game/config";
 import { bindInput } from "@/game/input";
 import { startLoop } from "@/game/loop";
 import { Renderer } from "@/game/render/draw";
+import { view } from "@/game/render/metrics";
+import { worldZoom } from "@/game/scenes/park";
 import { composeGame, updateGame } from "@/game/scenes";
 import { createState } from "@/game/state";
 
@@ -29,7 +31,7 @@ export default function Game({ fontFamily }: { fontFamily: string }) {
       window.addEventListener("resize", resize);
       const halt = startLoop(
         (dt) => updateGame(state, input.read(), dt),
-        (fps) => { composeGame(state, renderer.frame, renderer.ui, fps); renderer.draw(); },
+        (fps) => { view.zoom = worldZoom(state); renderer.sync(); composeGame(state, renderer.frame, renderer.ui, fps); renderer.draw(); },
       );
       stop = () => { halt(); input.dispose(); window.removeEventListener("resize", resize); };
     })();

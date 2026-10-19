@@ -521,6 +521,83 @@ function biomeGround(f: Frame, i: number, P: Palette, th: Theme, w: World, wi: n
   }
 }
 
+/** Un point à placer sur la vue carte (animal, nid). */
+export interface MapMark {
+  x: number;
+  y: number;
+  glyph: number;
+  color: RGB;
+}
+
+/** Vue carte (dézoom) : chaque cellule écran résume `k` × `k` cellules du monde. */
+export interface MapView {
+  world: World;
+  time: number;
+  /** Coin haut-gauche de la vue, en cellules monde. */
+  camX: number;
+  camY: number;
+  k: number;
+  /** Lumière du jour 0..1 : la carte s'assombrit la nuit, sans ombres ni éclairage fin. */
+  light: number;
+  veg?: Field;
+  plankton?: Field;
+  marks: MapMark[];
+}
+
+/**
+ * Vue carte : un glyphe par bloc, d'après la cellule centrale (sol, décor, eau), avec la végétation
+ * vivante et le plancton (Lenia) qui bougent, et les animaux en lettres. Pas de rastérisation : on voit
+ * toute la carte d'un coup sans ralentir.
+ */
+export function composeMap(th: Theme, f: Frame, v: MapView): void {
+  const P = th.pal, w = v.world, { cols, rows } = f, k = v.k, half = k >> 1;
+  const L = 0.35 + 0.65 * v.light;
+  for (let y = 0; y < rows; y++) {
+    const wy = v.camY + y * k + half;
+    for (let x = 0; x < cols; x++) {
+      const i = y * cols + x, wx = v.camX + x * k + half;
+      f.obj[i] = 0;
+      if (wx < 0 || wy < 0 || wx >= w.cols || wy >= w.rows) {
+        f.ch[i] = 32; setFg(f, i, P.void[0], P.void[1], P.void[2]); setBg(f, i, P.void[0], P.void[1], P.void[2]);
+        continue;
+      }
+      const wi = wy * w.cols + wx, terr = w.terrain[wi], tone = w.tone[wi] * INV255, ti = Math.min(3, Math.floor(tone * 4));
+      let c = 46, col: RGB = P.dirt[ti], g = 1;
+      const vd = v.veg ? sample(v.veg, wx + 0.5, wy + 0.5) : 0;
+      if (terr === T.Deep || terr === T.Shallow) {
+        col = terr === T.Deep ? P.waterDeep : P.waterMid;
+        c = Math.sin(wx * 0.05 + wy * 0.09 + v.time) > 0.6 ? 126 : 32; // vaguelettes ~
+        g = th.cel ? 1.3 : 2.2;
+        const pd = v.plankton && terr === T.Deep ? sample(v.plankton, wx + 0.5, wy + 0.5) : 0;
+        if (pd > 0.1) { c = pd > 0.5 ? 42 : 58; mix(col, GLOW, Math.min(1, pd * (0.5 + 0.8 * (1 - v.light)))); col = [R, G, B]; g = 1.2; } // * :
+        else if (terr === T.Shallow && w.biome[wi] === BIOME.Swamp && vd > 0.3) { c = 111; col = P.grass[2]; } // o lentilles d'eau
+      } else if (terr === T.Rock) {
+        const h = w.depth[wi] * INV255, cap = w.biome[wi] === BIOME.Tundra && h > 0.7;
+        c = 94; col = cap ? P.snow[3] : P.rock[Math.min(3, Math.floor(h * 4))]; g = 1.2; // ^
+      } else if (w.decorMat[wi] && th.mats[w.decorMat[wi]]) {
+        // Arbres et rochers : leur couleur, un glyphe d'arbre.
+        col = th.mats[w.decorMat[wi]].color; c = w.biome[wi] === BIOME.Tundra ? 65 : 84; g = 1.1; // A (conifère) T
+      } else if (terr === T.Snow) { c = vd > 0.35 ? 37 : 46; col = vd > 0.35 ? LICHEN : P.snow[ti]; } // % .
+      else if (terr === T.Sand) { c = vd > 0.35 ? 59 : 126; col = vd > 0.35 ? P.grass[0] : P.sand[ti]; } // ; ~
+      else if (terr === T.Mud) { c = vd > 0.3 ? 34 : 44; col = vd > 0.3 ? P.grass[1] : P.mud[ti]; } // " ,
+      else if (terr === T.Grass) { c = vd > 0.5 ? 34 : vd > 0.25 ? 44 : 46; col = vd > 0.25 ? P.grass[ti] : P.dirt[ti]; } // " , .
+      f.ch[i] = c;
+      const kf = g * L * (th.cel ? 1.15 : 1.6), kb = L * (th.cel ? 0.8 : 0.55);
+      setFg(f, i, col[0] * kf, col[1] * kf, col[2] * kf);
+      setBg(f, i, col[0] * kb, col[1] * kb, col[2] * kb);
+    }
+  }
+  // Animaux et nids : une lettre vive sur fond d'encre, visible de loin.
+  for (const m of v.marks) {
+    const x = Math.floor((m.x / CELL_W - v.camX) / k), y = Math.floor((m.y / CELL_H - v.camY) / k);
+    if (x < 0 || y < 0 || x >= cols || y >= rows) continue;
+    const i = y * cols + x;
+    f.ch[i] = m.glyph;
+    setFg(f, i, m.color[0], m.color[1], m.color[2]);
+    setBg(f, i, P.ink[0], P.ink[1], P.ink[2]);
+  }
+}
+
 /** Quel animal possède la cellule `si` ? (pour colorer le contour de l'animal sélectionné) */
 function haloOwner(v: WorldView, si: number, cols: number): number {
   const sx = (si % cols) + v.camX, sy = Math.floor(si / cols) + v.camY;

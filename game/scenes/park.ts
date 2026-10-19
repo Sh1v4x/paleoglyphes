@@ -3,7 +3,7 @@ import { CLOCK_SPEEDS, clockLabel, daylight, litTheme, periodName } from "../day
 import type { Input } from "../input";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
-import { composeWorld, type Actor, type Critter } from "../render/compose";
+import { composeMap, composeWorld, type Actor, type Critter, type MapMark } from "../render/compose";
 import { metrics, uiCellAt, worldCellAt } from "../render/metrics";
 import { placed, RasterCache, type Raster } from "../render/raster";
 import { mulberry32 } from "../rng";
@@ -171,6 +171,51 @@ export interface ParkState {
   rosterScroll?: number;
   /** Animal pour lequel on demande confirmation avant de le retirer. */
   confirmRetire?: number;
+  /** Niveau de zoom (indice dans ZOOMS ; défaut ZOOM_DEFAULT) et pincement cumulé. */
+  zoom?: number;
+  zoomAcc?: number;
+}
+
+/**
+ * Niveaux de zoom de la réserve, du plus proche au plus large. `z` : taille des glyphes ; `m` : cellules
+ * monde par cellule écran (au-delà de 1, vue carte). Le dernier montre toute la carte.
+ */
+const ZOOMS: readonly { z: number; m: number; name: string }[] = [
+  { z: 2, m: 1, name: "x2" },
+  { z: 1.5, m: 1, name: "x1.5" },
+  { z: 1, m: 1, name: "x1" },
+  { z: 1, m: 3, name: "carte" },
+  { z: 1, m: 6, name: "carte large" },
+  { z: 1, m: 12, name: "toute la carte" },
+];
+const ZOOM_DEFAULT = 2;
+
+/** Zoom effectif : documentaire, appareil photo et cinématiques restent au zoom normal. */
+function zoomLevel(s: GameState) {
+  if (s.mode !== "park" || s.photo.aiming || s.docu.on) return ZOOMS[ZOOM_DEFAULT];
+  return ZOOMS[s.park.zoom ?? ZOOM_DEFAULT];
+}
+
+/** Taille des glyphes du monde pour le Renderer (seule la réserve zoome). */
+export function worldZoom(s: GameState): number {
+  return zoomLevel(s).z;
+}
+
+/** Taille de la vue en px monde (fenêtre / zoom des glyphes x cellules par bloc de la carte). */
+const viewW = (s: GameState) => (metrics.cols * metrics.cellW * zoomLevel(s).m) / zoomLevel(s).z;
+const viewH = (s: GameState) => (metrics.rows * metrics.cellH * zoomLevel(s).m) / zoomLevel(s).z;
+
+/** Change de niveau de zoom en gardant le point (px monde) `ax, ay` sous le même endroit de l'écran. */
+function setZoom(s: GameState, level: number, ax?: number, ay?: number) {
+  const p = s.park;
+  const n = Math.max(0, Math.min(ZOOMS.length - 1, level));
+  if (n === (p.zoom ?? ZOOM_DEFAULT)) return;
+  const w0 = viewW(s), h0 = viewH(s);
+  const fx = ax === undefined ? 0.5 : (ax - p.cam.x) / w0, fy = ay === undefined ? 0.5 : (ay - p.cam.y) / h0;
+  const cx = p.cam.x + w0 * fx, cy = p.cam.y + h0 * fy;
+  p.zoom = n;
+  p.cam.x = cx - viewW(s) * fx;
+  p.cam.y = cy - viewH(s) * fy;
 }
 
 /** Un nid : quelques œufs qui éclosent au bout de l'incubation ; un parent le garde. */
@@ -384,8 +429,8 @@ export const MINI_W = 28, MINI_H = 10;
 const MINI_GLYPH: Partial<Record<SpeciesId, string>> = { ankylo: "A", raptor: "R", trike: "T", edmonto: "E", pachy: "P", trex: "X" };
 
 export function centerOn(s: GameState, x: number, y: number) {
-  s.park.cam.x = x - (metrics.cols * CELL_W) / 2;
-  s.park.cam.y = y - (metrics.rows * CELL_H) / 2;
+  s.park.cam.x = x - viewW(s) / 2;
+  s.park.cam.y = y - viewH(s) / 2;
   s.park.follow = false;
 }
 
@@ -404,15 +449,26 @@ export const parkScene: Scene = {
     const docuCam = updateDocumentary(s, input, dt);
     const photoCaptures = updatePhoto(s, input, dt);
     void docuCam; void photoCaptures;
-    // Caméra : clavier + glisser.
-    const speed = 700 * dt;
+    // Zoom : touches à droite du 0, pavé numérique, pincement / Ctrl + molette (centré sur la souris).
+    const zl = p.zoom ?? ZOOM_DEFAULT;
+    if (input.pressed.includes("Equal") || input.pressed.includes("NumpadAdd")) setZoom(s, zl - 1);
+    if (input.pressed.includes("Minus") || input.pressed.includes("NumpadSubtract")) setZoom(s, zl + 1);
+    p.zoomAcc = (p.zoomAcc ?? 0) + (input.mouse.zoom ?? 0);
+    if (Math.abs(p.zoomAcc) >= 60) {
+      const L = zoomLevel(s), k = L.m / L.z;
+      setZoom(s, (p.zoom ?? ZOOM_DEFAULT) + Math.sign(p.zoomAcc), p.cam.x + input.mouse.x * k, p.cam.y + input.mouse.y * k);
+      p.zoomAcc = 0;
+    }
+    // Caméra : clavier + glisser (plus vite quand on voit plus large).
+    const zk = zoomLevel(s).m / zoomLevel(s).z;
+    const speed = 700 * dt * zk;
     if (input.dx || input.dy) p.follow = false;
     p.cam.x += input.dx * speed;
     p.cam.y += input.dy * speed;
     if (input.mouse.down && (input.mouse.dragX || input.mouse.dragY)) {
       p.follow = false;
-      p.cam.x -= input.mouse.dragX;
-      p.cam.y -= input.mouse.dragY;
+      p.cam.x -= input.mouse.dragX * zk;
+      p.cam.y -= input.mouse.dragY * zk;
     }
     // Molette : défile le recensement s'il est sous la souris, sinon animal suivant / précédent.
     if (p.roster && input.mouse.wheel && rosterOver(input.mouse.x, input.mouse.y)) {
@@ -445,11 +501,13 @@ export const parkScene: Scene = {
     const tgt = sel && box ? { x: (box.cx + box.w / 2) * CELL_W, y: (box.cy + box.h / 2) * CELL_H } : bug ? { x: bug.x, y: bug.y } : nest ? { x: nest.x, y: nest.y } : undefined;
     // Documentaire : il tient la caméra (il s'arrête de lui-même dès que le joueur la reprend).
     if (p.follow && tgt && !docuCam) {
-      p.cam.x += (tgt.x - metrics.cols * CELL_W / 2 - p.cam.x) * Math.min(1, dt * 4);
-      p.cam.y += (tgt.y - metrics.rows * CELL_H / 2 - p.cam.y) * Math.min(1, dt * 4);
+      p.cam.x += (tgt.x - viewW(s) / 2 - p.cam.x) * Math.min(1, dt * 4);
+      p.cam.y += (tgt.y - viewH(s) / 2 - p.cam.y) * Math.min(1, dt * 4);
     }
-    p.cam.x = Math.max(0, Math.min(w.cols * CELL_W - metrics.cols * CELL_W, p.cam.x));
-    p.cam.y = Math.max(0, Math.min(w.rows * CELL_H - metrics.rows * CELL_H, p.cam.y));
+    // Bords de la carte (en vue « toute la carte », elle est centrée si elle tient dans l'écran).
+    const vw = viewW(s), vh = viewH(s);
+    p.cam.x = vw >= w.cols * CELL_W ? (w.cols * CELL_W - vw) / 2 : Math.max(0, Math.min(w.cols * CELL_W - vw, p.cam.x));
+    p.cam.y = vh >= w.rows * CELL_H ? (w.rows * CELL_H - vh) / 2 : Math.max(0, Math.min(w.rows * CELL_H - vh, p.cam.y));
 
     // Herbe couchée sous les pas : on note l'instant du passage (rien à faire décroître sur toute la carte).
     if (p.trample) {
@@ -471,7 +529,13 @@ export const parkScene: Scene = {
     }
 
     const overUi = rosterOver(input.mouse.x, input.mouse.y) && p.roster;
-    if (input.mouse.inside && !overUi) {
+    // Vue carte : un clic y plonge (zoom normal, centré sur le point cliqué) ; rien à survoler.
+    if (zoomLevel(s).m > 1) {
+      p.hover = p.bugHover = p.nestHover = undefined;
+      const c = input.worldClicks[0];
+      if (c) { const k = zoomLevel(s).m; p.zoom = ZOOM_DEFAULT; centerOn(s, p.cam.x + c.x * k, p.cam.y + c.y * k); }
+      input.worldClicks.length = 0;
+    } else if (input.mouse.inside && !overUi) {
       p.hover = animalAt(s, input.mouse.x, input.mouse.y)?.id;
       p.bugHover = p.hover === undefined ? faunaAt(s, input.mouse.x, input.mouse.y)?.uid : undefined;
       p.nestHover = p.hover === undefined && p.bugHover === undefined ? nestAt(s, input.mouse.x, input.mouse.y)?.id : undefined;
@@ -495,13 +559,15 @@ export const parkScene: Scene = {
       if (id === "park:follow") p.follow = !p.follow;
       if (id === "park:clock" || id === "park:speed") nextSpeed(s);
       if (id === "park:map") p.hideMap = !p.hideMap;
+      if (id === "park:zoomin") setZoom(s, (p.zoom ?? ZOOM_DEFAULT) - 1);
+      if (id === "park:zoomout") setZoom(s, (p.zoom ?? ZOOM_DEFAULT) + 1);
       if (id === "park:gotodig") s.mode = "dig";
       if (id === "park:close") { p.selected = undefined; p.bug = undefined; p.nestSel = undefined; p.follow = false; p.confirmRetire = undefined; }
       if (weatherClick(s, id)) continue;
       if (id === "park:roster") p.roster = !p.roster;
       if (id === "park:couple") {
         // Test : un couple prêt à nicher, au centre de l'écran, de l'espèce sélectionnée si possible.
-        const cx = p.cam.x + (metrics.cols * CELL_W) / 2, cy = p.cam.y + (metrics.rows * CELL_H) / 2;
+        const cx = p.cam.x + viewW(s) / 2, cy = p.cam.y + viewH(s) / 2;
         const cur = p.animals.find((a) => a.id === p.selected);
         const m = addTestCouple(s, cx, cy, cur?.sp);
         if (m) {
@@ -544,6 +610,21 @@ export const parkScene: Scene = {
     const p = s.park;
     const w = worldFor(s);
     const camX = Math.floor(p.cam.x / CELL_W), camY = Math.floor(p.cam.y / CELL_H);
+    const zv = zoomLevel(s);
+    if (zv.m > 1) {
+      // Vue carte : les animaux en lettres (rouge : carnivores, bleu : nageurs), les nids en « o ».
+      const u = th.ui, marks: MapMark[] = [];
+      for (const n of p.nests) marks.push({ x: n.x, y: n.y, glyph: 111, color: u.dim });
+      for (const a of p.animals) {
+        const spec = SPECIES[a.sp];
+        if (!spec || a.task === "dead") continue;
+        const color = a.id === p.selected ? u.hi : spec.habitat === "sea" ? th.pal.waterShore : spec.behavior.diet === "carnivore" ? u.bad : u.ok;
+        marks.push({ x: a.x, y: a.y - a.alt, glyph: (MINI_GLYPH[a.sp] ?? spec.name[0].toUpperCase()).charCodeAt(0), color });
+      }
+      composeMap(th, world, { world: w, time: s.time, camX, camY, k: zv.m, light: daylight(s.clock), veg: p.eco?.veg, plankton: p.eco?.plankton, marks });
+      drawHud(s, th, world, ui);
+      return;
+    }
     const actors: Actor[] = [];
     const margin = 400;
     const vx0 = p.cam.x - margin, vx1 = p.cam.x + world.cols * CELL_W + margin;
@@ -639,7 +720,9 @@ export const parkScene: Scene = {
   hints(s) {
     if (s.photo.aiming) return [["Clic", "declencher"], ["Molette", "cadrage"], ["Glisser", "deplacer"], ["P", "ranger l'appareil"]];
     if (s.docu.on) return [["V", "arreter"], ["Fleches", "reprendre la camera"]];
-    const h: Hint[] = [["Fleches", "camera"], ["Glisser", "camera"], ["Clic", "observer"], ["Molette", "animal suivant"]];
+    const h: Hint[] = zoomLevel(s).m > 1
+      ? [["Fleches", "camera"], ["Glisser", "camera"], ["Clic", "y plonger"], ["= )", "zoom"]]
+      : [["Fleches", "camera"], ["Glisser", "camera"], ["Clic", "observer"], ["Molette", "animal suivant"], ["= )", "zoom"]];
     if (s.park.selected !== undefined || s.park.nestSel !== undefined || s.park.bug !== undefined) h.push(["Echap", "fermer la fiche"]);
     return h;
   },
@@ -649,6 +732,7 @@ export const parkScene: Scene = {
       ["Fleches", "deplacer la camera (ou ZQSD / WASD, ou glisser)"],
       ["Clic", "observer un animal, un nid, une petite bete : remplit le carnet"],
       ["Molette", "animal suivant / precedent (ou defiler le recensement)"],
+      ["= )", "zoomer / dezoomer (touches a droite du 0, + et - du pave numerique, pincement) ; la vue carte montre toute la reserve"],
       ["V", "documentaire : la camera filme les moments forts"],
       ["P", "appareil photo (clic ou Espace : declencher, molette : cadrage)"],
       ["C", "recensement : la liste de tous les animaux"],
@@ -718,6 +802,8 @@ function drawHud(s: GameState, th: Theme, world: Frame, ui: Frame) {
     { id: "photo:toggle", label: "Appareil photo", short: "Photo", icon: "@", key: "P", tip: "Appareil photo : cadrer, puis declencher" },
     { id: "park:roster", label: "Recensement", short: "Liste", icon: "#", key: "C", toggle: true, active: !!p.roster, tip: "Recensement : tous les animaux de la reserve" },
     { id: "park:map", label: "Carte", icon: "%", key: "M", toggle: true, active: !p.hideMap, tip: "Afficher / masquer la carte" },
+    { id: "park:zoomout", label: "Zoom -", short: "-", icon: "-", tip: "Dezoomer (touche a droite du 0, pincement) : jusqu'a toute la carte" },
+    { id: "park:zoomin", label: "Zoom +", short: "+", icon: "+", tip: "Zoomer (touche =, pincement)" },
     { id: "park:speed", label: `Temps x${s.clockSpeed}`, short: `x${s.clockSpeed}`, icon: `x${s.clockSpeed}`, key: "T", active: s.clockSpeed > 1, tip: "Accelerer le temps (x1, x4, x16)" },
   );
   if (DEV) tools.push({ id: "park:couple", label: "Couple (test)", short: "Couple", icon: "+", variant: "ghost", tip: "Test : ajouter un couple pret a nicher" });

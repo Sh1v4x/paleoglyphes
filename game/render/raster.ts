@@ -17,7 +17,8 @@ export interface Raster {
   cy: number;
   w: number;
   h: number;
-  mat: Uint8Array;
+  /** Matière par cellule (Uint16 : les espèces ont dépassé les 255 matières). */
+  mat: Uint16Array;
   /** Luminance d'ombrage 0..1 (éclairage de lune sur la normale). */
   lum: Float32Array;
   /** Glyphe imposé (traits fins), 0 sinon. */
@@ -54,12 +55,12 @@ export function rasterize(prims: Prim[], ox: number, oy: number, flip = false): 
     x0 = Math.min(x0, wa, wc); x1 = Math.max(x1, wa, wc);
     y0 = Math.min(y0, oy + b); y1 = Math.max(y1, oy + d);
   }
-  if (!isFinite(x0)) return { cx: 0, cy: 0, w: 1, h: 1, mat: new Uint8Array(1), lum: new Float32Array(1), glyph: new Uint8Array(1) };
+  if (!isFinite(x0)) return { cx: 0, cy: 0, w: 1, h: 1, mat: new Uint16Array(1), lum: new Float32Array(1), glyph: new Uint8Array(1) };
   const cx = Math.floor(x0 / CELL_W), cy = Math.floor(y0 / CELL_H);
   const w = Math.max(1, Math.ceil(x1 / CELL_W) - cx + 1);
   const h = Math.max(1, Math.ceil(y1 / CELL_H) - cy + 1);
   const n = w * h;
-  const mat = new Uint8Array(n);
+  const mat = new Uint16Array(n);
   const glyph = new Uint8Array(n);
   const hgt = new Float32Array(n).fill(-Infinity);
   const lum = new Float32Array(n);

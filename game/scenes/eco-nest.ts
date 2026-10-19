@@ -7,6 +7,7 @@ import { BREED_COOLDOWN, CLUTCH, growthOf, INCUBATION, lifespan, liveBirth, MAX_
 import type { Species, SpeciesId } from "../species/types";
 import { worldFor, type GameState } from "../state";
 import { toast } from "../ui/toast";
+import { BIOME } from "../world/biomes";
 import { isWater, T } from "../world/tiles";
 import { beachNester, beachSite, isFish, onLand, specialStats } from "./eco-special";
 import type { WildKit } from "./eco-wild";
@@ -562,7 +563,11 @@ function fedEnough(s: GameState, spec: Species, a: Animal): boolean {
   if (!eco || n <= 2) return true;
   if (spec.habitat === "sea") return mass(eco.plankton) > 35;
   const B = spec.behavior;
-  if (B.diet !== "carnivore" && (B.browse === "low" || B.browse === "both")) return meanAround(eco.veg, a.x, a.y, 400) > 0.3;
+  // Dans la neige et les dunes, la végétation est clairsemée (lichens, croûte) : le seuil s'y adapte.
+  if (B.diet !== "carnivore" && (B.browse === "low" || B.browse === "both")) {
+    const w = worldFor(s), b = w.biome[Math.floor(a.y / CELL_H) * w.cols + Math.floor(a.x / CELL_W)];
+    return meanAround(eco.veg, a.x, a.y, 400) > (b === BIOME.Tundra || b === BIOME.Desert ? 0.12 : 0.3);
+  }
   if (B.prey.length) {
     let prey = 0;
     for (const o of s.park.animals) if (o.task !== "dead" && B.prey.includes(o.sp)) prey++;

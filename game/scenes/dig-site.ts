@@ -90,7 +90,8 @@ export const MATRIX_INFO = { name: "Gangue", fact: "La roche collee autour d'un 
 
 /** Ordre de déblocage des espèces en fouille : [espèce, squelettes assemblés requis]. */
 const UNLOCK: [SpeciesId, number][] = [["ankylo", 0], ["edmonto", 0], ["raptor", 0], ["trike", 2], ["pachy", 2], ["quetzal", 3], ["mosa", 3], ["trex", 4],
-  ["pectinodon", 1], ["xiphactinus", 2], ["archelon", 2], ["pteranodon", 3], ["nyctosaurus", 3], ["allosaurus", 4], ["alamosaurus", 5]];
+  ["pectinodon", 1], ["xiphactinus", 2], ["archelon", 2], ["pteranodon", 3], ["nyctosaurus", 3], ["allosaurus", 4], ["alamosaurus", 5],
+  ["protoceratops", 2], ["pachyrhino", 3], ["citipati", 3], ["velociraptor", 4], ["nanuq", 5]];
 
 /** Seuil de déblocage d'une espèce qui n'est pas dans UNLOCK (nouvelles espèces) : 3 espèces assemblées. */
 const DEFAULT_UNLOCK = 3;

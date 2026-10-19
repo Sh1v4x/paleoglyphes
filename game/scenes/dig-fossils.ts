@@ -97,7 +97,7 @@ export const rasterMid = (r: Raster) => ({ x: r.cx + r.w / 2, y: r.cy + r.h / 2 
 
 /** Copie d'une raster dont on ne garde que les colonnes absolues [c0, c1). */
 export function clipCols(r: Raster, c0: number, c1: number): Raster {
-  const mat = new Uint8Array(r.mat);
+  const mat = new Uint16Array(r.mat);
   for (let j = 0; j < r.h; j++)
     for (let i = 0; i < r.w; i++) {
       const c = r.cx + i;

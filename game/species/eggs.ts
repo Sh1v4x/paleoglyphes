@@ -46,6 +46,13 @@ const SPEC: Partial<Record<SpeciesId, EggSpec>> = {
   raptor: { nest: "scrape", W: 74, H: 4, shell: NM.ShellBlue, w: 9, h: 20, paired: true, speck: 2, veg: 0.2, big: 21 },
   trex: { nest: "scrape", W: 90, H: 5, shell: NM.ShellBrown, w: 11, h: 24, paired: true, speck: 3, veg: 0.3, big: 24 },
   quetzal: { nest: "sand", W: 56, H: 4, shell: NM.ShellLeather, w: 11, h: 13, paired: false, speck: 0, veg: 0, big: 14 },
+  nanuq: { nest: "scrape", W: 80, H: 5, shell: NM.ShellBrown, w: 10, h: 21, paired: true, speck: 3, veg: 0.3, big: 22 },
+  pachyrhino: { nest: "mound", W: 78, H: 9, shell: NM.ShellCream, w: 13, h: 16, paired: false, speck: 0, veg: 0.9, big: 18 },
+  velociraptor: { nest: "scrape", W: 60, H: 3, shell: NM.ShellTan, w: 7, h: 15, paired: true, speck: 2, veg: 0, big: 16 },
+  // Œufs mous, à coquille souple, enterrés dans le sable (étude de 2020 sur des œufs fossiles de Protoceratops).
+  protoceratops: { nest: "sand", W: 58, H: 4, shell: NM.ShellLeather, w: 9, h: 12, paired: false, speck: 0, veg: 0, big: 13 },
+  // Œufs bleu-vert allongés, en couronne, couvés par l'adulte (les oviraptoridés pondaient des œufs colorés).
+  citipati: { nest: "scrape", W: 64, H: 4, shell: NM.ShellBlue, w: 8, h: 18, paired: true, speck: 0, veg: 0, big: 19 },
 };
 
 /** Œuf et nid par défaut, pour toute nouvelle espèce ovipare qui n'a pas encore les siens. */

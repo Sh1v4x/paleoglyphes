@@ -48,7 +48,7 @@ const COUNT: Partial<Record<string, number>> = { dragonfly: 9, beetle: 8, didelp
 const UID0 = 1_000_000;
 const cache = new RasterCache(800);
 const TAU = Math.PI * 2;
-const EMPTY: Raster = { cx: 0, cy: 0, w: 1, h: 1, mat: new Uint8Array(1), lum: new Float32Array(1), glyph: new Uint8Array(1) };
+const EMPTY: Raster = { cx: 0, cy: 0, w: 1, h: 1, mat: new Uint16Array(1), lum: new Float32Array(1), glyph: new Uint8Array(1) };
 
 export const faunaDef = (b: Bug): FaunaDef | undefined => (FAUNA as Partial<Record<string, FaunaDef>>)[b.kind];
 const darting = (d: FaunaDef) => d.flying && (d.altitude ?? 20) < 60;

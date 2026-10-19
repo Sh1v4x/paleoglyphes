@@ -90,15 +90,15 @@ export interface WorldView {
 
 // Calques d'animaux à l'échelle de l'écran, réalloués seulement si la taille change.
 let L_N = 0;
-let aMat = new Uint8Array(0), aGlyph = new Uint8Array(0), aHalo = new Int16Array(0), aSel = new Uint8Array(0), aSub = new Uint8Array(0);
+let aMat = new Uint16Array(0), aGlyph = new Uint8Array(0), aHalo = new Int16Array(0), aSel = new Uint8Array(0), aSub = new Uint8Array(0);
 let aLum = new Float32Array(0), aBase = new Float32Array(0), aShadow = new Float32Array(0);
-let rMat = new Uint8Array(0), rGlyph = new Uint8Array(0), rLum = new Float32Array(0);
+let rMat = new Uint16Array(0), rGlyph = new Uint8Array(0), rLum = new Float32Array(0);
 function layers(n: number) {
   if (n === L_N) return;
   L_N = n;
-  aMat = new Uint8Array(n); aGlyph = new Uint8Array(n); aHalo = new Int16Array(n); aSel = new Uint8Array(n); aSub = new Uint8Array(n);
+  aMat = new Uint16Array(n); aGlyph = new Uint8Array(n); aHalo = new Int16Array(n); aSel = new Uint8Array(n); aSub = new Uint8Array(n);
   aLum = new Float32Array(n); aBase = new Float32Array(n); aShadow = new Float32Array(n);
-  rMat = new Uint8Array(n); rGlyph = new Uint8Array(n); rLum = new Float32Array(n);
+  rMat = new Uint16Array(n); rGlyph = new Uint8Array(n); rLum = new Float32Array(n);
 }
 
 /** Pose les animaux dans les calques : tri par la ligne de sol, pattes dans l'eau, reflets, ombres, contours. */

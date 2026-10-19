@@ -517,7 +517,9 @@ export function generateWorld(style: Style, seed = 7): World {
       const x = gx + 20 + hash2(gx, gy, 31) * 70, y = gy + 20 + hash2(gx, gy, 32) * 70;
       if (!inside(x, y)) continue;
       const i = cellOf(x, y);
-      const kind = PATCH[w.cover[i]];
+      // Sur la neige et le sable : lichens et touffes du désert, un point sur deux (végétation clairsemée).
+      const sparse = w.terrain[i] === T.Snow ? "lichen" : w.terrain[i] === T.Sand ? "desert-tufts" : undefined;
+      const kind = PATCH[w.cover[i]] ?? (sparse && ((gx + gy) / 110) % 2 === 0 ? sparse : undefined);
       // La mousse ne nourrit qu'en toundra (le reste du temps, les fougères suffisent).
       if (kind && !w.solid[i] && (kind !== "moss" || w.biome[i] === BIOME.Tundra)) plant(x, y, kind, "low");
     }

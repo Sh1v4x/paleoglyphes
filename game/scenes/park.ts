@@ -426,7 +426,10 @@ function cycle(s: GameState, dir: number) {
 
 export const MINI_W = 28, MINI_H = 10;
 /** Lettre de chaque espèce sur la mini-carte. */
-const MINI_GLYPH: Partial<Record<SpeciesId, string>> = { ankylo: "A", raptor: "R", trike: "T", edmonto: "E", pachy: "P", trex: "X" };
+const MINI_GLYPH: Partial<Record<SpeciesId, string>> = {
+  ankylo: "A", raptor: "R", trike: "T", edmonto: "E", pachy: "P", trex: "X",
+  nanuq: "N", pachyrhino: "H", velociraptor: "V", protoceratops: "O", citipati: "C",
+};
 
 export function centerOn(s: GameState, x: number, y: number) {
   s.park.cam.x = x - viewW(s) / 2;

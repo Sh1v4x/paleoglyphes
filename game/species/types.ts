@@ -5,7 +5,9 @@ import type { Prim } from "../render/raster";
 /** Espèces que l'on peut fouiller, assembler et lâcher dans la réserve. */
 export type SpeciesId =
   | "ankylo" | "raptor" | "trike" | "edmonto" | "pachy" | "trex" | "quetzal" | "mosa"
-  | "archelon" | "xiphactinus" | "pteranodon" | "nyctosaurus" | "pectinodon" | "allosaurus" | "alamosaurus";
+  | "archelon" | "xiphactinus" | "pteranodon" | "nyctosaurus" | "pectinodon" | "allosaurus" | "alamosaurus"
+  // Toundra (Alaska, Prince Creek) et désert (Gobi, Djadochta).
+  | "nanuq" | "pachyrhino" | "velociraptor" | "protoceratops" | "citipati";
 
 /**
  * Ce que fait un animal. Chaque modèle sait dessiner chaque action (au minimum « idle » et « walk »).

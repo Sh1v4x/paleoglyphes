@@ -30,7 +30,9 @@ export const M = {
 } as const;
 
 /**
- * Plages d'identifiants réservées (Uint8) :
+ * Plages d'identifiants réservées. Les rasters et les calques d'animaux stockent des Uint16 ; la couche
+ * décor du monde (World.decorMat) reste en Uint8 : flore et décor doivent garder un identifiant < 256.
+ *
  *   0-29    cœur (ci-dessus)
  *   30-59   herbivores        (game/species/herbivores.mat.ts)
  *   60-89   carnivores, faune (game/species/carnivores.mat.ts)
@@ -45,6 +47,11 @@ export const M = {
  *   229-236 Pectinodon (game/species/pectinodon.mat.ts)
  *   237-245 Allosaurus (game/species/allosaurus.mat.ts)
  *   246-254 Alamosaurus (game/species/alamosaurus.mat.ts)
+ *   300-309 Nanuqsaurus (game/species/nanuq.mat.ts)
+ *   310-319 Pachyrhinosaurus (game/species/pachyrhino.mat.ts)
+ *   320-329 Velociraptor (game/species/velociraptor.mat.ts)
+ *   330-339 Protoceratops (game/species/protoceratops.mat.ts)
+ *   340-349 Citipati (game/species/citipati.mat.ts)
  * Les couleurs et rampes de chaque matière dépendent du thème : voir palette.ts.
  */
 

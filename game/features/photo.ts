@@ -107,7 +107,7 @@ export function subjectsIn(s: GameState, r: Rect): (Subject & { animal?: Animal 
   const camX = Math.floor(p.cam.x / CELL_W), camY = Math.floor(p.cam.y / CELL_H);
   const x0 = camX + r.x, y0 = camY + r.y, x1 = x0 + r.w, y1 = y0 + r.h;
   const out: (Subject & { animal?: Animal })[] = [];
-  const count = (cx: number, cy: number, rw: number, rh: number, mat: Uint8Array) => {
+  const count = (cx: number, cy: number, rw: number, rh: number, mat: Uint16Array) => {
     let inside = 0, total = 0, sx = 0, sy = 0;
     for (let j = 0; j < rh; j++) for (let i = 0; i < rw; i++) {
       if (!mat[j * rw + i]) continue;

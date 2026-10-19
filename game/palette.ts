@@ -12,6 +12,11 @@ import { NYCTOSAURUS_MATS } from "./species/nyctosaurus.mat";
 import { PECTINODON_MATS } from "./species/pectinodon.mat";
 import { ALLOSAURUS_MATS } from "./species/allosaurus.mat";
 import { ALAMOSAURUS_MATS } from "./species/alamosaurus.mat";
+import { NANUQ_MATS } from "./species/nanuq.mat";
+import { PACHYRHINO_MATS } from "./species/pachyrhino.mat";
+import { VELOCIRAPTOR_MATS } from "./species/velociraptor.mat";
+import { PROTOCERATOPS_MATS } from "./species/protoceratops.mat";
+import { CITIPATI_MATS } from "./species/citipati.mat";
 
 export type { Material };
 
@@ -101,6 +106,7 @@ export interface Theme {
 const EXTRA = [
   HERBIVORE_MATS, CARNIVORE_MATS, FLORA_MATS, SCENE_MATS, MARINE_MATS, NEST_MATS,
   ARCHELON_MATS, XIPHACTINUS_MATS, PTERANODON_MATS, NYCTOSAURUS_MATS, PECTINODON_MATS, ALLOSAURUS_MATS, ALAMOSAURUS_MATS,
+  NANUQ_MATS, PACHYRHINO_MATS, VELOCIRAPTOR_MATS, PROTOCERATOPS_MATS, CITIPATI_MATS,
 ];
 
 /** Table des matières d'un style : cœur + matières déclarées par les espèces, la flore et les scènes. */

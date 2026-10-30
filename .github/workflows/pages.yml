@@ -1,9 +1,9 @@
-# Publie le jeu sur GitHub Pages (site statique, voir next.config.ts) à chaque push sur la branche de travail.
+# Publie le jeu sur GitHub Pages (site statique, voir next.config.ts) à chaque push sur main.
 name: GitHub Pages
 
 on:
   push:
-    branches: [main, feat/lenia]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

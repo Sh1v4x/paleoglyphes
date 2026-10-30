@@ -10,6 +10,8 @@ Cadre : Hell Creek, fin du Crétacé, il y a 66 millions d'années (inspiré de 
 
 Deux styles au choix (Échap) : *dark fantasy* et *cartoon*.
 
+**Jouer en ligne : https://sh1v4x.github.io/paleoglyphes/**
+
 ## Lancer
 
 ```bash
@@ -22,3 +24,7 @@ npm run dev   # http://localhost:3107
 ```bash
 npx tsx scripts/preview-sprite.ts trex attack 0.5   # aperçu d'un modèle dans le terminal
 ```
+
+## Licence
+
+MIT, voir [LICENSE](LICENSE).

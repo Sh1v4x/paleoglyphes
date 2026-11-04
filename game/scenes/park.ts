@@ -23,6 +23,7 @@ import { activeTrees, treeRaster, updateTrees } from "../world/trees";
 import { drawDocuLog, drawDocumentary, missedCount, stopDocumentary, updateDocumentary } from "../features/documentary";
 import { drawPhoto, updatePhoto } from "../features/photo";
 import { drawThunder, drawWeather, drawWeatherRows, updateWeather, weatherClick, weatherTheme } from "../features/weather";
+import { recordVisit } from "./journal-travel";
 import { INCUBATION, juvenilePrims, lifespan, STAGE_AT } from "../species/life";
 import { nestModel } from "../species/eggs";
 import { toast } from "../ui/toast";
@@ -592,6 +593,7 @@ export const parkScene: Scene = {
     const w = worldFor(s);
     // Fonctions de la réserve : météo, documentaire (peut piloter la caméra), appareil photo.
     updateWeather(s, dt * s.clockSpeed);
+    recordVisit(s); // carnet de voyage : le biome au centre de la caméra
     const docuCam = updateDocumentary(s, input, dt);
     const photoCaptures = updatePhoto(s, input, dt);
     void docuCam; void photoCaptures;

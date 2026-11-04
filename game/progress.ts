@@ -1,5 +1,6 @@
 import type { DigSiteId } from "./scenes/dig-sites";
 import type { SpeciesId } from "./species/types";
+import type { BiomeId } from "./world/biomes";
 
 /** Progression du joueur, sauvegardée dans le navigateur. */
 export interface Progress {
@@ -27,6 +28,8 @@ export interface Progress {
   digSite?: DigSiteId;
   /** Sites de fouille déjà annoncés comme ouverts. */
   digSites?: DigSiteId[];
+  /** Biomes déjà visités dans la réserve (pages du carnet de voyage). Ancien format : absent. */
+  biomes?: BiomeId[];
 }
 
 const KEY = "ascii-dino-progress-v1";

@@ -30,7 +30,7 @@ const TABS: { mode: Mode; label: string; icon: string; key: string; tip: string 
   { mode: "park", label: "Reserve", icon: "Y", key: "1", tip: "Reserve : observer les dinosaures vivants" },
   { mode: "dig", label: "Fouille", icon: "T", key: "2", tip: "Fouille : degager des fossiles" },
   { mode: "lab", label: "Atelier", icon: "+", key: "3", tip: "Atelier : assembler les squelettes" },
-  { mode: "journal", label: "Carnet", icon: "=", key: "4", tip: "Carnet : fiches, frise, quiz, tailles" },
+  { mode: "journal", label: "Carnet", icon: "=", key: "4", tip: "Carnet : fiches, frise, quiz, tailles, voyage" },
   { mode: "museum", label: "Musee", icon: "^", key: "5", tip: "Musee : ta collection exposee" },
   { mode: "photos", label: "Photos", icon: "@", key: "6", tip: "Photos : l'album du photo-safari" },
 ];

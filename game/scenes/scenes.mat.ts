@@ -6,7 +6,7 @@ function hex(h: string): readonly [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-/** Matières de la fouille et de l'atelier (plage 120-149, voir render/materials.ts). */
+/** Matières de la fouille et de l'atelier (plages 120-149 et 480-499, voir render/materials.ts). */
 export const SM = {
   // Couches de sédiments (du haut vers le bas, en général).
   Topsoil: 120,
@@ -48,6 +48,25 @@ export const SM = {
   Spark: 148,
   /** Silhouette humaine pour l'échelle. */
   Human: 149,
+  // Roches propres à chaque site de fouille (voir dig-sites.ts).
+  /** Prince Creek (Alaska) : pergélisol, graviers, cendre volcanique, neige, montagnes. */
+  Permafrost: 480,
+  Gravel: 481,
+  Ash: 482,
+  Snow: 483,
+  Peaks: 484,
+  /** Djadochta (Gobi) : sable et grès rouges, grès de dune, nodules de caliche, falaises flamboyantes. */
+  RedSand: 485,
+  RedSandstone: 486,
+  DuneSandstone: 487,
+  Caliche: 488,
+  RedCliff: 489,
+  /** Niobrara (Kansas) : craie blanche et jaune, argilite noire de Pierre, tours de craie, prairie. */
+  Chalk: 490,
+  YellowChalk: 491,
+  DarkShale: 492,
+  ChalkTower: 493,
+  Prairie: 494,
 } as const;
 
 /** Matières de ce module, déclinées par style. Identifiants : voir les plages dans render/materials.ts. */
@@ -84,6 +103,21 @@ export const SCENE_MATS: MaterialSet = {
     [SM.Scan]: { color: hex("#9be88a"), ramp: "|", emissive: true },
     [SM.Spark]: { color: hex("#d8ffc8"), ramp: "*", emissive: true },
     [SM.Human]: { color: hex("#4a4458"), ramp: ".:=#" },
+    [SM.Permafrost]: { color: hex("#4e5866"), ramp: ".:=+#" },
+    [SM.Gravel]: { color: hex("#5e5a56"), ramp: ".o:o," },
+    [SM.Ash]: { color: hex("#7a766c"), ramp: "-~=.:" },
+    [SM.Snow]: { color: hex("#8a94a1"), ramp: ".,'`" },
+    [SM.Peaks]: { color: hex("#343a48"), ramp: "^-" },
+    [SM.RedSand]: { color: hex("#7a4a34"), ramp: ".,'`:" },
+    [SM.RedSandstone]: { color: hex("#6e3a2c"), ramp: ":=x%#" },
+    [SM.DuneSandstone]: { color: hex("#7e5238"), ramp: "/=/:/" },
+    [SM.Caliche]: { color: hex("#8a8278"), ramp: "oO0@" },
+    [SM.RedCliff]: { color: hex("#3a2228"), ramp: "-=" },
+    [SM.Chalk]: { color: hex("#8e8a80"), ramp: ".:-=:" },
+    [SM.YellowChalk]: { color: hex("#86784e"), ramp: ".:-=+" },
+    [SM.DarkShale]: { color: hex("#2e2e34"), ramp: "_-=_=" },
+    [SM.ChalkTower]: { color: hex("#3e3c40"), ramp: "|=" },
+    [SM.Prairie]: { color: hex("#4a4a30"), ramp: ",;\"v" },
   },
   // Plein jour : falaise des badlands en bandes franches, aplats lumineux.
   cartoon: {
@@ -117,5 +151,20 @@ export const SCENE_MATS: MaterialSet = {
     [SM.Scan]: { color: hex("#3fe0ff"), ramp: "|", emissive: true },
     [SM.Spark]: { color: hex("#ffe14d"), ramp: "*", emissive: true },
     [SM.Human]: { color: hex("#5b6fd8"), ramp: ":=#" },
+    [SM.Permafrost]: { color: hex("#9fb4c8"), ramp: ".:=+" },
+    [SM.Gravel]: { color: hex("#a89e92"), ramp: ".o:o" },
+    [SM.Ash]: { color: hex("#e8e2d0"), ramp: "-~=" },
+    [SM.Snow]: { color: hex("#f2f8fc"), ramp: ".,'" },
+    [SM.Peaks]: { color: hex("#9aaac8"), ramp: "^-" },
+    [SM.RedSand]: { color: hex("#f0945a"), ramp: ".,'`" },
+    [SM.RedSandstone]: { color: hex("#d8643e"), ramp: ":=x#" },
+    [SM.DuneSandstone]: { color: hex("#eb8a4e"), ramp: "/=/:" },
+    [SM.Caliche]: { color: hex("#f4eee0"), ramp: "oO0@" },
+    [SM.RedCliff]: { color: hex("#e0603a"), ramp: "-=" },
+    [SM.Chalk]: { color: hex("#f6f2e6"), ramp: ".:-=" },
+    [SM.YellowChalk]: { color: hex("#f0d68a"), ramp: ".:-=" },
+    [SM.DarkShale]: { color: hex("#5e5e6e"), ramp: "_-=" },
+    [SM.ChalkTower]: { color: hex("#efe6cc"), ramp: "|=" },
+    [SM.Prairie]: { color: hex("#b8b04a"), ramp: ",;\"v" },
   },
 };

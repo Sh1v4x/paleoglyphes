@@ -18,6 +18,7 @@ import { toast } from "../ui/toast";
 import { unlockTrigger } from "../unlock";
 import { bonePrims, clipCols, deName, IDLE_POSE, outlineRaster, primBounds, rasterMid, scaleAll, skeletonPrims } from "./dig-fossils";
 import { atHome, canStand, centerOn, observeNest, parkScene, syncPopulation } from "./park";
+import { DIG_SITE, noteNewSites, sitesOf } from "./dig-sites";
 import { SM } from "./scenes.mat";
 import { UI_TOP, type Scene } from "./types";
 
@@ -226,7 +227,7 @@ function autoPlace(s: GameState, spec: Species) {
   const next = foundOf(s, spec).find((id) => !placed.includes(id));
   if (next) placeBone(s, spec, next);
   else if (complete(s, spec)) startSynth(s, spec);
-  else hint(s, "Il manque des os : retourne a la fouille (touche 2) pour les trouver !");
+  else hint(s, `Il manque des os : retourne fouiller a ${DIG_SITE[sitesOf(spec.id)[0]].name} (touche 2) pour les trouver !`);
 }
 
 function startSynth(s: GameState, spec: Species) {
@@ -251,7 +252,8 @@ function finishSynth(s: GameState, spec: Species) {
   s.lab.synth = null;
   s.lab.done = { sp: spec.id, added, t: s.time, first };
   // Pas de notification ici : la modale de fin de synthèse dit déjà la même chose.
-  if (first) unlockTrigger(s, spec.id, "assemble");
+  // Un squelette de plus peut ouvrir un nouveau site de fouille.
+  if (first) { unlockTrigger(s, spec.id, "assemble"); noteNewSites(s); }
 }
 
 /** Œufs fossiles prêts à incuber pour cette espèce (jamais pour les vivipares comme le mosasaure). */

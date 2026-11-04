@@ -1,3 +1,4 @@
+import type { DigSiteId } from "./scenes/dig-sites";
 import type { SpeciesId } from "./species/types";
 
 /** Progression du joueur, sauvegardée dans le navigateur. */
@@ -22,6 +23,10 @@ export interface Progress {
   quiz?: { correct: number; answered: number; bestStreak: number };
   /** Espèces bien placées sur la frise du temps (une étoile chacune). */
   timeline?: SpeciesId[];
+  /** Site de fouille choisi (ancien format : absent, Hell Creek). */
+  digSite?: DigSiteId;
+  /** Sites de fouille déjà annoncés comme ouverts. */
+  digSites?: DigSiteId[];
 }
 
 const KEY = "ascii-dino-progress-v1";

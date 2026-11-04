@@ -52,6 +52,7 @@ export const M = {
  *   320-329 Velociraptor (game/species/velociraptor.mat.ts)
  *   330-339 Protoceratops (game/species/protoceratops.mat.ts)
  *   340-349 Citipati (game/species/citipati.mat.ts)
+ *   480-499 roches des sites de fouille (game/scenes/scenes.mat.ts)
  * Les couleurs et rampes de chaque matière dépendent du thème : voir palette.ts.
  */
 

@@ -9,6 +9,7 @@ import { view } from "@/game/render/metrics";
 import { worldZoom } from "@/game/scenes/park";
 import { composeGame, updateGame } from "@/game/scenes";
 import { prepareEcosystem } from "@/game/scenes/ecosystem";
+import { autosave, loadReserve, saveReserve } from "@/game/save";
 import { createState, worldFor } from "@/game/state";
 import Loading from "./Loading";
 
@@ -39,17 +40,26 @@ export default function Game({ fontFamily }: { fontFamily: string }) {
       await paint();
       if (disposed) return;
       prepareEcosystem(state);
+      setStep("Retour dans la reserve...");
+      await paint();
+      if (disposed) return;
+      loadReserve(state);
       setStep(null);
       // Accès console pour le débogage (dev uniquement).
       if (DEV) (window as unknown as { __game: unknown }).__game = state;
       const resize = () => renderer.resize(window.innerWidth, window.innerHeight);
       resize();
       window.addEventListener("resize", resize);
+      // Sauvegarde de la réserve quand on quitte la page ou change d'onglet (en plus de l'automatique).
+      const save = () => { saveReserve(state); };
+      const hidden = () => { if (document.visibilityState === "hidden") saveReserve(state); };
+      window.addEventListener("pagehide", save);
+      document.addEventListener("visibilitychange", hidden);
       const halt = startLoop(
-        (dt) => updateGame(state, input.read(), dt),
+        (dt) => { updateGame(state, input.read(), dt); autosave(state, dt); },
         (fps) => { view.zoom = worldZoom(state); renderer.sync(); composeGame(state, renderer.frame, renderer.ui, fps); renderer.draw(); },
       );
-      stop = () => { halt(); input.dispose(); window.removeEventListener("resize", resize); };
+      stop = () => { halt(); input.dispose(); window.removeEventListener("resize", resize); window.removeEventListener("pagehide", save); document.removeEventListener("visibilitychange", hidden); };
     })();
     return () => { disposed = true; stop(); };
   }, [fontFamily]);

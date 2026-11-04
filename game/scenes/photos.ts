@@ -1,6 +1,7 @@
 import { clockLabel } from "../daycycle";
 import { blitPhoto, copyText, downloadPng } from "../features/photo-export";
 import { starsText } from "../features/photo-score";
+import { copyGameLink, GAME_URL, sharePhoto } from "../features/photo-share";
 import { album, loadAlbum, MAX_PHOTOS, removePhoto, type Photo } from "../features/photo-store";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
@@ -84,6 +85,7 @@ export const photosScene: Scene = {
       for (const k of input.pressed) {
         if (k === "ArrowLeft" || k === "KeyA" || k === "KeyQ") open(s, ps.view - 1);
         if (k === "ArrowRight" || k === "KeyD") open(s, ps.view + 1);
+        if (k === "KeyP" && p && !ps.confirm) void sharePhoto(s, p);
       }
       for (const id of input.ui) {
         if (id === "photos:prev") open(s, ps.view - 1);
@@ -101,6 +103,8 @@ export const photosScene: Scene = {
         if (id === "photos:png" && p) {
           void downloadPng(p, photoCaption(p)).then((ok) => toast(s, ok ? "Image téléchargée" : "Téléchargement impossible", ok ? `paleoglyphes-${p.id}.png` : ""));
         }
+        if (id === "photos:share" && p) void sharePhoto(s, p);
+        if (id === "photos:link") void copyGameLink(s);
         if (id === "photos:txt" && p) {
           void copyText(p, photoCaption(p)).then((ok) => toast(s, ok ? "Copiée en texte !" : "Copie impossible", ok ? "Colle-la dans un éditeur en police à chasse fixe." : "Le presse-papiers n'est pas accessible."));
         }
@@ -173,7 +177,7 @@ export const photosScene: Scene = {
     const ps = s.photos;
     if (ps.view >= 0 && album.photos[ps.view]) {
       if (ps.confirm) return [["Echap", "annuler"]];
-      return [["Fleches", "photo precedente / suivante"], ["Echap", "retour a l'album"]];
+      return [["Fleches", "photo precedente / suivante"], ["P", "partager"], ["Echap", "retour a l'album"]];
     }
     return album.photos.length ? [["Clic", "voir en grand"], ["Molette", "defiler"]] : [];
   },
@@ -183,6 +187,7 @@ export const photosScene: Scene = {
       ["Clic", "ouvrir une photo en grand (ou Tab puis Entree)"],
       ["Molette", "defiler l'album (fleches haut / bas aussi)"],
       ["Fleches", "en grand : photo precedente / suivante"],
+      ["P", "en grand : partager la photo (image + lien du jeu)"],
       ["Echap", "annuler la suppression, puis revenir a l'album"],
     ];
   },
@@ -225,7 +230,12 @@ function drawFull(s: GameState, th: Theme, world: Frame, ui: Frame, p: Photo) {
   const notes = p.notes.length ? `  -  ${p.notes.join(", ")}` : "";
   const line2 = `${when}${notes}`;
   text(ui, cx0, cy + 1, line2.length > cw ? `${line2.slice(0, cw - 3)}...` : line2, [120, 108, 96], null);
-  if (k < 1) text(ui, 18, UI_TOP, clip("Apercu reduit (fenetre trop petite)", ui.cols - 20), u.dim, u.panel, 0.7);
+  // Partage en haut à droite (la rangée du bas est pleine).
+  const sx = ps.confirm ? ui.cols : actions(ui, th, SP.margin, UI_TOP, ui.cols - 2 * SP.margin, [
+    { id: "photos:link", label: "Copier le lien du jeu", tip: GAME_URL },
+    { id: "photos:share", label: "Partager", key: "P", variant: "primary", tip: "Partager une jolie carte de la photo" },
+  ]);
+  if (k < 1) text(ui, 18, UI_TOP, clip("Apercu reduit (fenetre trop petite)", sx - 20), u.dim, u.panel, 0.7);
 
   // Boutons, au-dessus de la ligne d'aide : navigation à gauche, actions à droite (Retour tout à droite).
   const by = ui.rows - 2;

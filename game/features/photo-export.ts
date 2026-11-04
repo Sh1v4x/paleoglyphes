@@ -39,7 +39,7 @@ export function blitPhoto(f: Frame, p: Photo, x: number, y: number, w: number, h
 }
 
 /** Police du jeu (posée sur <html> par next/font). */
-function gameFont(): string {
+export function gameFont(): string {
   try {
     const f = getComputedStyle(document.documentElement).fontFamily;
     if (f) return f;
@@ -51,15 +51,12 @@ function gameFont(): string {
 
 const rgb = (a: Uint8Array, k: number) => `rgb(${a[k]},${a[k + 1]},${a[k + 2]})`;
 
-/** Rend la photo dans un canvas 2D : fonds, puis glyphes à la police du jeu, puis un bandeau de légende. */
-export function photoCanvas(p: Photo, caption: string): HTMLCanvasElement {
-  const scale = Math.max(2, Math.ceil(window.devicePixelRatio || 1));
+/** Échelle des images exportées (au moins 2, pour rester nettes). */
+export const exportScale = () => Math.max(2, Math.ceil(window.devicePixelRatio || 1));
+
+/** Dessine les cellules de la photo à partir de (x0, y0) : fonds, puis glyphes à la police du jeu. */
+export function drawCells(g: CanvasRenderingContext2D, p: Photo, x0: number, y0: number, scale: number) {
   const cw = CELL_W * scale, chh = CELL_H * scale;
-  const strip = Math.round(UI_FONT_SIZE * scale * 2.2);
-  const cv = document.createElement("canvas");
-  cv.width = p.cols * cw;
-  cv.height = p.rows * chh + strip;
-  const g = cv.getContext("2d")!;
   // Fonds : par segments de même couleur sur chaque rangée.
   for (let j = 0; j < p.rows; j++) {
     let i0 = 0;
@@ -67,7 +64,7 @@ export function photoCanvas(p: Photo, caption: string): HTMLCanvasElement {
       const a = (j * p.cols + i0) * 3, b = (j * p.cols + i) * 3;
       if (i < p.cols && p.bg[a] === p.bg[b] && p.bg[a + 1] === p.bg[b + 1] && p.bg[a + 2] === p.bg[b + 2]) continue;
       g.fillStyle = rgb(p.bg, a);
-      g.fillRect(i0 * cw, j * chh, (i - i0) * cw, chh);
+      g.fillRect(x0 + i0 * cw, y0 + j * chh, (i - i0) * cw, chh);
       i0 = i;
     }
   }
@@ -82,9 +79,21 @@ export function photoCanvas(p: Photo, caption: string): HTMLCanvasElement {
       if (code <= 32 || code > 126) continue;
       const col = rgb(p.fg, c * 3);
       if (col !== last) { g.fillStyle = col; last = col; }
-      g.fillText(String.fromCharCode(code), i * cw + cw / 2, j * chh + chh / 2 + 0.5 * scale);
+      g.fillText(String.fromCharCode(code), x0 + i * cw + cw / 2, y0 + j * chh + chh / 2 + 0.5 * scale);
     }
   }
+}
+
+/** Rend la photo dans un canvas 2D : les cellules, puis un bandeau de légende. */
+export function photoCanvas(p: Photo, caption: string): HTMLCanvasElement {
+  const scale = exportScale();
+  const chh = CELL_H * scale;
+  const strip = Math.round(UI_FONT_SIZE * scale * 2.2);
+  const cv = document.createElement("canvas");
+  cv.width = p.cols * CELL_W * scale;
+  cv.height = p.rows * chh + strip;
+  const g = cv.getContext("2d")!;
+  drawCells(g, p, 0, 0, scale);
   // Bandeau de légende.
   const y0 = p.rows * chh;
   g.fillStyle = "#14121a";
@@ -96,20 +105,25 @@ export function photoCanvas(p: Photo, caption: string): HTMLCanvasElement {
   return cv;
 }
 
+/** Enregistre un fichier (Blob) sous le nom donné, par un lien de téléchargement. */
+export function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
 /** Télécharge la photo en PNG (paleoglyphes-<id>.png). */
 export function downloadPng(p: Photo, caption: string): Promise<boolean> {
   return new Promise((resolve) => {
     try {
       photoCanvas(p, caption).toBlob((blob) => {
         if (!blob) { resolve(false); return; }
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `paleoglyphes-${p.id}.png`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        downloadBlob(blob, `paleoglyphes-${p.id}.png`);
         resolve(true);
       }, "image/png");
     } catch {

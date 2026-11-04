@@ -6,11 +6,11 @@ const KEYS: Record<string, [number, number]> = {
  * Touches lues par le jeu (les autres restent au navigateur). Carte du clavier :
  * 1-6 onglets ; Tab / Maj+Tab focus suivant / précédent ; Entrée / Espace activer ; Échap retour puis menu ;
  * Retour arrière : retour ; H aide ; V documentaire ; P appareil photo ; C recensement ; M carte ; T temps ;
- * E/R/F outils de fouille ; N (dev) debug navigation ; flèches / ZQSD / WASD déplacements ;
+ * E/R/F outils de fouille ; B couper / remettre le son ; N (dev) debug navigation ; flèches / ZQSD / WASD déplacements ;
  * zoom de la réserve : les deux touches à droite du 0 (« = » et « ) » en AZERTY, « = » et « - » en QWERTY),
  * + et - du pavé numérique, pincement ou Ctrl + molette.
  */
-const PRESS = new Set(["Equal", "Minus", "NumpadAdd", "NumpadSubtract", "Escape", "Enter", "Space", "Tab", "Backspace", "KeyH", "KeyT", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "KeyP", "KeyV", "KeyM", "KeyE", "KeyR", "KeyF", "KeyC", "KeyN", ...Object.keys(KEYS)]);
+const PRESS = new Set(["Equal", "Minus", "NumpadAdd", "NumpadSubtract", "Escape", "Enter", "Space", "Tab", "Backspace", "KeyH", "KeyT", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "KeyP", "KeyV", "KeyM", "KeyE", "KeyR", "KeyF", "KeyC", "KeyN", "KeyB", ...Object.keys(KEYS)]);
 
 export interface Click {
   /** Position en px CSS dans le canvas. */

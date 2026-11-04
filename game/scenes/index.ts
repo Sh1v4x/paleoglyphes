@@ -5,7 +5,9 @@ import { THEMES } from "../palette";
 import type { Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { saveProgress } from "../progress";
-import { saveSettings, settings, UI_SCALES, type UiScale } from "../settings";
+import { saveSettings, settings, UI_SCALES, VOLUMES, type UiScale } from "../settings";
+import { applyVolume, play } from "../features/sound";
+import { updateSound } from "../features/sound-watch";
 import { SPECIES_LIST } from "../species";
 import type { GameState } from "../state";
 import {
@@ -47,6 +49,7 @@ const GLOBAL_HELP: Hint[] = [
   ["Entree", "activer le bouton choisi (ou Espace)"],
   ["Echap", "fermer / revenir, puis menu"],
   ["H", "ouvrir / fermer cette aide"],
+  ["B", "couper / remettre le son"],
 ];
 
 export function setMode(s: GameState, m: Mode) {
@@ -110,9 +113,14 @@ function settingsAction(s: GameState, id: string) {
   if (id.startsWith("set:scale:")) {
     const k = Number(id.slice(10)) as UiScale;
     if (UI_SCALES.includes(k)) settings.uiScale = k;
-  } else if (id === "set:motion") settings.reduceMotion = !settings.reduceMotion;
+  } else if (id.startsWith("set:vol:")) {
+    const v = Number(id.slice(8));
+    if ((VOLUMES as readonly number[]).includes(v)) { settings.volume = v; settings.mute = false; }
+  } else if (id === "set:mute") settings.mute = !settings.mute;
+  else if (id === "set:motion") settings.reduceMotion = !settings.reduceMotion;
   else if (id === "set:fps") settings.showFps = !settings.showFps;
   saveSettings();
+  applyVolume();
 }
 
 function updateMenu(s: GameState, input: Input) {
@@ -173,6 +181,16 @@ export function updateGame(s: GameState, input: Input, dt: number) {
   s.clock = advanceClock(s.clock, dt, s.clockSpeed);
   s.mouse.x = input.mouse.x;
   s.mouse.y = input.mouse.y;
+  // Son : B le coupe ou le remet partout ; un clic doux pour chaque bouton activé.
+  if (input.pressed.includes("KeyB")) {
+    input.pressed = input.pressed.filter((k) => k !== "KeyB");
+    settings.mute = !settings.mute;
+    saveSettings();
+    applyVolume();
+    toast(s, settings.mute ? "Son coupe" : "Son remis", "Touche B, ou Menu > Reglages.");
+  }
+  if (input.mouse.clicks.some((c) => hitAt(c.x, c.y)) || input.pressed.some((k) => k.startsWith("Digit") || ((k === "Enter" || k === "Space") && focusedId()))) play("click");
+  updateSound(s, dt);
   // Cinématique : elle a la main (pas de menu ni d'onglets ; Échap la passe).
   if (s.mode === "meteor") { SCENES.meteor.update(s, input, dt); return; }
   if (s.menu.open) { updateMenu(s, input); return; }

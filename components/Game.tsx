@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { DEV, FONT_SIZE } from "@/game/config";
+import { bindSound } from "@/game/features/sound";
 import { bindInput } from "@/game/input";
 import { startLoop } from "@/game/loop";
 import { Renderer } from "@/game/render/draw";
@@ -29,6 +30,8 @@ export default function Game({ fontFamily }: { fontFamily: string }) {
       const canvas = ref.current;
       if (disposed || !canvas) return;
       const input = bindInput(canvas);
+      // Son : le contexte audio naît au premier geste (règles d'autoplay).
+      const unbindSound = bindSound();
       const renderer = new Renderer(canvas, fontFamily);
       const state = createState();
       // La carte (~2 s) puis la végétation et le plancton : chaque étape est annoncée avant de bloquer.
@@ -59,7 +62,7 @@ export default function Game({ fontFamily }: { fontFamily: string }) {
         (dt) => { updateGame(state, input.read(), dt); autosave(state, dt); },
         (fps) => { view.zoom = worldZoom(state); renderer.sync(); composeGame(state, renderer.frame, renderer.ui, fps); renderer.draw(); },
       );
-      stop = () => { halt(); input.dispose(); window.removeEventListener("resize", resize); window.removeEventListener("pagehide", save); document.removeEventListener("visibilitychange", hidden); };
+      stop = () => { halt(); input.dispose(); unbindSound(); window.removeEventListener("resize", resize); window.removeEventListener("pagehide", save); document.removeEventListener("visibilitychange", hidden); };
     })();
     return () => { disposed = true; stop(); };
   }, [fontFamily]);

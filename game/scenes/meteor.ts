@@ -27,7 +27,7 @@ import type { Scene } from "./types";
  */
 
 /** Chronologie de la réserve (s depuis la fin de la séquence spatiale). */
-const T = { debris: 0.8, shock: 2.2, dust: 5.5, black: 8, reset: 8.6, dawn: 9.2, end: 15 };
+export const T = { debris: 0.8, shock: 2.2, dust: 5.5, black: 8, reset: 8.6, dawn: 9.2, end: 15 };
 
 export interface MeteorState {
   t: number;
@@ -38,6 +38,8 @@ export interface MeteorState {
 }
 
 let m: MeteorState = { t: 0, ox: 0, oy: 0, done: false };
+/** Temps écoulé dans la cinématique (s), pour le son (features/sound-watch.ts). */
+export const meteorTime = () => m.t;
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 

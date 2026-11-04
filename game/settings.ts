@@ -3,16 +3,20 @@
  * - `uiScale` : taille du calque d'interface (cellules 8x15 px multipliées), appliquée par le Renderer.
  * - `reduceMotion` : coupe secousses, éclairs, flashs et clignotements rapides.
  * - `showFps` : compteur d'images dans l'en-tête (outil de développement).
+ * - `volume`, `mute` : volume du son (une des valeurs de VOLUMES) et coupure (touche B).
  * Sans stockage (navigation privée, scripts Node) : valeurs par défaut, sans erreur.
  */
 
 export const UI_SCALES = [1, 1.25, 1.5] as const;
 export type UiScale = (typeof UI_SCALES)[number];
+export const VOLUMES = [0.25, 0.5, 0.75, 1] as const;
 
 export interface Settings {
   uiScale: UiScale;
   reduceMotion: boolean;
   showFps: boolean;
+  volume: number;
+  mute: boolean;
 }
 
 const KEY = "paleoglyphes:settings";
@@ -24,7 +28,7 @@ function defaults(): Settings {
   } catch {
     // Pas de navigateur : on garde les animations.
   }
-  return { uiScale: 1, reduceMotion: reduce, showFps: false };
+  return { uiScale: 1, reduceMotion: reduce, showFps: false, volume: 0.5, mute: false };
 }
 
 function load(): Settings {
@@ -37,6 +41,8 @@ function load(): Settings {
       uiScale: UI_SCALES.includes(v.uiScale as UiScale) ? (v.uiScale as UiScale) : d.uiScale,
       reduceMotion: typeof v.reduceMotion === "boolean" ? v.reduceMotion : d.reduceMotion,
       showFps: typeof v.showFps === "boolean" ? v.showFps : d.showFps,
+      volume: (VOLUMES as readonly number[]).includes(v.volume as number) ? (v.volume as number) : d.volume,
+      mute: typeof v.mute === "boolean" ? v.mute : d.mute,
     };
   } catch {
     return d;

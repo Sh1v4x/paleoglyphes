@@ -8,7 +8,9 @@ import type { GameState } from "../state";
 import { uiCellAt } from "../render/metrics";
 import { button, buttonW, clip, emptyState, fill, hitAt, over, panel, put, region, text, wrap } from "../ui/kit";
 import { toast } from "../ui/toast";
-import { ageMid, ageRange, box, du, fitSprite, known, knownList, le, lerp } from "./journal-common";
+import { du, le } from "../fr";
+import { mixRgb } from "../math";
+import { ageMid, ageRange, box, fitSprite, known, knownList } from "./journal-common";
 import { UI_TOP } from "./types";
 
 /**
@@ -65,7 +67,7 @@ function epochOf(ma: number): [number, number] {
 }
 const epochName = (ei: number, si: number) => ei === ERAS.length - 1 ? "Cénozoïque (après les dinosaures)" : `${ERAS[ei].name} ${ERAS[ei].subs[si][0]}`;
 
-const eraBg = (th: Theme, c: RGB, k = 0.55): RGB => lerp(th.ui.panel, c, th.style === "dark" ? k * 0.75 : k);
+const eraBg = (th: Theme, c: RGB, k = 0.55): RGB => mixRgb(th.ui.panel, c, th.style === "dark" ? k * 0.75 : k);
 
 // ---------------------------------------------------------------------------
 // Mini-jeu

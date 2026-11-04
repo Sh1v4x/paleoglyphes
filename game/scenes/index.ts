@@ -5,18 +5,19 @@ import { THEMES } from "../palette";
 import type { Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
-import { saveProgress } from "../progress";
-import { saveSettings, settings, UI_SCALES, VOLUMES, type UiScale } from "../settings";
+import { factKey, hasFact, saveProgress } from "../progress";
+import { isUiScale, saveSettings, settings, VOLUMES } from "../settings";
 import { applyVolume, play } from "../features/sound";
 import { updateSound } from "../features/sound-watch";
 import { SPECIES_LIST } from "../species";
 import type { GameState } from "../state";
+import { STRINGS } from "../strings";
 import {
   actions, ascii, beginUi, overlay, button, drawFocus, drawTooltip, fill, focusedId, hintLine, hitAt, keyChip, moveFocus, over,
   panel, put, region, resetUi, setFocus, SP, text, touchHints, wrap, type Hint,
 } from "../ui/kit";
 import { drawMenu, drawSettings, MENU_ITEMS } from "../ui/menu";
-import { drawToasts, toast } from "../ui/toast";
+import { drawToasts, toast, updateToasts } from "../ui/toast";
 import { digScene } from "./dig";
 import { journalScene } from "./journal";
 import { labScene } from "./lab";
@@ -30,14 +31,14 @@ export const SCENES: Record<Mode, Scene> = { dig: digScene, lab: labScene, park:
 
 /** Onglets : touche, icône ASCII (un caractère) et libellé. */
 const TABS: { mode: Mode; label: string; icon: string; key: string; tip: string }[] = [
-  { mode: "park", label: "Reserve", icon: "Y", key: "1", tip: "Reserve : observer les dinosaures vivants" },
-  { mode: "dig", label: "Fouille", icon: "T", key: "2", tip: "Fouille : degager des fossiles" },
-  { mode: "lab", label: "Atelier", icon: "+", key: "3", tip: "Atelier : assembler les squelettes" },
-  { mode: "journal", label: "Carnet", icon: "=", key: "4", tip: "Carnet : fiches, frise, quiz, tailles, voyage" },
-  { mode: "museum", label: "Musee", icon: "^", key: "5", tip: "Musee : ta collection exposee" },
-  { mode: "photos", label: "Photos", icon: "@", key: "6", tip: "Photos : l'album du photo-safari" },
+  { mode: "park", icon: "Y", key: "1", ...STRINGS.tabs.park },
+  { mode: "dig", icon: "T", key: "2", ...STRINGS.tabs.dig },
+  { mode: "lab", icon: "+", key: "3", ...STRINGS.tabs.lab },
+  { mode: "journal", icon: "=", key: "4", ...STRINGS.tabs.journal },
+  { mode: "museum", icon: "^", key: "5", ...STRINGS.tabs.museum },
+  { mode: "photos", icon: "@", key: "6", ...STRINGS.tabs.photos },
 ];
-const TAB_NAME: Record<Mode, string> = { park: "Reserve", dig: "Fouille", lab: "Atelier", journal: "Carnet", museum: "Musee", photos: "Photos", meteor: "Cinematique" };
+const tabName = (m: Mode) => STRINGS.tabs[m].label;
 // Style dark fantasy mis de côté pour l'instant : seul le cartoon est proposé.
 // const STYLES: Style[] = ["dark", "cartoon"];
 /** Nombre de lignes du menu Échap (voir MENU_ITEMS). */
@@ -77,7 +78,7 @@ function unlockAll(s: GameState) {
     p.bones[spec.id] = spec.bones.map((b) => b.id);
     if (!p.assembled.includes(spec.id)) p.assembled.push(spec.id);
     // Comme un vrai assemblage : les faits « assemble » rejoignent le carnet (sans notification).
-    for (const f of spec.facts) if (f.unlock === "assemble" && !p.facts.includes(`${spec.id}:${f.id}`)) p.facts.push(`${spec.id}:${f.id}`);
+    for (const f of spec.facts) if (f.unlock === "assemble" && !hasFact(p, spec.id, f.id)) p.facts.push(factKey(spec.id, f.id));
     const [a, b] = spec.behavior.herd;
     p.population[spec.id] = Math.max(p.population[spec.id] ?? 0, Math.round((a + b) / 2));
   }
@@ -121,8 +122,8 @@ function activateMenu(s: GameState, byKey: boolean) {
 function settingsAction(s: GameState, id: string) {
   if (id === "set:back") { s.menu.page = "main"; setFocus(undefined); return; }
   if (id.startsWith("set:scale:")) {
-    const k = id === "set:scale:auto" ? "auto" : (Number(id.slice(10)) as UiScale);
-    if (k === "auto" || UI_SCALES.includes(k)) settings.uiScale = k;
+    const k = id === "set:scale:auto" ? "auto" : Number(id.slice(10));
+    if (k === "auto" || isUiScale(k)) settings.uiScale = k;
   } else if (id.startsWith("set:vol:")) {
     const v = Number(id.slice(8));
     if ((VOLUMES as readonly number[]).includes(v)) { settings.volume = v; settings.mute = false; }
@@ -160,7 +161,7 @@ function updateMenu(s: GameState, input: Input) {
       else closeMenu(s);
       return;
     }
-    if (k === "ArrowUp" || k === "KeyW" || k === "KeyZ" || k === "ShiftTab") { m.index = (m.index + MENU_ROWS - 1) % MENU_ROWS; m.confirm = false; }
+    if (k === "ArrowUp" || k === "KeyW" || k === "ShiftTab") { m.index = (m.index + MENU_ROWS - 1) % MENU_ROWS; m.confirm = false; }
     if (k === "ArrowDown" || k === "KeyS" || k === "Tab") { m.index = (m.index + 1) % MENU_ROWS; m.confirm = false; }
     if (k === "Enter" || k === "Space" || k === "ArrowRight" || k === "KeyD") activateMenu(s, true);
     if (!m.open || m.page !== "main") return;
@@ -188,7 +189,8 @@ function updateHelp(s: GameState, input: Input) {
 /** Logique globale : menu Échap, aide, onglets, focus clavier, routage des clics, puis la scène courante. */
 export function updateGame(s: GameState, input: Input, dt: number) {
   s.time += dt;
-  s.clock = advanceClock(s.clock, dt, s.clockSpeed);
+  advanceClock(s, dt);
+  updateToasts(s);
   s.mouse.x = input.mouse.x;
   s.mouse.y = input.mouse.y;
   // Son : B le coupe ou le remet partout ; un clic doux pour chaque bouton activé.
@@ -235,7 +237,8 @@ export function updateGame(s: GameState, input: Input, dt: number) {
   // Boutons du cœur (clic ou clavier) : onglets, menu, aide.
   const rest: string[] = [];
   for (const id of input.ui) {
-    if (id.startsWith("tab:")) setMode(s, id.slice(4) as Mode);
+    const tab = TABS.find((t) => id === `tab:${t.mode}`);
+    if (tab) setMode(s, tab.mode);
     else if (id === "menu:open") { openMenu(s); return; }
     else if (id === "help:open") { s.help = true; return; }
     // Bouton « < » (écran tactile) : comme Échap, ferme ce qui est ouvert, sinon le menu.
@@ -339,7 +342,7 @@ function drawHelp(s: GameState, th: Theme, ui: Frame) {
   const count = (r: { lines: string[] }[]) => r.reduce((n, q) => n + q.lines.length, 0);
   const H = Math.min(ui.rows - 2, 3 + count(g) + (l.length ? 2 + count(l) : 0) + 3);
   const x = Math.floor((ui.cols - W) / 2), y = Math.max(HEADER_ROWS, Math.floor((ui.rows - H) / 2));
-  panel(ui, th, x, y, W, H, `Aide - ${TAB_NAME[s.mode]}`, { close: "help:close", overlay: true });
+  panel(ui, th, x, y, W, H, `Aide - ${tabName(s.mode)}`, { close: "help:close", overlay: true });
   let yy = y + 2;
   const block = (title: string, rows: { k: string; lines: string[] }[]) => {
     text(ui, x + SP.pad, yy++, title, u.hi, u.panel, u.alpha);
@@ -351,7 +354,7 @@ function drawHelp(s: GameState, th: Theme, ui: Frame) {
     }
   };
   block("Partout", g);
-  if (l.length) { yy++; block(`Dans cet ecran (${TAB_NAME[s.mode]})`, l); }
+  if (l.length) { yy++; block(`Dans cet ecran (${tabName(s.mode)})`, l); }
   actions(ui, th, x + SP.pad, y + H - 2, iw, [{ id: "help:close", label: "Fermer", key: "H", variant: "primary" }]);
 }
 

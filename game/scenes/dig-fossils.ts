@@ -124,9 +124,6 @@ export function outlineRaster(f: Frame, r: Raster, x0: number, y0: number, col: 
   }
 }
 
-/** « d'Ankylosaure », « de Tyrannosaure ». */
-export const deName = (n: string) => (/^[aeiouyhéèêâîôAEIOUYHÉÈÊ]/.test(n) ? `d'${n}` : `de ${n}`);
-
 /** Cellules monde d'une longueur en px (pour placer des choses à l'échelle). */
 export const pxToCols = (px: number) => px / CELL_W;
 export const pxToRows = (px: number) => px / CELL_H;

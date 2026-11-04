@@ -1,6 +1,6 @@
 import { createNoise2D } from "simplex-noise";
 import { CELL_H, CELL_W, DEV } from "../config";
-import { DAY_SECONDS, daylight } from "../daycycle";
+import { DAY_SECONDS, daylight, golden, periodName } from "../daycycle";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
@@ -13,12 +13,16 @@ import { BIOME } from "../world/biomes";
 import type { World } from "../world/generate";
 import { T, isWater } from "../world/tiles";
 import { knockTree, type Tree } from "../world/trees";
+import { sample } from "./lenia";
 
 /**
  * Saisons, météo et événements rares de la réserve.
  *
  * - Une année dure YEAR_DAYS jours de réserve : saison des pluies (orages, verdure), fin des pluies,
  *   saison sèche (chaleur, végétation jaunie, mares plus basses, tourbillons de poussière), retour des pluies.
+ * - Chaque biome vit l'année à sa façon (annoncée quand on le regarde) : marais qui reculent puis débordent,
+ *   jour polaire (soleil de minuit, dégel) et nuit polaire (crépuscule à midi, lacs gelés, aurores) en
+ *   Alaska, oasis qui rétrécissent, tempêtes de sable et désert qui reverdit après la pluie au Gobi.
  * - Le ciel du moment (`Sky`) fixe des cibles d'intensité (nuages, pluie, orage, neige, brouillard,
  *   chaleur) que les niveaux rejoignent en douceur : les transitions sont progressives.
  * - Événements rares (notification + note éducative) : incendie après la foudre, crue, canicule,
@@ -75,6 +79,8 @@ const SKY_ICON: Record<Sky, [string, RGB]> = {
   fog: ["=-=", [190, 196, 205]],
   heat: ["\\O/", [255, 130, 40]],
 };
+
+const SAND_ICON: [string, RGB] = ["~>~", [215, 165, 80]];
 
 /** Ordre du forçage de test (clic sur le panneau, DEV seulement). */
 const FORCE = ["auto", "clear", "cloudy", "rain", "storm", "snow", "fog", "heat", "incendie", "crue", "etoiles"] as const;
@@ -133,6 +139,16 @@ export interface WeatherState {
   view: Levels;
   viewSnow: number;
   viewBiome: number;
+  /** Part de toundra dans la vue (0..1, en douceur) : jour et nuit polaires, aurores. */
+  viewPolar: number;
+  /** Tempête de sable vue (Gobi, saison sèche) 0..1, et instant (réel) de sa dernière annonce. */
+  sand: number;
+  sandTold: number;
+  /** Reverdissement du désert après la pluie 0..1 (retombe en un demi-jour). */
+  bloom: number;
+  /** Par biome : moitié de l'année déjà annoncée (0 pluies / été polaire, 1 saison sèche / hiver), -1 jamais. */
+  told: number[];
+  toldAt: number;
 }
 
 export function createWeatherState(): WeatherState {
@@ -141,6 +157,7 @@ export function createWeatherState(): WeatherState {
     lv: { ...TARGET.clear }, seed: 1, snowCover: 0, wet: 0, floodT: -1, event: null, eventT: 0,
     fires: [], burned: 0, douse: 0, bolt: null, nextBolt: 0, boomAt: -1e9, season: -1, force: 0,
     view: { ...TARGET.clear }, viewSnow: 0, viewBiome: BIOME.HellCreek,
+    viewPolar: 0, sand: 0, sandTold: -1e9, bloom: 0, told: [-1, -1, -1, -1, -1], toldAt: -1e9,
   };
 }
 
@@ -173,17 +190,73 @@ function seasonIndex(s: GameState): number {
   const f = yearFrac(s);
   return f < 0.36 ? 0 : f < 0.5 ? 1 : f < 0.86 ? 2 : 3;
 }
-const SEASON_NOTE = [
-  "Hell Creek, il y a 66 millions d'années : une plaine côtière chaude et humide, parcourue de rivières. Les orages sont fréquents, tout reverdit.",
-  "Les averses s'espacent. Les rivières sont encore hautes, la végétation au plus dense.",
-  "Il fait chaud et sec : la végétation jaunit, les mares baissent. Les herbivores doivent marcher plus loin pour boire.",
-  "Les premiers orages reviennent : la végétation repart et les mares se remplissent.",
-];
+/**
+ * Annonce de saison par biome, pour chaque moitié de l'année (pluies / été polaire, saison sèche / hiver) :
+ * [saison, lieu, note]. Titre : « La nuit polaire commence en Alaska » (ou « continue », si l'on arrive
+ * dans le biome en cours de saison).
+ */
+const SEASON_TOAST: Record<number, [string, string, string][]> = {
+  [BIOME.HellCreek]: [
+    ["La saison des pluies", "à Hell Creek", "Hell Creek, il y a 66 millions d'années : une plaine côtière chaude et humide, parcourue de rivières. Les orages reviennent, les fougères reverdissent, les mares se remplissent."],
+    ["La saison sèche", "à Hell Creek", "Il fait chaud et sec : les fougères jaunissent et s'éclaircissent, les mares baissent. Les herbivores doivent marcher plus loin pour boire."],
+  ],
+  [BIOME.Swamp]: [
+    ["La saison des pluies", "dans le marais", "L'eau monte et recouvre la vase. Lentilles d'eau et prêles poussent à toute vitesse."],
+    ["La saison sèche", "dans le marais", "L'eau recule et laisse de la vase craquelée : poissons et tortues se serrent dans les dernières mares."],
+  ],
+  [BIOME.Tundra]: [
+    ["Le jour polaire", "en Alaska", "Si près du pôle, le soleil ne se couche presque plus de l'été ! La neige fond, mousses et prêles poussent, les troupeaux arrivent pour manger."],
+    ["La nuit polaire", "en Alaska", "Le soleil se lève à peine, même à midi. Froid, neige et longues nuits, parfois une aurore boréale. On y a trouvé des bébés dinosaures : certains vivaient là toute l'année !"],
+  ],
+  [BIOME.Desert]: [
+    ["La saison des orages", "au Gobi", "Quelques averses arrosent les dunes : la croûte du sol et les buissons reverdissent pour quelques jours, les oasis se remplissent."],
+    ["La saison sèche", "au Gobi", "Chaleur écrasante : l'air tremble au-dessus des dunes, les oasis rétrécissent. Gare aux tempêtes de sable !"],
+  ],
+};
 
 /** Jaunissement de la végétation 0..1 (saison sèche + chaleur), effacé par la neige. */
 function dryness(s: GameState): number {
   const st = s.weather;
   return clamp01(smooth(0.5, 0.12, seasonWet(s)) * 0.7 + st.view.heat * 0.35) * (1 - st.viewSnow);
+}
+
+/**
+ * Hauteur du soleil d'été au pôle : +1 au cœur de l'été polaire (milieu de la moitié humide de l'année),
+ * -1 au cœur de l'hiver, 0 aux équinoxes (bords de `polarSummer`).
+ */
+function polarSun(s: GameState): number {
+  return Math.cos(2 * Math.PI * (yearFrac(s) - 0.25));
+}
+/** Hiver polaire 0..1 (neige épaisse, lacs gelés) et dégel 0..1 (mousses, eau de fonte). */
+const polarWinter = (sun: number) => smooth(0.25, -0.6, sun);
+const polarMelt = (sun: number) => smooth(0.1, 0.7, sun);
+/** Saison sèche pure 0..1 (sans la chaleur du moment). */
+const seasonDry = (s: GameState) => smooth(0.5, 0.12, seasonWet(s));
+
+/**
+ * Hauteur du soleil vers 80° de latitude (Prince Creek), -1..1 : en été il tourne au-dessus de l'horizon
+ * sans se coucher, en hiver il reste dessous (un crépuscule à midi). Lumière et heure dorée en découlent.
+ */
+const polarElev = (hour: number, sun: number) => 0.55 * sun + 0.45 * Math.cos((2 * Math.PI * (hour - 12)) / 24);
+const polarLight = (e: number) => smooth(-0.3, 0.25, e);
+const polarGolden = (e: number) => clamp01(1 - Math.abs(e - 0.02) / 0.22);
+
+/** Lumière du jour vue par la caméra (0..1) : celle des latitudes moyennes, ou la polaire en toundra. */
+export function seenDaylight(s: GameState, hour = s.clock): number {
+  const p = s.weather.viewPolar, d = daylight(hour);
+  return p < 0.01 ? d : lerp(d, polarLight(polarElev(hour, polarSun(s))), p);
+}
+/** Lumière dorée vue (soleil de minuit en été polaire, crépuscule de midi en hiver). */
+export function seenGolden(s: GameState, hour = s.clock): number {
+  const p = s.weather.viewPolar, g = golden(hour);
+  return p < 0.01 ? g : lerp(g, polarGolden(polarElev(hour, polarSun(s))), p);
+}
+/** Moment de la journée affiché : « Soleil de minuit » ou « Nuit polaire » quand on regarde la toundra. */
+export function seenPeriod(s: GameState): string {
+  const night = daylight(s.clock) < 0.35, lit = seenDaylight(s);
+  if (s.weather.viewPolar > 0.5 && night && lit > 0.5) return "Soleil de minuit";
+  if (s.weather.viewPolar > 0.5 && !night && lit < 0.35) return "Nuit polaire";
+  return periodName(s.clock);
 }
 
 /** Niveau de crue 0..1 (montée, palier, décrue). */
@@ -332,6 +405,7 @@ export function updateWeather(s: GameState, dt: number): void {
     st.ready = true;
     st.prevClock = s.clock;
     st.season = seasonIndex(s);
+    st.told[BIOME.HellCreek] = st.season <= 1 ? 0 : 1; // le lancement n'annonce rien
     setSky(st, "clear", 0.2 * DAY_SECONDS);
     return;
   }
@@ -340,11 +414,14 @@ export function updateWeather(s: GameState, dt: number): void {
   const prev = st.prevClock;
   st.prevClock = s.clock;
 
-  // Changement de saison.
-  const si = seasonIndex(s);
-  if (si !== st.season) {
-    st.season = si;
-    if (si === 0 || si === 2) toast(s, SEASONS[si], SEASON_NOTE[si]);
+  // Changement de saison : annoncé biome par biome, quand on le regarde (une fois par moitié d'année).
+  const si = seasonIndex(s), half = si <= 1 ? 0 : 1;
+  st.season = si;
+  const tb = SEASON_TOAST[st.viewBiome];
+  if (tb && st.told[st.viewBiome] !== half && s.time - st.toldAt > 8) {
+    const [name, where, note] = tb[half];
+    st.told[st.viewBiome] = half; st.toldAt = s.time;
+    toast(s, `${name} ${si === 0 || si === 2 ? "commence" : "continue"} ${where}`, note);
   }
 
   // Événements en cours.
@@ -380,6 +457,9 @@ export function updateWeather(s: GameState, dt: number): void {
   else st.snowCover = Math.max(0, st.snowCover - (dt * acc * (1 + st.lv.heat * 2)) / 160);
   if (st.lv.rain > 0.2) st.wet = Math.min(1, st.wet + (dt * st.lv.rain * acc) / 60);
   else st.wet = Math.max(0, st.wet - (dt * acc * (1 + st.lv.heat * 2)) / 200);
+  // Désert : une averse fait reverdir la croûte et les buissons, qui jaunissent en un demi-jour.
+  if (st.lv.rain > 0.3) st.bloom = Math.min(1, st.bloom + (dt * st.lv.rain * acc) / 90);
+  else st.bloom = Math.max(0, st.bloom - dt / (DAY_SECONDS * 0.5));
 
   localize(s, dt);
 
@@ -405,16 +485,28 @@ function localize(s: GameState, dt: number) {
   st.viewBiome = b;
   const tg: Levels = { ...L };
   let snowCover = st.snowCover;
+  let sand = 0;
   if (b === BIOME.Tundra) {
-    // Alaska : ce qui tombe tombe en neige ; jamais de canicule.
-    tg.snow = Math.max(L.snow, L.rain * 0.9, L.cloud * 0.25);
-    tg.rain = 0; tg.storm = 0; tg.heat = 0; tg.cloud = Math.max(L.cloud, 0.3);
-    snowCover = Math.max(st.snowCover, 0.35 + 0.65 * tg.snow); // poudrée par beau temps, blanche quand il neige
+    // Alaska : l'hiver, ce qui tombe tombe en neige ; l'été polaire, une pluie fraîche mêlée de neige.
+    // Jamais de canicule. Neige au sol épaisse l'hiver, en plaques l'été.
+    const winter = polarWinter(polarSun(s)), cold = 0.3 + 0.7 * winter;
+    tg.snow = Math.max(L.snow, L.rain * 0.9 * cold, L.cloud * 0.25 * winter);
+    tg.rain = L.rain * (1 - cold) * 0.8; tg.storm = 0; tg.heat = 0; tg.cloud = Math.max(L.cloud, 0.3);
+    snowCover = Math.max(st.snowCover, Math.min(1, lerp(0.08, 0.85, winter) + 0.6 * tg.snow));
   } else if (b === BIOME.Desert) {
-    // Gobi : presque pas de pluie, chaleur sèche (le soir, elle retombe vite : voir temperature()).
+    // Gobi : presque pas de pluie, chaleur sèche écrasante en saison sèche (le soir, elle retombe vite :
+    // voir temperature()). Parfois une tempête de sable, par tranches de 5 h tirées au sort.
+    const dry = seasonDry(s);
     tg.rain = L.rain * 0.2; tg.storm = L.storm * 0.2; tg.snow = 0; tg.fog = 0;
-    tg.cloud = L.cloud * 0.5; tg.heat = Math.max(L.heat, 0.5);
+    tg.cloud = L.cloud * 0.5; tg.heat = Math.max(L.heat, 0.35 + 0.55 * dry);
     snowCover = 0;
+    const slot = Math.floor((st.day * 24 + s.clock) / 5);
+    sand = L.rain < 0.2 && hash2(slot, 17, 191) < 0.22 * dry ? 1 : 0;
+    if (sand && st.sand < 0.05 && s.time - st.sandTold > 240) {
+      st.sandTold = s.time;
+      toast(s, "Tempête de sable au Gobi !",
+        "Le vent soulève le sable des dunes. Au Gobi, des dinosaures ont été ensevelis vivants par le sable : le célèbre fossile des « dinosaures combattants », un Velociraptor agrippé à un Protoceratops.");
+    }
   } else if (b === BIOME.Swamp) {
     // Marais : brume sur l'eau, averses plus fortes.
     tg.fog = Math.max(L.fog, 0.3); tg.rain = Math.min(1, L.rain * 1.2);
@@ -423,6 +515,8 @@ function localize(s: GameState, dt: number) {
   v.cloud += (tg.cloud - v.cloud) * a; v.rain += (tg.rain - v.rain) * a; v.storm += (tg.storm - v.storm) * a;
   v.snow += (tg.snow - v.snow) * a; v.fog += (tg.fog - v.fog) * a; v.heat += (tg.heat - v.heat) * a;
   st.viewSnow += (snowCover - st.viewSnow) * a;
+  st.viewPolar += ((b === BIOME.Tundra ? 1 : 0) - st.viewPolar) * a;
+  st.sand += (sand - st.sand) * Math.min(1, dt * 0.15);
 }
 
 export function weatherClick(s: GameState, id: string): boolean {
@@ -553,21 +647,37 @@ export function drawWeather(s: GameState, th: Theme, world: Frame, camX: number,
   dustPass(s, th, world, camX, camY);
   firePass(s, w, world, camX, camY);
   meteorPass(s, world);
+  auroraPass(s, world);
   boltPass(s, world, camX, camY);
 }
 
+/** Par biome (indice BIOME), recalculés à chaque image : jaunissement, verdure, niveau des mares basses. */
+const DRY_B = new Float32Array(5), LUSH_B = new Float32Array(5), LOW_B = new Float32Array(5);
+const ICE: RGB = [200, 222, 240];
+/** Fleurs jaunes du désert après la pluie (mêmes teintes dans les deux styles, la lumière fait le reste). */
+const BLOOM: RGB = [236, 196, 72];
+
 /**
- * Passe par cellule (une seule boucle) : crue, boue des mares basses, végétation jaunie, flaques,
- * neige au sol et sur les cimes, brouillard, ombres de nuages. Chaque effet est sauté s'il est nul.
+ * Passe par cellule (une seule boucle) : crue, saisons par biome (fougères jaunies ou d'un vert profond,
+ * mares et marais qui reculent ou débordent, oasis qui rétrécissent, lacs gelés et dégel de la toundra,
+ * désert qui reverdit après la pluie), flaques, neige au sol et sur les cimes, brouillard, ombres de nuages.
  */
 function groundPass(s: GameState, th: Theme, w: World, fl: { low: Uint8Array; dist: Uint8Array }, f: Frame, camX: number, camY: number) {
   const st = s.weather, lv = seen(s), t = s.time, P = th.pal;
-  const dry = dryness(s), snowC = st.viewSnow, fog = lv.fog;
+  const dry = dryness(s), snowC = st.viewSnow, fog = lv.fog, veg = s.park.eco?.veg;
   const floodCells = floodLevel(st) * FLOOD_MAX;
-  const lowWater = dry * 0.3 * (st.floodT < 0 ? 1 : 0);
+  const noFlood = st.floodT < 0 ? 1 : 0;
+  const lush = smooth(0.55, 0.9, seasonWet(s)) * (1 - snowC);
+  const sun = polarSun(s), freeze = polarWinter(sun) * 0.55, melt = polarMelt(sun), bloom = st.bloom;
+  // Hell Creek : les fougères jaunissent, les mares baissent un peu. Marais : l'eau recule loin et, au cœur
+  // des pluies, déborde sur la vase. Gobi : les oasis rétrécissent (leur végétation, nourrie par la nappe,
+  // jaunit peu). Toundra : pas de saison sèche, la mousse verdit au dégel.
+  DRY_B[BIOME.HellCreek] = dry; DRY_B[BIOME.Swamp] = dry * 0.8; DRY_B[BIOME.Desert] = dry * 0.5;
+  LUSH_B[BIOME.HellCreek] = lush; LUSH_B[BIOME.Swamp] = lush; LUSH_B[BIOME.Desert] = lush * 0.4; LUSH_B[BIOME.Tundra] = melt * (1 - snowC) * 0.8;
+  LOW_B[BIOME.HellCreek] = dry * 0.3 * noFlood; LOW_B[BIOME.Swamp] = dry * 0.55 * noFlood; LOW_B[BIOME.Desert] = (0.06 + dry * 0.6) * noFlood;
+  const overflow = smooth(0.7, 0.97, seasonWet(s)) * 3 * noFlood;
   const puddle = st.wet > 0.05 ? 255 - st.wet * 55 : 999;
   const cloud = clamp01((lv.cloud - 0.15) / 0.85) + lv.storm * 0.2;
-  if (dry < 0.02 && snowC < 0.01 && fog < 0.02 && floodCells < 0.5 && lowWater < 0.01 && puddle > 255 && cloud < 0.02) return;
   const { cols, rows } = f;
   const mist = P.mistFg, mud = P.dirt[1], mudBg = P.dirt[0];
   const fw: RGB = [lerp(P.waterMid[0], P.dirt[2][0], 0.3), lerp(P.waterMid[1], P.dirt[2][1], 0.3), lerp(P.waterMid[2], P.dirt[2][2], 0.3)];
@@ -579,29 +689,78 @@ function groundPass(s: GameState, th: Theme, w: World, fl: { low: Uint8Array; di
       const wx = camX + x;
       if (wx < 0 || wx >= w.cols) continue;
       const i = y * cols + x, k = i * 4, wi = wy * w.cols + wx;
-      const terr = w.terrain[wi], obj = f.obj[i];
+      const terr = w.terrain[wi], obj = f.obj[i], b = w.biome[wi];
       const L = (f.lr[i] + f.lg[i] + f.lb[i]) / 3;
       if (terr === T.Shallow || terr === T.Deep) {
-        // Saison sèche : les bords des mares se découvrent (boue craquelée).
-        if (lowWater > 0 && !obj && terr === T.Shallow && w.depth[wi] / 255 < lowWater) {
+        const d = w.depth[wi] / 255;
+        if (obj) { /* animal ou décor devant l'eau */ }
+        else if (b === BIOME.Tundra && d < freeze) {
+          // Hiver polaire : les lacs gèlent depuis la rive (glace pâle, quelques fissures).
+          const h = hash2(wx, wy, 85), kk = Math.min(1.15, 0.3 + L * 0.85);
+          f.ch[i] = h < 0.1 ? 45 : h < 0.15 ? 61 : 32; // - =
+          f.fg[k] = ICE[0] * kk * 0.9; f.fg[k + 1] = ICE[1] * kk * 0.9; f.fg[k + 2] = ICE[2] * kk * 0.95;
+          f.bg[k] = ICE[0] * kk * 0.66; f.bg[k + 1] = ICE[1] * kk * 0.7; f.bg[k + 2] = ICE[2] * kk * 0.76;
+        } else if (d < LOW_B[b]) {
+          // Saison sèche : les bords des mares se découvrent (boue craquelée).
           const h = hash2(wx, wy, 81);
           f.ch[i] = h < 0.35 ? 46 : h < 0.55 ? 44 : h < 0.65 ? 95 : 32; // . , _
           f.fg[k] = mud[0] * L * 1.2; f.fg[k + 1] = mud[1] * L * 1.2; f.fg[k + 2] = mud[2] * L * 1.2;
           f.bg[k] = mudBg[0] * L * 0.75; f.bg[k + 1] = mudBg[1] * L * 0.75; f.bg[k + 2] = mudBg[2] * L * 0.75;
         }
-      } else if (floodCells >= 1 && !obj && fl.dist[wi] <= floodCells) {
-        // Crue : eau boueuse sur les rives.
+      } else if (!obj && ((floodCells >= 1 && fl.dist[wi] <= floodCells) || (overflow >= 1 && terr === T.Mud && b === BIOME.Swamp && fl.dist[wi] <= overflow))) {
+        // Crue, ou marais gonflé par les pluies : eau boueuse sur les rives.
         const wave = Math.sin(wx * 0.3 + t * 1.3 + Math.sin(wy * 0.5 + t * 0.7));
         f.ch[i] = wave > 0.55 ? 126 : wave > -0.1 ? 45 : wave > -0.6 ? 46 : 32; // ~ - .
         const kk = L * (1.7 + 0.4 * wave);
         f.fg[k] = fw[0] * kk; f.fg[k + 1] = fw[1] * kk; f.fg[k + 2] = fw[2] * kk;
         f.bg[k] = fw[0] * L * 0.75; f.bg[k + 1] = fw[1] * L * 0.75; f.bg[k + 2] = fw[2] * L * 0.75;
       } else {
-        // Végétation jaunie (saison sèche) : couvert du sol, feuillage un peu moins.
-        if (dry > 0.02 && obj !== 2 && (obj === 1 || terr === T.Grass)) {
-          const a = dry * (obj ? 0.4 : 0.75);
-          const lum = (f.fg[k] + f.fg[k + 1] + f.fg[k + 2]) / 3 * 1.2;
-          f.fg[k] += (lum * 1.15 - f.fg[k]) * a; f.fg[k + 1] += (lum * 0.95 - f.fg[k + 1]) * a; f.fg[k + 2] += (lum * 0.45 - f.fg[k + 2]) * a;
+        // Dégel de la toundra : la neige se retire des bosses (mousses, prêles naines), l'eau de fonte
+        // remplit les creux. Taches stables : champ des creux + un peu de tramage.
+        if (melt > 0.02 && terr === T.Snow && !obj) {
+          const p = fl.low[wi] / 255 + (hash2(wx, wy, 55) - 0.5) * 0.12;
+          if (p > 1 - melt * 0.24) {
+            const sh = 0.5 + 0.5 * Math.sin(wx * 0.4 + wy * 0.7 + t * 0.8), c = P.waterShore;
+            f.ch[i] = sh > 0.8 ? 126 : sh > 0.5 ? 45 : 32; // ~ -
+            const kk = L * (1.2 + 0.8 * sh);
+            f.fg[k] = c[0] * kk; f.fg[k + 1] = c[1] * kk; f.fg[k + 2] = c[2] * kk;
+            f.bg[k] = c[0] * L * 0.6; f.bg[k + 1] = c[1] * L * 0.6; f.bg[k + 2] = c[2] * L * 0.6;
+          } else if (p < melt * 0.72) {
+            const h = hash2(wx, wy, 56), g = P.grass[1 + Math.floor(h * 2.99)], dd = P.dirt[2], m = 0.15 + 0.35 * hash2(wx, wy, 57);
+            f.ch[i] = h < 0.35 ? 34 : h < 0.65 ? 44 : h < 0.85 ? 46 : 59; // " , . ;
+            const kk = L * th.grassGain, fill = th.groundFill * L;
+            const r = lerp(g[0], dd[0], m), gg = lerp(g[1], dd[1], m), bb = lerp(g[2], dd[2], m);
+            f.fg[k] = r * kk; f.fg[k + 1] = gg * kk; f.fg[k + 2] = bb * kk;
+            f.bg[k] = P.void[0] * (1 - fill) + r * fill; f.bg[k + 1] = P.void[1] * (1 - fill) + gg * fill; f.bg[k + 2] = P.void[2] * (1 - fill) + bb * fill;
+          }
+        }
+        // Végétation : jaunie en saison sèche (les fougères clairsemées d'abord, elles s'éclaircissent),
+        // d'un vert profond aux pluies là où elle est dense. Feuillage des arbres moins marqué.
+        const dB = DRY_B[b], lB = LUSH_B[b];
+        if ((dB > 0.02 || lB > 0.02) && obj !== 2 && (obj === 1 || terr === T.Grass)) {
+          const vd = veg && !obj ? sample(veg, wx + 0.5, wy + 0.5) : 0.6;
+          // Le fond compte autant que le glyphe (surtout en cartoon) : il suit, un peu moins.
+          const lum = (f.fg[k] + f.fg[k + 1] + f.fg[k + 2]) / 3, bl = (f.bg[k] + f.bg[k + 1] + f.bg[k + 2]) / 3;
+          if (dB > 0.02) {
+            const a = Math.min(1, dB * (obj ? 0.4 : 0.4 + 0.6 * (1 - vd))), ab = a * 0.75;
+            f.fg[k] += (lum * 1.38 - f.fg[k]) * a; f.fg[k + 1] += (lum * 1.1 - f.fg[k + 1]) * a; f.fg[k + 2] += (lum * 0.5 - f.fg[k + 2]) * a;
+            f.bg[k] += (bl * 1.38 - f.bg[k]) * ab; f.bg[k + 1] += (bl * 1.1 - f.bg[k + 1]) * ab; f.bg[k + 2] += (bl * 0.5 - f.bg[k + 2]) * ab;
+            if (!obj && hash2(wx, wy, 58) < dB * (1 - vd) * 0.7) f.ch[i] = hash2(wx, wy, 59) < 0.6 ? 46 : 44; // . ,
+          }
+          if (lB > 0.02) {
+            const q = lB * (obj ? 0.25 : 0.25 + 0.45 * vd), qb = q * 0.6;
+            f.fg[k] = lum + (f.fg[k] - lum) * (1 + q); f.fg[k + 1] = (lum + (f.fg[k + 1] - lum) * (1 + q)) * (1 + 0.12 * q); f.fg[k + 2] = lum + (f.fg[k + 2] - lum) * (1 + q);
+            f.bg[k] = bl + (f.bg[k] - bl) * (1 + qb); f.bg[k + 1] = bl + (f.bg[k + 1] - bl) * (1 + qb); f.bg[k + 2] = bl + (f.bg[k + 2] - bl) * (1 + qb);
+          }
+        }
+        // Désert après la pluie : la croûte verdit, des pousses et des fleurs sortent autour.
+        if (bloom > 0.02 && terr === T.Sand && !obj && veg) {
+          const vd = sample(veg, wx + 0.5, wy + 0.5);
+          if (vd > 0.12 && hash2(wx, wy, 23) < vd * 1.1 + bloom * 0.3 && hash2(wx, wy, 60) < bloom) {
+            const flower = hash2(wx, wy, 61) < 0.25, c = flower ? BLOOM : P.grass[3], kk = L * th.grassGain * (flower ? 0.75 : 1);
+            f.ch[i] = flower ? 42 : hash2(wx, wy, 62) < 0.5 ? 34 : 44; // * " ,
+            f.fg[k] = c[0] * kk; f.fg[k + 1] = c[1] * kk; f.fg[k + 2] = c[2] * kk;
+          }
         }
         // Flaques dans les creux du sol mouillé.
         if (!obj && fl.low[wi] > puddle) {
@@ -663,7 +822,7 @@ function groundPass(s: GameState, th: Theme, w: World, fl: { low: Uint8Array; di
 
 /** Chaleur : l'air tremble, certaines lignes du sol glissent d'une cellule. */
 function shimmerPass(s: GameState, f: Frame, camY: number) {
-  const heat = seen(s).heat * daylight(s.clock);
+  const heat = seen(s).heat * seenDaylight(s);
   if (heat < 0.2) return;
   const t = s.time, { cols, rows } = f;
   for (let y = 0; y < rows; y++) {
@@ -758,21 +917,39 @@ function snowPass(s: GameState, f: Frame, camX: number, camY: number) {
   }
 }
 
+/** Tempête de sable : un voile ocre qui avale le paysage par vagues, et des traînées `- ~` qui filent au vent. */
+function sandPass(s: GameState, f: Frame, camX: number, camY: number, dust: RGB) {
+  const I = s.weather.sand, t = s.time, run = calm() ? 8 : 30, { cols, rows } = f;
+  for (let y = 0; y < rows; y++) {
+    const wy = camY + y;
+    for (let x = 0; x < cols; x++) {
+      const wx = camX + x, i = y * cols + x, k = i * 4;
+      const a = I * (0.5 + 0.25 * Math.sin(wx * 0.04 - t * 1.6 + wy * 0.09));
+      const L = Math.min(1.1, 0.3 + (f.lr[i] + f.lg[i] + f.lb[i]) / 3 * 0.8);
+      f.fg[k] += (dust[0] * L * 1.2 - f.fg[k]) * a * 0.75; f.fg[k + 1] += (dust[1] * L * 1.2 - f.fg[k + 1]) * a * 0.75; f.fg[k + 2] += (dust[2] * L * 1.2 - f.fg[k + 2]) * a * 0.75;
+      f.bg[k] += (dust[0] * L * 0.75 - f.bg[k]) * a; f.bg[k + 1] += (dust[1] * L * 0.75 - f.bg[k + 1]) * a; f.bg[k + 2] += (dust[2] * L * 0.75 - f.bg[k + 2]) * a;
+      if (!f.obj[i] && hash2(Math.floor(wx * 0.34 - t * run * 0.34), wy, 193) < I * 0.16) f.ch[i] = hash2(wx >> 3, wy, 194) < 0.6 ? 45 : 126; // - ~
+    }
+  }
+}
+
 /** Saison sèche et chaleur : poussière qui file au vent et tourbillons (`@ o .`). */
 function dustPass(s: GameState, th: Theme, f: Frame, camX: number, camY: number) {
-  const I = Math.max(seen(s).heat, dryness(s) * 0.6) * (1 - seen(s).rain);
+  const sand = s.weather.sand;
+  const I = Math.max(seen(s).heat, dryness(s) * 0.6, sand) * (1 - seen(s).rain) * (1 - s.weather.viewPolar);
   if (I < 0.1) return;
   const t = s.time, P = th.pal;
   const dust: RGB = [P.dirt[3][0] * 1.15, P.dirt[3][1] * 1.1, P.dirt[3][2] * 0.95];
-  // Grains de poussière.
-  const TW = 40, TH = 30, n = Math.round(I * 6);
+  if (sand > 0.02) sandPass(s, f, camX, camY, dust);
+  // Grains de poussière (une nuée pendant la tempête de sable).
+  const TW = 40, TH = 30, n = Math.round(I * 6 + sand * 34);
   for (let ty = Math.floor(camY / TH); ty <= Math.floor((camY + f.rows) / TH); ty++) {
     for (let tx = Math.floor(camX / TW) - 1; tx <= Math.floor((camX + f.cols) / TW); tx++) {
       for (let j = 0; j < n; j++) {
         const h0 = hash2(tx * 131 + j, ty, 101);
         const ph = t / (3 + h0 * 2) + hash2(tx, ty * 97 + j, 102);
         const cyc = Math.floor(ph), u = ph - cyc;
-        const x = Math.round(tx * TW + hash2(tx + j, ty + cyc, 103) * TW + u * 30 - camX);
+        const x = Math.round(tx * TW + hash2(tx + j, ty + cyc, 103) * TW + u * (30 + sand * 90) - camX);
         const y = Math.round(ty * TH + hash2(ty + j, tx - cyc, 104) * TH + Math.sin(u * 6 + h0 * 9) * 1.5 - camY);
         if (inside(f, x, y)) plot(f, x, y, h0 < 0.6 ? 46 : 44, dust, 0.6 * Math.sin(Math.PI * u));
       }
@@ -872,7 +1049,7 @@ function firePass(s: GameState, w: World, f: Frame, camX: number, camY: number) 
 /** Étoiles filantes : traînées dans le ciel (écran), seulement la nuit. */
 function meteorPass(s: GameState, f: Frame) {
   if (s.weather.event !== "meteors") return;
-  const night = 1 - daylight(s.clock);
+  const night = 1 - seenDaylight(s);
   if (night < 0.2) return;
   const t = s.time;
   for (let n = 0; n < 7; n++) {
@@ -889,6 +1066,34 @@ function meteorPass(s: GameState, f: Frame) {
       if (!inside(f, x, y)) continue;
       const a = fade * (1 - k / 14);
       plot(f, x, y, k === 0 ? 42 : k < 3 ? 61 : k < 8 ? 45 : 46, [255, 248, 215], a, 1, k === 0 ? a * 0.6 : 0); // * = - .
+    }
+  }
+}
+
+/**
+ * Aurore boréale (nuit polaire, ciel dégagé, une nuit sur deux environ) : des rideaux verts, violets
+ * en haut, qui ondulent dans le ciel (haut de l'écran), traversés de rayons `| ' :`, et une lueur verte
+ * renvoyée par la neige.
+ */
+const AURORA: RGB = [90, 255, 160], AURORA_TOP: RGB = [170, 100, 255];
+function auroraPass(s: GameState, f: Frame) {
+  const st = s.weather;
+  const I = st.viewPolar * smooth(0.3, 0.05, seenDaylight(s)) * (1 - seen(s).cloud * 0.9) * (hash2(s.clock < 12 ? st.day - 1 : st.day, 5, 197) < 0.55 ? 1 : 0); // tirage par nuit, pas par jour
+  if (I < 0.03) return;
+  const t = calm() ? s.time * 0.3 : s.time, { cols, rows } = f;
+  const n = cols * rows * 4, glow = I * 0.05;
+  for (let k = 0; k < n; k += 4) { f.bg[k + 1] += AURORA[1] * glow; f.bg[k + 2] += AURORA[2] * glow * 0.6; f.fg[k + 1] += AURORA[1] * glow; }
+  for (let x = 0; x < cols; x++) {
+    const band = smooth(0.15, 1, Math.sin(x * 0.035 + t * 0.2 + 1.8 * Math.sin(x * 0.009 - t * 0.07))) * (0.65 + 0.35 * Math.sin(x * 0.17 + t * 0.8));
+    if (band < 0.03) continue;
+    const bottom = Math.max(4, Math.floor(rows * (0.34 + 0.1 * Math.sin(x * 0.02 + t * 0.15))));
+    for (let y = 0; y < bottom; y++) {
+      const v = y / bottom, a = I * band * (0.2 + 0.8 * v * v), i = y * cols + x, k = i * 4;
+      // Violet en haut du rideau, vert vif à sa lisière basse.
+      const r = lerp(AURORA_TOP[0], AURORA[0], v) * a, g = lerp(AURORA_TOP[1], AURORA[1], v) * a, b = lerp(AURORA_TOP[2], AURORA[2], v) * a;
+      f.fg[k] += r; f.fg[k + 1] += g; f.fg[k + 2] += b;
+      f.bg[k] += r * 0.5; f.bg[k + 1] += g * 0.5; f.bg[k + 2] += b * 0.5;
+      if (!f.obj[i] && hash2(x, y, 198) < a * 0.3) f.ch[i] = v > 0.75 ? 124 : v > 0.4 ? 39 : 58; // | ' :
     }
   }
 }
@@ -949,7 +1154,8 @@ export function weatherLabel(s: GameState): string {
   if (st.event === "heatwave") return "Canicule";
   // Le ciel vu depuis le biome à l'écran : la pluie tombe en neige en Alaska, à peine au Gobi.
   const wet = st.kind === "rain" || st.kind === "storm";
-  if (st.viewBiome === BIOME.Tundra && wet) return SKY_LABEL.snow;
+  if (st.viewBiome === BIOME.Tundra && wet) return st.view.snow >= st.view.rain ? SKY_LABEL.snow : SKY_LABEL.rain;
+  if (st.sand > 0.5) return "Tempête de sable";
   if (st.viewBiome === BIOME.Desert && wet) return SKY_LABEL.cloudy;
   return SKY_LABEL[st.kind];
 }
@@ -963,8 +1169,9 @@ export function drawWeatherRows(s: GameState, th: Theme, ui: Frame, x: number, y
   const st = s.weather;
   if (!st.ready) return 0;
   const u = th.ui;
-  const season = st.event === "coldsnap" ? "Hiver rigoureux" : SEASONS[seasonIndex(s)];
-  const [icon, ic] = SKY_ICON[st.kind];
+  const season = st.event === "coldsnap" ? "Hiver rigoureux"
+    : st.viewBiome === BIOME.Tundra ? (polarSummer(s) ? "Été polaire (jour)" : "Hiver polaire (nuit)") : SEASONS[seasonIndex(s)];
+  const [icon, ic] = st.sand > 0.5 ? SAND_ICON : SKY_ICON[st.kind];
   const temp = temperature(s);
   const tl = `${temp} C`;
   const tcol: RGB = temp >= 33 ? u.bad : temp <= 5 ? [40, 100, 170] : u.text;
@@ -1054,8 +1261,10 @@ export function temperature(s: GameState): number {
   const st = s.weather, lv = seen(s);
   // Biome vu : l'Alaska du Crétacé est frais (pas glacial), le Gobi brûlant le jour et froid la nuit.
   const b = st.viewBiome;
-  const base = 24 + 8 * (1 - seasonWet(s)) + (b === BIOME.Tundra ? -20 : b === BIOME.Desert ? 6 : 0);
-  const day = (daylight(s.clock) * 6 - 3) * (b === BIOME.Desert ? 3 : 1);
+  // Toundra : ~12 °C au cœur de l'été polaire, ~-8 °C au cœur de l'hiver, peu d'écart jour / nuit.
+  // Gobi : jusqu'à ~45 °C l'après-midi en saison sèche, frais la nuit.
+  const base = b === BIOME.Tundra ? 2 + 10 * polarSun(s) : 24 + 8 * (1 - seasonWet(s)) - (b === BIOME.Desert ? 1 : 0);
+  const day = (seenDaylight(s) * 6 - 3) * (b === BIOME.Desert ? 3 : b === BIOME.Tundra ? 0.5 : 1);
   let c = base + day - lv.cloud * 2 - lv.rain * 3 - lv.storm * 1 + lv.heat * 6 - lv.fog * 2;
   c = lerp(c, -2 + day * 0.5, lv.snow);
   return Math.round(c);

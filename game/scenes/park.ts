@@ -1,5 +1,5 @@
 import { CELL_H, CELL_W, DEV, WORLD_H, WORLD_W } from "../config";
-import { CLOCK_SPEEDS, clockLabel, daylight, litTheme, periodName } from "../daycycle";
+import { CLOCK_SPEEDS, clockLabel, litTheme } from "../daycycle";
 import type { Input } from "../input";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
@@ -23,7 +23,7 @@ import { activeTrees, treeRaster, updateTrees } from "../world/trees";
 import { drawDocuLog, drawDocumentary, missedCount, stopDocumentary, updateDocumentary } from "../features/documentary";
 import { drawPhoto, updatePhoto } from "../features/photo";
 import { censusClick, sampleCensus, type CensusState } from "../features/census";
-import { drawThunder, drawWeather, drawWeatherRows, updateWeather, weatherClick, weatherTheme } from "../features/weather";
+import { drawThunder, drawWeather, drawWeatherRows, seenDaylight, seenGolden, seenPeriod, updateWeather, weatherClick, weatherTheme } from "../features/weather";
 import { recordVisit } from "./journal-travel";
 import { INCUBATION, juvenilePrims, lifespan, STAGE_AT } from "../species/life";
 import { nestModel } from "../species/eggs";
@@ -773,7 +773,7 @@ export const parkScene: Scene = {
         const color = a.id === p.selected ? u.hi : spec.habitat === "sea" ? th.pal.waterShore : spec.behavior.diet === "carnivore" ? u.bad : u.ok;
         marks.push({ x: a.x, y: a.y - a.alt, glyph: (MINI_GLYPH[a.sp] ?? spec.name[0].toUpperCase()).charCodeAt(0), color });
       }
-      composeMap(th, world, { world: w, time: s.time, camX, camY, k: zv.m, light: daylight(s.clock), veg: p.eco?.veg, plankton: p.eco?.plankton, marks });
+      composeMap(th, world, { world: w, time: s.time, camX, camY, k: zv.m, light: seenDaylight(s), veg: p.eco?.veg, plankton: p.eco?.plankton, marks });
       drawHud(s, th, world, ui);
       return;
     }
@@ -807,7 +807,7 @@ export const parkScene: Scene = {
       if (r) actors.push({ id: -100000 - t.id, r: placed(r, Math.floor(t.x / CELL_W), Math.floor(t.y / CELL_H)), x: t.x, y: t.y, inWater: false, shadowRx: t.state === "down" ? 60 : 18, eyeX: t.x, eyeY: -1e6 });
     }
     // La réserve suit le cycle jour / nuit ; l'interface garde ses couleurs.
-    composeWorld(weatherTheme(s, litTheme(th, s.clock)), world, {
+    composeWorld(weatherTheme(s, litTheme(th, s.clock, seenDaylight(s), seenGolden(s))), world, {
       world: w, time: s.time, camX, camY,
       glowX: p.cam.x + world.cols * CELL_W / 2, glowY: p.cam.y + world.rows * CELL_H / 2,
       actors, critters: p.critters, trample: p.trample ?? undefined, trampleNow: trampleNow(s), veg: p.eco?.veg, plankton: p.eco?.plankton, selected: p.selected ?? (p.bug !== undefined ? 1_000_000 + p.bug : p.nestSel !== undefined ? nestActorId(p.nestSel) : undefined),
@@ -1049,7 +1049,7 @@ const TIME_W = 34;
 function drawTime(s: GameState, th: Theme, ui: Frame, x: number, y: number, W: number, H: number) {
   const u = th.ui;
   const hour = s.clock;
-  const day = daylight(hour) > 0.5;
+  const day = seenDaylight(s) > 0.5;
   panel(ui, th, x, y, W, H, "Temps et meteo");
   region("park:clock", x, y, W, 4, { tip: "Clic : accelerer le temps (T)" });
   const iw = W - 4, ix = x + 2;
@@ -1058,7 +1058,7 @@ function drawTime(s: GameState, th: Theme, ui: Frame, x: number, y: number, W: n
   text(ui, ix, y + 1, day ? "(O)" : "(C", day ? sun : moon, u.panel, u.alpha);
   text(ui, ix + 4, y + 1, clockLabel(hour), u.text, u.panel, u.alpha);
   const sp = `x${s.clockSpeed}`;
-  text(ui, ix + 10, y + 1, periodName(hour).slice(0, iw - 11 - sp.length), u.hi, u.panel, u.alpha);
+  text(ui, ix + 10, y + 1, seenPeriod(s).slice(0, iw - 11 - sp.length), u.hi, u.panel, u.alpha);
   text(ui, ix + iw - sp.length, y + 1, sp, s.clockSpeed > 1 ? u.hi : u.dim, u.panel, u.alpha);
   if (H <= 4) {
     drawWeatherRows(s, th, ui, ix, y + 2, iw, true);
@@ -1070,7 +1070,7 @@ function drawTime(s: GameState, th: Theme, ui: Frame, x: number, y: number, W: n
   text(ui, tx + track, ty, "]", u.border, u.panel, u.alpha);
   for (let i = 0; i < track; i++) {
     const h = (i / track) * 24;
-    const lit = daylight(h);
+    const lit = seenDaylight(s, h);
     put(ui, tx + i, ty, lit > 0.5 ? 61 : lit > 0 ? 45 : 46, lit > 0.5 ? u.hi : u.dim, u.panel, u.alpha);
   }
   const cur = Math.min(track - 1, Math.floor((hour / 24) * track));

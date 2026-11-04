@@ -1,6 +1,7 @@
 import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
+import { c, e, rot, squash, strike } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -10,51 +11,6 @@ import type { Pose, Species } from "./types";
  */
 const LENGTH_M = 7;
 export const ANKYLO_SCALE = (LENGTH_M * PX_PER_M) / 335;
-
-export const e = (x: number, y: number, rx: number, ry: number, m: number, z: number, h: number, yMin?: number, yMax?: number): Prim =>
-  ({ k: "e", x, y, rx, ry, m, z, h, yMin, yMax });
-export const c = (ax: number, ay: number, bx: number, by: number, ra: number, rb: number, m: number, z: number, h: number, stroke = false): Prim =>
-  ({ k: "c", ax, ay, bx, by, ra, rb, m, z, h, stroke });
-
-/**
- * Outils de pose partagés par les herbivores.
- * `turn` : rotation autour d'un pivot (rad ; positif = sens horaire à l'écran, donc tête qui s'abaisse
- * pour un regard à droite), puis décalage. Les ellipses ne tournent pas, seul leur centre bouge.
- */
-export function turn(ps: Prim[], px: number, py: number, a: number, dx = 0, dy = 0): Prim[] {
-  const co = Math.cos(a), si = Math.sin(a);
-  const fx = (x: number, y: number) => px + (x - px) * co - (y - py) * si + dx;
-  const fy = (x: number, y: number) => py + (x - px) * si + (y - py) * co + dy;
-  return ps.map((p) => {
-    if (p.k === "c") return { ...p, ax: fx(p.ax, p.ay), ay: fy(p.ax, p.ay), bx: fx(p.bx, p.by), by: fy(p.bx, p.by) };
-    const y = fy(p.x, p.y), d = y - p.y;
-    if (p.k === "cut") return { ...p, x: fx(p.x, p.y), y };
-    return { ...p, x: fx(p.x, p.y), y, yMin: p.yMin === undefined ? undefined : p.yMin + d, yMax: p.yMax === undefined ? undefined : p.yMax + d };
-  });
-}
-
-/** Aplatit verticalement vers le sol (y = 0) : animal couché sur le flanc. */
-export function squash(ps: Prim[], sy: number, dy = 0): Prim[] {
-  const r = Math.sqrt(sy);
-  return ps.map((p) => {
-    if (p.k === "c") return { ...p, ay: p.ay * sy + dy, by: p.by * sy + dy, ra: p.ra * r, rb: p.rb * r };
-    if (p.k === "cut") return { ...p, y: p.y * sy + dy, ry: p.ry * sy };
-    return { ...p, y: p.y * sy + dy, ry: p.ry * sy,
-      yMin: p.yMin === undefined ? undefined : p.yMin * sy + dy, yMax: p.yMax === undefined ? undefined : p.yMax * sy + dy };
-  });
-}
-
-const smooth = (u: number) => { const v = Math.min(1, Math.max(0, u)); return v * v * (3 - 2 * v); };
-
-/**
- * Déroulé d'un coup (0..1) : armé (0-0.35), frappe (0.35-0.6), retour (0.6-1).
- * Renvoie l'élan (-1 armé .. 1 frappé) et l'instant de l'impact (0..1, max au milieu de la frappe).
- */
-export function strike(t: number): { s: number; hit: number } {
-  if (t < 0.35) return { s: -smooth(t / 0.35), hit: 0 };
-  if (t < 0.6) { const u = (t - 0.35) / 0.25; return { s: -1 + 2 * smooth(u), hit: Math.sin(u * Math.PI) }; }
-  return { s: 1 - smooth((t - 0.6) / 0.4), hit: 0 };
-}
 
 /** Réglages de pose de l'ankylosaure, déduits de l'action. */
 interface AnkyloLook {
@@ -216,7 +172,7 @@ function ankyloParts(L: AnkyloLook, walk: number, moving: number): Prim[] {
     // Bouche ouverte : mâchoire inférieure abaissée, intérieur sombre.
     H.push(e(137, -41, 13, 6, M.Skin, 10, 8));
     H.push(e(134, -33 + L.mouth * 2, 11, 2 + L.mouth * 3, M.Mouth, 20, 1));
-    H.push(...turn([c(116, -34, 142, -31, 6, 3.5, M.Skin, 22, 5)], 112, -36, L.mouth * 0.35));
+    H.push(...rot([c(116, -34, 142, -31, 6, 3.5, M.Skin, 22, 5)], 112, -36, L.mouth * 0.35));
     H.push(c(146, -40, 153, -37, 3.5, 1.5, M.Spike, 16, 3));
   } else {
     H.push(e(139, -38, 12, 9, M.Skin, 10, 9));
@@ -226,7 +182,7 @@ function ankyloParts(L: AnkyloLook, walk: number, moving: number): Prim[] {
   H.push(c(108, -33, 98, -23, 4, 1, M.Spike, 24, 4));
   if (L.eye) H.push(e(122, -48, 3.5, 3.5, M.Eye, 40, 1));
   P.push(e(92, -46 + bob, 20, 17, M.Skin, 6, 18));
-  P.push(...turn(H, 88, -46, L.headA, 0, bob + L.headDy));
+  P.push(...rot(H, 88, -46, L.headA, 0, bob + L.headDy));
   return P;
 }
 

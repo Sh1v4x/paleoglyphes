@@ -1,7 +1,7 @@
 import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
-import { c, e, squash, strike, turn } from "./ankylo";
+import { c, e, rot, squash, strike } from "./kit";
 import { AL } from "./alamosaurus.mat";
 import type { Pose, Species } from "./types";
 
@@ -234,16 +234,16 @@ function alamoParts(L: AlamoLook, walk: number, moving: number): Prim[] {
   T.push(c(10, -1, 38, 2, 11, 8, AL.Skin, 32, 9));
   T.push(e(16, -12, 8, 5, AL.Face, 44, 3));
   if (L.mouth > 0.05) T.push(e(26, 7 + L.mouth * 4, 14, 2 + L.mouth * 5, M.Mouth, 29, 1));
-  T.push(...turn([c(6, 7, 36, 9, 7, 5, AL.Skin, 31, 6), e(37, 9, 6, 4, AL.Face, 34, 3)], 6, 7, L.mouth * 0.45));
+  T.push(...rot([c(6, 7, 36, 9, 7, 5, AL.Skin, 31, 6), e(37, 9, 6, 4, AL.Face, 34, 3)], 6, 7, L.mouth * 0.45));
   T.push(e(38, 2, 7, 6, AL.Face, 38, 4));
   if (L.eye) T.push(e(EYE_LX, EYE_LY, 2.6, 2.6, M.Eye, 50, 1));
   else T.push(c(EYE_LX - 3, EYE_LY, EYE_LX + 3, EYE_LY, 1, 1, AL.Wrinkle, 50, 1, true));
   const [hx, hy] = N[NECK_N];
-  B.push(...turn(T, 0, 0, L.headA, hx, hy));
+  B.push(...rot(T, 0, 0, L.headA, hx, hy));
 
   // Bascule autour de la hanche, puis respiration et appuis.
-  P.push(...turn(Q, HIP_X, HIP_Y, -L.pitch * 0.4, 0, bob));
-  P.push(...turn(B, HIP_X, HIP_Y, L.pitch, 0, bob));
+  P.push(...rot(Q, HIP_X, HIP_Y, -L.pitch * 0.4, 0, bob));
+  P.push(...rot(B, HIP_X, HIP_Y, L.pitch, 0, bob));
   return P;
 }
 
@@ -292,7 +292,7 @@ export function alamosaurusSkeleton(pose: Pose): Prim[] {
   tag("queue", c(HIP_X - 40, HIP_Y - 10, HIP_X - 200, HIP_Y + 50, 1, 1, B, 9, 2, true));
   // Crâne : petit, museau large, narines reculées vers le haut.
   const [hx, hy] = N[NECK_N];
-  tag("crane", ...turn([e(6, -2, 16, 11, B, 12, 6), c(10, 0, 38, 3, 8, 6, B, 12, 5), c(6, 8, 36, 9, 3, 2, B, 12, 3),
+  tag("crane", ...rot([e(6, -2, 16, 11, B, 12, 6), c(10, 0, 38, 3, 8, 6, B, 12, 5), c(6, 8, 36, 9, 3, 2, B, 12, 3),
     e(EYE_LX, EYE_LY, 4, 4, M.Socket, 30, 1), e(16, -7, 4, 2.5, M.Socket, 30, 1)], 0, 0, IDLE_HEAD_A, hx, hy));
   return P.map((p) => scalePrim(p, ALAMOSAURUS_SCALE));
 }

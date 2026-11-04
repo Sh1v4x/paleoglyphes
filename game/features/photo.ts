@@ -1,6 +1,6 @@
 import { CELL_H, CELL_W } from "../config";
 import { golden, isNight } from "../daycycle";
-import type { Input } from "../input";
+import { pointer, type Input } from "../input";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
@@ -15,8 +15,10 @@ import { calm } from "../settings";
 import { button, buttonW, fill, put, region, resetUi, text } from "../ui/kit";
 import { toast } from "../ui/toast";
 import { unlockTrigger } from "../unlock";
+import type { BiomeId } from "../world/biomes";
 import { isWater } from "../world/tiles";
 import { blitPhoto } from "./photo-export";
+import { sharePhoto } from "./photo-share";
 import { actOf, scoreShot, starsText, triggersOf, type Score, type Subject } from "./photo-score";
 import { addPhoto, album, captureCells, loadAlbum, MAX_PHOTOS, newPhotoId, type Photo } from "./photo-store";
 
@@ -37,21 +39,10 @@ export interface PhotoState {
   last: Photo | null;
   lastT: number;
   lastFrom: { x: number; y: number; w: number; h: number };
-  /** Jour de la réserve (compté aux passages de minuit) et heure vue à la dernière image. */
-  day: number;
-  lastClock: number;
 }
 
-const DAY_KEY = "paleoglyphes-photo-day";
-
 export function createPhotoState(): PhotoState {
-  let day = 1;
-  try {
-    day = Math.max(1, Number(localStorage.getItem(DAY_KEY)) || 1);
-  } catch {
-    // Stockage indisponible : on compte depuis le jour 1.
-  }
-  return { aiming: false, zoom: 0.6, shoot: false, cool: 0, last: null, lastT: -99, lastFrom: { x: 0, y: 0, w: 1, h: 1 }, day, lastClock: -1 };
+  return { aiming: false, zoom: 0.6, shoot: false, cool: 0, last: null, lastT: -99, lastFrom: { x: 0, y: 0, w: 1, h: 1 } };
 }
 
 /** Cadre du viseur en cellules monde (relatives à l'écran), 16:10, centré sur la souris et borné. */
@@ -75,13 +66,8 @@ type Rect = ReturnType<typeof viewRect>;
 export function updatePhoto(s: GameState, input: Input, dt: number): boolean {
   const st = s.photo;
   loadAlbum();
-  // Jour de la réserve : l'horloge repasse par minuit.
-  if (st.lastClock >= 0 && s.clock < st.lastClock - 1) {
-    st.day++;
-    try { localStorage.setItem(DAY_KEY, String(st.day)); } catch { /* sans stockage : tant pis */ }
-  }
-  st.lastClock = s.clock;
   st.cool = Math.max(0, st.cool - dt);
+  if (st.last && input.ui.includes("photo:share")) void sharePhoto(s, st.last);
   if (input.pressed.includes("KeyP") || input.ui.includes("photo:toggle")) {
     st.aiming = !st.aiming;
     st.shoot = false;
@@ -91,6 +77,11 @@ export function updatePhoto(s: GameState, input: Input, dt: number): boolean {
   if (input.mouse.wheel) {
     st.zoom = Math.max(0.25, Math.min(0.95, st.zoom - Math.sign(input.mouse.wheel) * 0.05));
     input.mouse.wheel = 0;
+  }
+  // Pincement (doigts, pavé tactile) : même réglage, et la réserve ne zoome pas pendant la visée.
+  if (input.mouse.zoom) {
+    st.zoom = Math.max(0.25, Math.min(0.95, st.zoom + input.mouse.zoom * 0.002));
+    input.mouse.zoom = 0;
   }
   if (input.ui.includes("photo:shoot") || input.worldClicks.length || input.pressed.includes("Space") || input.pressed.includes("Enter")) {
     if (st.cool <= 0) st.shoot = true;
@@ -127,7 +118,6 @@ export function subjectsIn(s: GameState, r: Rect): (Subject & { animal?: Animal 
   };
   for (const a of p.animals) {
     const spec = SPECIES[a.sp];
-    if (!spec) continue;
     const ra = animalRaster(a, s.time);
     if (ra.cx > x1 || ra.cy > y1 || ra.cx + ra.w < x0 || ra.cy + ra.h < y0) continue;
     const c = count(ra.cx, ra.cy, ra.w, ra.h, ra.mat);
@@ -140,7 +130,6 @@ export function subjectsIn(s: GameState, r: Rect): (Subject & { animal?: Animal 
   }
   for (const n of p.nests) {
     const spec = SPECIES[n.sp];
-    if (!spec) continue;
     const rn = nestRaster(n);
     if (rn.cx > x1 || rn.cy > y1 || rn.cx + rn.w < x0 || rn.cy + rn.h < y0) continue;
     const c = count(rn.cx, rn.cy, rn.w, rn.h, rn.mat);
@@ -165,18 +154,29 @@ function takePhoto(s: GameState, world: Frame, r: Rect) {
   const st = s.photo;
   st.shoot = false;
   st.cool = 0.6;
+  if (!album.loaded) {
+    toast(s, "Album en cours de chargement", "Reessaie dans un instant.");
+    return;
+  }
   if (album.photos.length >= MAX_PHOTOS) {
     toast(s, "Album plein !", `${MAX_PHOTOS} photos au maximum : supprime-en dans l'onglet Photos.`);
     return;
   }
   const subjects = subjectsIn(s, r);
   const sc = evaluate(s, r, subjects);
+  // Biome de la cellule monde au centre du cadre (pour la légende de partage).
+  const w = worldFor(s);
+  const gx = Math.floor(s.park.cam.x / CELL_W) + r.x + (r.w >> 1), gy = Math.floor(s.park.cam.y / CELL_H) + r.y + (r.h >> 1);
+  const biome = gx >= 0 && gy >= 0 && gx < w.cols && gy < w.rows ? (w.biome[gy * w.cols + gx] as BiomeId) : undefined;
   const photo: Photo = {
-    id: newPhotoId(), day: st.day, clock: s.clock, real: Date.now(),
-    title: sc.title, stars: sc.stars, species: sc.species, notes: sc.notes,
+    id: newPhotoId(), day: s.day, clock: s.clock, real: Date.now(),
+    title: sc.title, stars: sc.stars, species: sc.species, notes: sc.notes, biome, act: subjects[sc.main]?.act,
     ...captureCells(world, r.x, r.y, r.w, r.h),
   };
-  addPhoto(photo);
+  const left = MAX_PHOTOS - album.photos.length - 1;
+  void addPhoto(photo).then((outcome) => {
+    toast(s, "Photo enregistrée ! (onglet Photos)", `${sc.title}  [${starsText(sc.stars)}]${left <= 5 ? `  -  plus que ${left} place${left > 1 ? "s" : ""} dans l'album` : ""}${outcome === "memory" ? "  (stockage indisponible : photo perdue au rechargement)" : ""}`);
+  });
   // Le carnet : chaque animal bien cadré (au moins la moitié de sa silhouette) compte comme une observation.
   for (const sub of subjects) {
     const a = sub.animal, spec = a && SPECIES[a.sp];
@@ -185,8 +185,6 @@ function takePhoto(s: GameState, world: Frame, r: Rect) {
   }
   st.last = photo;
   st.lastT = s.time;
-  const left = MAX_PHOTOS - album.photos.length;
-  toast(s, "Photo enregistrée ! (onglet Photos)", `${sc.title}  [${starsText(sc.stars)}]${left <= 5 ? `  -  plus que ${left} place${left > 1 ? "s" : ""} dans l'album` : ""}${album.persistent ? "" : "  (stockage indisponible : photo perdue au rechargement)"}`);
 }
 
 /** Écrit un glyphe semi-transparent (lignes des tiers). */
@@ -251,11 +249,14 @@ function drawToggle(s: GameState, th: Theme, ui: Frame) {
   button(ui, th, "photo:toggle", ui.cols - w - 2, ui.rows - 3, label, { key: "P", variant: "primary", tip: "Ranger l'appareil (P ou Echap)" });
 }
 
+/** Le polaroïd reste dans le coin (s) avant de filer : le temps de cliquer « Partager ». */
+const SHOT_HOLD = 5;
+
 /** Flash, obturateur et polaroïd qui file vers le coin de l'écran. */
 function drawShotFx(s: GameState, th: Theme, ui: Frame) {
   const st = s.photo;
   const age = s.time - st.lastT;
-  if (!st.last || age > 3.2) return;
+  if (!st.last || age > SHOT_HOLD + 0.5) return;
   const f = st.lastFrom;
   // Obturateur : deux volets noirs qui se ferment sur le cadre, puis le flash blanc.
   if (age < 0.09) {
@@ -271,21 +272,26 @@ function drawShotFx(s: GameState, th: Theme, ui: Frame) {
   const sx = f.x + Math.floor(f.w / 2 - PW / 2), sy = f.y + Math.floor(f.h / 2 - PH / 2);
   const ex = ui.cols - PW - 2, ey = Math.max(HEADER_ROWS + 1, ui.rows - MINI_H - 4 - PH);
   const e = Math.min(1, (age - 0.12) / 0.6), ease = 1 - (1 - e) ** 3;
-  const out = Math.max(0, (age - 2.7) / 0.5);
+  const out = Math.max(0, (age - SHOT_HOLD) / 0.5);
   const x = Math.round(sx + (ex - sx) * ease), y = Math.round(sy + (ey - sy) * ease + out * out * (ui.rows - ey));
   const cream: RGB = [244, 238, 222], ink: RGB = [70, 60, 50];
   fill(ui, x, y, PW, PH, cream, 1);
   blitPhoto(ui, st.last, x + 1, y + 1, IW, IH);
   text(ui, x + 2, y + PH - 2, `[${starsText(st.last.stars)}]`, [190, 120, 20], cream, 1);
   text(ui, x + 10, y + PH - 2, `Jour ${st.last.day}`, ink, cream, 1);
-  void th;
+  // Une fois posé, le polaroïd propose de partager la photo (clic : geste exigé par le navigateur).
+  if (age >= 0.72 && out === 0) {
+    const label = "Partager", bw = buttonW(label);
+    button(ui, th, "photo:share", x + Math.floor((PW - bw) / 2), y + PH, label, { variant: "primary", tip: "Partager une jolie carte de la photo" });
+  }
 }
 
 /** Viseur, flash, bouton appareil. `world` est l'image finale de la réserve (pour la capture). */
 export function drawPhoto(s: GameState, th: Theme, world: Frame, ui: Frame): void {
   const st = s.photo;
   if (st.aiming) {
-    const r = viewRect(st.zoom, s.mouse.x, s.mouse.y, s.mouse.x >= 0 && s.mouse.y >= 0);
+    // Au doigt, le viseur reste centré : glisser déplace la vue, toucher déclenche.
+    const r = viewRect(st.zoom, s.mouse.x, s.mouse.y, !pointer.touch && s.mouse.x >= 0 && s.mouse.y >= 0);
     if (st.shoot) takePhoto(s, world, r);
     // Viseur plein écran : l'interface de la réserve s'efface pour bien cadrer.
     resetUi(ui);

@@ -1,7 +1,7 @@
 import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
-import { c, e, squash, strike, turn } from "./ankylo";
+import { c, e, pillarLegs, quadLook, rot, squash, strike, taperedTail, type PillarLegSpec, type QuadLook } from "./kit";
 import { H } from "./herbivores.mat";
 import type { Pose, Species } from "./types";
 
@@ -12,32 +12,16 @@ import type { Pose, Species } from "./types";
 const LENGTH_M = 9;
 export const TRIKE_SCALE = (LENGTH_M * PX_PER_M) / 375;
 
-interface TrikeLook {
-  bob: number;
-  drop: number;
-  /** Avancée du corps (charge). */
-  dx: number;
-  legs: "walk" | "tuck" | "none";
-  amp: number;
-  spread: number;
-  headA: number;
-  headDy: number;
-  mouth: number;
-  sway: number;
-  eye: boolean;
-}
+/** Pattes : piliers massifs, ongles en sabots. */
+const LEGS: PillarLegSpec = {
+  hips: [-50, 58, -40, 66], far: H.TFar, skin: H.TSkin, nail: H.THorn, swing: 16, lift: 8, frontY: -60, backY: -72,
+  shoulder: [20, 24], thigh: [26, 32], thighH: 16, upper: [15, 18], upperB: 13, upperH: 13, lower: [13, 11, 11], foot: [15, 7],
+  nailDx: 13, nailR: [3, 2.6], tuckDx: 16, tuckR: 22, tuckNailDx: 18,
+};
 
 export function trikeModel(pose: Pose): Prim[] {
   const { walk, moving, time, action, actionT: at } = pose;
-  const run = action === "run";
-  const amp = run ? 1.5 : 1;
-  const rest = action === "rest";
-  const breath = Math.sin((time * Math.PI * 2) / (rest ? 3.4 : 1.3)) * (1 - moving) * (rest ? 1.8 : 1);
-  const L: TrikeLook = {
-    bob: -Math.abs(Math.sin(walk)) * 3 * moving * amp * amp + breath * 1.3, drop: 0, dx: 0,
-    legs: "walk", amp, spread: 0, headA: run ? 0.1 : 0, headDy: 0, mouth: 0,
-    sway: Math.sin(time * 1.1) * 3 * (1 - moving) + Math.sin(walk) * 7 * moving * amp, eye: true,
-  };
+  const L = quadLook(pose, { breathPeriod: 1.3, runHead: 0.1, swayFreq: 1.1, swayAmp: 7 });
   const chew = Math.sin(at * Math.PI * 8);
   if (action === "eat") { L.headA = 0.5 + chew * 0.04; L.headDy = 8; L.mouth = Math.max(0, chew) * 0.6; }
   else if (action === "drink") { L.headA = 0.62; L.headDy = 12; L.drop = 5; L.spread = 10; }
@@ -70,53 +54,15 @@ export function trikeModel(pose: Pose): Prim[] {
   return P.map((p) => scalePrim(p, TRIKE_SCALE));
 }
 
-function trikeParts(L: TrikeLook, walk: number, moving: number): Prim[] {
+function trikeParts(L: QuadLook, walk: number, moving: number): Prim[] {
   const bob = L.bob + L.drop, X = L.dx;
   const P: Prim[] = [];
-
-  // --- Pattes : piliers massifs, ongles en sabots ---
-  const legs = [
-    { hip: -50, phase: 0, far: true, front: false },
-    { hip: 58, phase: Math.PI, far: true, front: true },
-    { hip: -40, phase: Math.PI, far: false, front: false },
-    { hip: 66, phase: 0, far: false, front: true },
-  ];
-  for (const G of legs) {
-    const m = G.far ? H.TFar : H.TSkin;
-    const z = G.far ? -70 : 30;
-    const hx = G.hip + X;
-    if (L.legs === "tuck") {
-      const fx = hx + (G.front ? 16 : -2);
-      P.push(e(fx, -7, 22, 7, m, z, 7));
-      for (const t of [-6, 1, 8]) P.push(e(fx + 18 + t * 0.4, -4, 3, 2.6, H.THorn, z + 6, 2));
-      continue;
-    }
-    if (L.legs === "none") continue;
-    const s = Math.sin(walk + G.phase) * moving * L.amp;
-    const lift = Math.max(0, Math.cos(walk + G.phase)) * moving * 8 * L.amp;
-    const fx = G.hip + s * 16 + (G.front ? (G.far ? -L.spread * 0.6 : L.spread) : -L.spread * 0.3) + X * 0.2;
-    const hy = (G.front ? -60 : -72) + bob;
-    // Cuisse ou épaule, puis colonne jusqu'au pied (coude légèrement écarté à l'avant).
-    P.push(e(hx, hy, G.front ? 20 : 26, G.front ? 24 : 32, m, z - 6, 16));
-    const kx = (hx + fx) / 2 + (G.front ? 6 : -2), ky = (hy - 8 - lift) / 2;
-    P.push(c(hx, hy + 6, kx, ky, G.front ? 15 : 18, 13, m, z, 13));
-    P.push(c(kx, ky, fx, -9 - lift, 13, 11, m, z + 2, 11));
-    P.push(e(fx + 3, -7 - lift, 15, 7, m, z + 2, 8));
-    for (const t of [-6, 1, 8]) P.push(e(fx + 13 + t * 0.4, -4 - lift, 3, 2.6, H.THorn, z + 8, 2));
-  }
+  pillarLegs(P, L, walk, moving, bob, LEGS);
 
   // --- Queue courte et épaisse ---
-  const tail: [number, number][] = [];
-  for (let k = 0; k <= 5; k++) {
-    const t = k / 5;
-    tail.push([-92 - t * 82 + X, -86 + bob * (1 - t) + L.drop * t + t * 30 + L.sway * t * t]);
-  }
-  for (let k = 0; k < 5; k++) {
-    const [ax, ay] = tail[k], [bx, by] = tail[k + 1];
-    const ra = 26 - k * 4.6, rb = 26 - (k + 1) * 4.6;
-    P.push(c(ax, ay, bx, by, ra, Math.max(3, rb), H.TSkin, 2, 16));
+  taperedTail(P, L, bob, { x: -92, len: 82, y: -86, droop: 30, r: 26, step: 4.6, m: H.TSkin, h: 16 }, (k, ax, ay, bx, by, ra) => {
     P.push(e((ax + bx) / 2, (ay + by) / 2 - ra * 0.7, 4, ra * 0.35, H.TStripe, 2 + ra * 0.9, 3));
-  }
+  });
 
   // --- Corps : bassin haut, épaules plus basses ---
   P.push(e(-8 + X, -82 + bob, 100, 44, H.TSkin, 0, 44));
@@ -152,7 +98,7 @@ function trikeParts(L: TrikeLook, walk: number, moving: number): Prim[] {
   T.push(c(134, -70, 140, -55, 5, 1.5, H.THorn, 30, 3));
   const jaw = L.mouth * 0.32;
   if (L.mouth > 0.05) T.push(e(160, -60 + L.mouth * 3, 18, 3 + L.mouth * 4, M.Mouth, 26, 1));
-  T.push(...turn([c(138, -62, 180, -56, 9, 4, H.TSkin, 22, 7), c(178, -56, 190, -52, 4, 1.5, H.TBeak, 26, 3)], 132, -64, jaw));
+  T.push(...rot([c(138, -62, 180, -56, 9, 4, H.TSkin, 22, 7), c(178, -56, 190, -52, 4, 1.5, H.TBeak, 26, 3)], 132, -64, jaw));
   T.push(c(166, -72, 196, -60, 12, 3, H.TBeak, 22, 8));
   // Cornes : courte sur le nez, deux longues au-dessus des yeux (la lointaine plus haute, derrière).
   T.push(c(166, -80, 175, -97, 6, 1.5, H.THorn, 30, 4));
@@ -160,7 +106,7 @@ function trikeParts(L: TrikeLook, walk: number, moving: number): Prim[] {
   T.push(c(140, -100, 202, -130, 7.5, 1.5, H.THorn, 34, 5));
   T.push(e(138, -98, 10, 6, H.TSkin, 30, 5));
   if (L.eye) T.push(e(142, -90, 3.5, 3.5, M.Eye, 50, 1));
-  P.push(...turn(T, 94, -84, L.headA, X, bob + L.headDy + 20));
+  P.push(...rot(T, 94, -84, L.headA, X, bob + L.headDy + 20));
   return P;
 }
 

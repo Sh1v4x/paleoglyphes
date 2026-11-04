@@ -1,4 +1,4 @@
-import { START_HOUR } from "./daycycle";
+import { loadDay, START_HOUR } from "./daycycle";
 import type { Style } from "./palette";
 import { loadProgress, type Progress } from "./progress";
 import { createDigState, type DigState } from "./scenes/dig";
@@ -35,6 +35,8 @@ export interface GameState {
   /** Heure de jeu dans la réserve (0..24) et vitesse de l'horloge (x1, x4, x16). */
   clock: number;
   clockSpeed: number;
+  /** Jour de la réserve (1, 2...), avancé par `advanceClock`. */
+  day: number;
   /** Un monde (réserve) par style, généré à la première visite. */
   worlds: Partial<Record<Style, World>>;
   toasts: Toast[];
@@ -70,6 +72,7 @@ export function createState(): GameState {
     progress: loadProgress(),
     clock: START_HOUR,
     clockSpeed: 1,
+    day: loadDay(),
     worlds: {},
     toasts: [],
     mouse: { x: -1, y: -1 },

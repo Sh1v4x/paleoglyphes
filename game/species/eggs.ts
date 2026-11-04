@@ -1,8 +1,7 @@
 import { CELL_H, CELL_W } from "../config";
 import { M } from "../render/materials";
 import type { Prim } from "../render/raster";
-import { SPECIES } from "./index";
-import { liveBirth } from "./life";
+import { mulberry32 } from "../rng";
 import { NM } from "./nest.mat";
 import type { SpeciesId } from "./types";
 
@@ -38,7 +37,12 @@ interface EggSpec {
   big: number;
 }
 
-const SPEC: Partial<Record<SpeciesId, EggSpec>> = {
+type OviparousId = Exclude<SpeciesId, "mosa" | "xiphactinus" | "elasmosaurus">;
+
+// Species without their own nest design yet share this one.
+const GENERIC: EggSpec = { nest: "scrape", W: 70, H: 4, shell: NM.ShellCream, w: 12, h: 15, paired: false, speck: 1, veg: 0.6, big: 16 };
+
+const SPEC: Record<OviparousId, EggSpec> = {
   ankylo: { nest: "scrape", W: 70, H: 4, shell: NM.ShellCream, w: 13, h: 15, paired: false, speck: 0, veg: 0.8, big: 17 },
   trike: { nest: "mound", W: 80, H: 9, shell: NM.ShellCream, w: 13, h: 16, paired: false, speck: 0, veg: 1, big: 18 },
   edmonto: { nest: "mound", W: 90, H: 11, shell: NM.ShellTan, w: 14, h: 17, paired: false, speck: 2, veg: 1.4, big: 19 },
@@ -53,30 +57,29 @@ const SPEC: Partial<Record<SpeciesId, EggSpec>> = {
   protoceratops: { nest: "sand", W: 58, H: 4, shell: NM.ShellLeather, w: 9, h: 12, paired: false, speck: 0, veg: 0, big: 13 },
   // Œufs bleu-vert allongés, en couronne, couvés par l'adulte (les oviraptoridés pondaient des œufs colorés).
   citipati: { nest: "scrape", W: 64, H: 4, shell: NM.ShellBlue, w: 8, h: 18, paired: true, speck: 0, veg: 0, big: 19 },
+  alamosaurus: GENERIC,
+  allosaurus: GENERIC,
+  pectinodon: GENERIC,
+  troodon: GENERIC,
+  pteranodon: GENERIC,
+  nyctosaurus: GENERIC,
+  archelon: GENERIC,
+  ornithomimus: GENERIC,
+  deinosuchus: GENERIC,
+  shuvuuia: GENERIC,
+  pinacosaurus: GENERIC,
+  therizino: GENERIC,
 };
 
-/** Œuf et nid par défaut, pour toute nouvelle espèce ovipare qui n'a pas encore les siens. */
-const GENERIC: EggSpec = { nest: "scrape", W: 70, H: 4, shell: NM.ShellCream, w: 12, h: 15, paired: false, speck: 1, veg: 0.6, big: 16 };
+export const hasEggs = (sp: SpeciesId): sp is OviparousId => Object.hasOwn(SPEC, sp);
 
-/** Réglages d'œuf d'une espèce (générique si elle n'en a pas), ou null si elle met bas. */
+/** Réglages d'œuf d'une espèce, ou null si elle met bas. */
 function eggSpec(sp: SpeciesId): EggSpec | null {
-  if (liveBirth(SPECIES[sp])) return null;
-  return SPEC[sp] ?? GENERIC;
+  return hasEggs(sp) ? SPEC[sp] : null;
 }
 
 /** Hauteur d'un œuf (px, taille réelle dans la réserve) ; 0 = pas d'œuf (espèce vivipare). */
 export const eggSize = (sp: SpeciesId) => eggSpec(sp)?.h ?? 0;
-
-/** Hasard déterministe (le modèle doit rester stable d'une image à l'autre pour le cache). */
-function rng(seed: number): () => number {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 /** Recale un point sur le centre de sa cellule. */
 const snapX = (x: number) => Math.floor(x / CELL_W) * CELL_W + CELL_W / 2;
@@ -111,7 +114,7 @@ interface EggOpts {
  */
 function egg(o: EggOpts): Prim[] {
   const P: Prim[] = [];
-  const r = rng(o.seed);
+  const r = mulberry32(o.seed);
   const eh = o.w * 0.6; // relief de la coquille
   const top = o.z + eh;
   const at = (f: number): [number, number] => [o.x + o.tilt * o.h * f, o.y - o.h * f];
@@ -216,7 +219,7 @@ function domeAt(cx: number, cy: number, rx: number, ry: number, z: number, h: nu
 export function nestModel(sp: SpeciesId, eggs: number, crack: number, hatched: boolean): Prim[] {
   const s = eggSpec(sp);
   if (!s) return [];
-  const r = rng(sp.length * 977 + sp.charCodeAt(0) * 131);
+  const r = mulberry32(sp.length * 977 + sp.charCodeAt(0) * 131);
   const P: Prim[] = [];
   const W = s.W, R = W / 2;
   const fy = W * 0.13; // demi-profondeur du nid vu en perspective

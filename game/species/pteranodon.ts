@@ -3,7 +3,8 @@ import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { MR } from "./marine.mat";
 import { PT } from "./pteranodon.mat";
-import { c, e, knee, lerp, rot, win } from "./raptor";
+import { lerp } from "../math";
+import { along, c, e, joint, rot, rp, sheet, win, type Pt } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -26,54 +27,8 @@ import type { Pose, Species } from "./types";
 const SPAN_M = 6.5;
 export const PTERANODON_SCALE = (SPAN_M * PX_PER_M) / 330;
 
-export type Pt = [number, number];
-
-/** Articulation d'un membre à deux segments ; `back` plie vers l'arrière (coude), sinon vers l'avant (genou). */
-export function joint(hx: number, hy: number, ax: number, ay: number, l1: number, l2: number, back: boolean): Pt {
-  if (!back) return knee(hx, hy, ax, ay, l1, l2);
-  const dx = ax - hx, dy = ay - hy;
-  const d = Math.min(l1 + l2 - 0.01, Math.max(Math.abs(l1 - l2) + 0.01, Math.hypot(dx, dy)));
-  const a = Math.atan2(dy, dx) + Math.acos(Math.min(1, Math.max(-1, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d))));
-  return [hx + l1 * Math.cos(a), hy + l1 * Math.sin(a)];
-}
-
-/** Point à la fraction t (0..1) de la longueur d'une ligne brisée. */
-export function along(pts: Pt[], t: number): Pt {
-  const seg: number[] = [];
-  let tot = 0;
-  for (let k = 1; k < pts.length; k++) { const l = Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]); seg.push(l); tot += l; }
-  let d = Math.min(1, Math.max(0, t)) * tot;
-  for (let k = 0; k < seg.length; k++) {
-    if (d <= seg[k] || k === seg.length - 1) {
-      const u = seg[k] ? Math.min(1, d / seg[k]) : 0;
-      return [lerp(pts[k][0], pts[k + 1][0], u), lerp(pts[k][1], pts[k + 1][1], u)];
-    }
-    d -= seg[k];
-  }
-  return pts[pts.length - 1];
-}
-
-/** Membrane tendue entre deux bords (lignes brisées) : capsules reliant les bords à la même fraction de longueur. */
-export function sheet(L: Pt[], T: Pt[], n: number, m: number, z: number): Prim[] {
-  const P: Prim[] = [];
-  for (let k = 0; k <= n; k++) {
-    const t = k / n, t2 = Math.min(1, (k + 1) / n);
-    const a = along(L, t), b = along(T, t), a2 = along(L, t2), b2 = along(T, t2);
-    const ra = Math.max(2.2, Math.hypot(a2[0] - a[0], a2[1] - a[1]) * 0.7);
-    const rb = Math.max(2.2, Math.hypot(b2[0] - b[0], b2[1] - b[1]) * 0.7);
-    P.push(c(a[0], a[1], b[0], b[1], ra, rb, m, z, 3));
-  }
-  return P;
-}
-
-/** Point (x, y) tourné de a autour de (px, py), puis décalé. */
-export function rp(x: number, y: number, px: number, py: number, a: number, dx = 0, dy = 0): Pt {
-  const co = Math.cos(a), si = Math.sin(a);
-  return [px + (x - px) * co - (y - py) * si + dx, py + (x - px) * si + (y - py) * co + dy];
-}
-
-/** Matières d'un ptérosaure ; `vein` 0 = pas d'actinofibrilles dessinées. */
-export interface PteroMats { skin: number; far: number; belly: number; wing: number; wingFar: number; vein: number }
+/** Matières d'un ptérosaure ; `vein` 0 = pas d'actinofibrilles dessinées ; `fuzz` = touffes de pycnofibres. */
+export interface PteroMats { skin: number; far: number; belly: number; wing: number; wingFar: number; vein: number; fuzz?: number }
 
 /** Tête : pivot (x0, y0) à la base du crâne, bec vers +x ; `fish` 0..1 = poisson tenu dans le bec. */
 export type PteroHead = (x0: number, y0: number, jaw: number, closed: boolean, fish: number) => Prim[];
@@ -112,10 +67,14 @@ export interface PteroKit {
   /** Vol : tronc (arrière, avant) et bout du cou, relatifs au centre du corps. */
   flyBody: [Pt, Pt];
   flyNeck: Pt;
+  /** « attack » : piqué de pêche en vol (pêcheurs) ou coup de bec au sol (chasseur à pied). */
+  diveAttack: boolean;
+  /** Poses au sol propres à l'espèce, à la place des poses communes. */
+  rig?: (pose: Pose) => PteroRig;
 }
 
 /** Réglages de pose au sol, déduits de l'action. */
-interface PRig {
+export interface PteroRig {
   dx: number;
   dy: number;
   /** Tangage du corps autour de la hanche (+ = épaules qui plongent). */
@@ -129,8 +88,10 @@ interface PRig {
   fish: number;
 }
 
-function pteroRig({ action, actionT: t, time }: Pose, K: PteroKit): PRig {
-  const r: PRig = { dx: 0, dy: 0, pitch: 0, neck: 0, head: 0, jaw: 0, legs: "stand", stride: 1, closed: false, fish: 0 };
+export const PTERO_REST: PteroRig = { dx: 0, dy: 0, pitch: 0, neck: 0, head: 0, jaw: 0, legs: "stand", stride: 1, closed: false, fish: 0 };
+
+function pteroRig({ action, actionT: t, time }: Pose, K: PteroKit): PteroRig {
+  const r = { ...PTERO_REST };
   const s = Math.sin(t * Math.PI * 2);
   const sz = -K.sho[1] / 60;
   switch (action) {
@@ -175,7 +136,7 @@ function pteroRig({ action, actionT: t, time }: Pose, K: PteroKit): PRig {
 /** Pose au sol : quadrupède, ailes repliées le long des bras, doigt de l'aile dressé derrière l'épaule. */
 export function pteroGround(pose: Pose, K: PteroKit): Prim[] {
   const { walk, moving, time } = pose;
-  const r = pteroRig(pose, K);
+  const r = K.rig ? K.rig(pose) : pteroRig(pose, K);
   const Mt = K.mats;
   const [l1, l2, meta] = K.arm;
   const sc = meta / 40;
@@ -247,6 +208,16 @@ export function pteroGround(pose: Pose, K: PteroKit): Prim[] {
     c(K.neck0[0], K.neck0[1], K.neck1[0], K.neck1[1], K.neckR[0], K.neckR[1], Mt.skin, 4, K.neckR[1]),
     c(K.neck0[0] + 4 * sc, K.neck0[1] + 2, K.neck1[0] + 3 * sc, K.neck1[1] + 3 * sc, K.neckR[0] * 0.35, K.neckR[1] * 0.35, Mt.belly, 10, 2),
   ];
+  if (Mt.fuzz) {
+    for (let k = 0; k < 6; k++) {
+      const t = k / 5;
+      B.push(e(lerp(hX - 8 * sc, sX - 7 * sc, t), lerp(hY - 12 * sc, sY - 7 * sc, t), 4 * sc, 2.4 * sc, Mt.fuzz, 14 + k, 3));
+    }
+    for (let k = 0; k < 4; k++) {
+      const t = 0.15 + k * 0.22;
+      N.push(e(lerp(K.neck0[0], K.neck1[0], t) - 7 * sc, lerp(K.neck0[1], K.neck1[1], t), 2.5 * sc, 3 * sc, Mt.fuzz, 12, 2));
+    }
+  }
   N.push(...rot(K.head(K.neck1[0], K.neck1[1], r.jaw, r.closed, r.fish), K.neck1[0], K.neck1[1], K.headA + r.head));
   B.push(...rot(N, K.neck0[0], K.neck0[1], r.neck));
   P.push(...rot(B, hX, hY, r.pitch, bx, by));
@@ -327,6 +298,7 @@ function flyPrims(K: PteroKit, by: number, theta: number, fold: number, headA: n
   P.push(c(ta[0], by + ta[1], tb[0], by + tb[1], K.torso[0], K.torso[1], Mt.skin, 0, K.torso[1]));
   P.push(c(ta[0] + 6 * sc, by + ta[1] + K.torso[0] * 0.5, tb[0] - 2 * sc, by + tb[1] + K.torso[1] * 0.55, K.torso[0] * 0.5, K.torso[1] * 0.5, Mt.belly, 4, 4));
   P.push(c(ta[0], by + ta[1], ta[0] - 12 * sc, by + ta[1] + 1, 2.5 * sc, 1, Mt.skin, 2, 2));
+  if (Mt.fuzz) for (let k = 0; k < 6; k++) P.push(e(ta[0] + (6 + k * 9) * sc, by + ta[1] - (14 + k * 0.8) * sc, 4 * sc, 2.2 * sc, Mt.fuzz, 13, 2));
   for (const far of [true, false]) {
     const m = far ? Mt.far : Mt.skin, z = far ? -12 : 12, o = (far ? -2 : 2) * sc;
     const lx = ta[0] + 6 * sc, ly = by + ta[1] + 3 * sc + o;
@@ -337,6 +309,10 @@ function flyPrims(K: PteroKit, by: number, theta: number, fold: number, headA: n
   // Cou court tendu vers l'avant, tête en équilibre (crête vers l'arrière, bec vers l'avant).
   const [nx, ny] = [K.flyNeck[0], by + K.flyNeck[1]];
   P.push(c(tb[0] - 2 * sc, by + tb[1], nx, ny, K.neckR[0], K.neckR[1], Mt.skin, 4, K.neckR[1]));
+  if (Mt.fuzz) for (let k = 0; k < 4; k++) {
+    const t = k / 3;
+    P.push(e(lerp(tb[0] + 8 * sc, nx - 16 * sc, t), lerp(by + tb[1] - 7 * sc, ny - 3.2 * sc, t), 3 * sc, 2 * sc, Mt.fuzz, 11, 2));
+  }
   P.push(...rot(K.head(nx, ny, jaw, false, fish), nx, ny, headA));
   wing(1);
   return P;
@@ -401,7 +377,7 @@ export function pteroTransition(pose: Pose, K: PteroKit): Prim[] {
 export function pteroModel(pose: Pose, K: PteroKit): Prim[] {
   switch (pose.action) {
     case "fly": return pteroFly(pose, K);
-    case "attack": return pteroDive(pose, K);
+    case "attack": return K.diveAttack ? pteroDive(pose, K) : pteroGround(pose, K);
     case "dead": return pteroDead(K);
     case "takeoff":
     case "land": return pteroTransition(pose, K);
@@ -466,6 +442,7 @@ const P_KIT: PteroKit = {
   chord: 0.55,
   flyBody: [[-24, 2], [12, -4]],
   flyNeck: [34, -14],
+  diveAttack: true,
 };
 
 const EYE: Pt = rp(P_KIT.neck1[0] + 5, P_KIT.neck1[1] - 3, P_KIT.neck1[0], P_KIT.neck1[1], P_KIT.headA);

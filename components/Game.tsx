@@ -1,50 +1,38 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { DEV, FONT_SIZE } from "@/game/config";
-import { bindInput } from "@/game/input";
-import { startLoop } from "@/game/loop";
-import { Renderer } from "@/game/render/draw";
-import { view } from "@/game/render/metrics";
-import { worldZoom } from "@/game/scenes/park";
-import { composeGame, updateGame } from "@/game/scenes";
-import { createState } from "@/game/state";
+import { useEffect, useRef, useState } from "react";
+import { bootGame } from "@/game/boot";
+import { STRINGS } from "@/game/strings";
+import Loading from "./Loading";
 
 export default function Game({ fontFamily }: { fontFamily: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const [step, setStep] = useState<string | null>(STRINGS.boot.font);
 
+  // Boucle de jeu impérative (canvas WebGL, écouteurs clavier et pointeur) : démarrée au montage, arrêtée au démontage.
   useEffect(() => {
     let stop = () => {};
     let disposed = false;
-    (async () => {
-      await document.fonts.load(`${FONT_SIZE}px ${fontFamily}`);
-      await document.fonts.ready;
-      const canvas = ref.current;
-      if (disposed || !canvas) return;
-      const input = bindInput(canvas);
-      const renderer = new Renderer(canvas, fontFamily);
-      const state = createState();
-      // Accès console pour le débogage (dev uniquement).
-      if (DEV) (window as unknown as { __game: unknown }).__game = state;
-      const resize = () => renderer.resize(window.innerWidth, window.innerHeight);
-      resize();
-      window.addEventListener("resize", resize);
-      const halt = startLoop(
-        (dt) => updateGame(state, input.read(), dt),
-        (fps) => { view.zoom = worldZoom(state); renderer.sync(); composeGame(state, renderer.frame, renderer.ui, fps); renderer.draw(); },
-      );
-      stop = () => { halt(); input.dispose(); window.removeEventListener("resize", resize); };
-    })();
+    const canvas = ref.current;
+    if (!canvas) return;
+    bootGame(canvas, fontFamily, { onStep: setStep, cancelled: () => disposed })
+      .then((halt) => {
+        if (!halt) return;
+        if (disposed) halt();
+        else stop = halt;
+      })
+      .catch((err) => {
+        console.error(err);
+        if (!disposed) setStep(STRINGS.boot.failed);
+      });
     return () => { disposed = true; stop(); };
   }, [fontFamily]);
 
-  // Le jeu se pilote entièrement au clavier (Tab, Entrée, Échap, H pour l'aide) ou à la souris.
+  // Le jeu se pilote entièrement au clavier (Tab, Entrée, Échap, H pour l'aide), à la souris ou au doigt.
   return (
-    <canvas
-      ref={ref}
-      role="application"
-      aria-label="Paleoglyphes, jeu educatif sur les dinosaures. Touche H : aide et liste des commandes. Tab : bouton suivant, Entree : activer, Echap : menu."
-      style={{ display: "block", touchAction: "none" }}
-    />
+    <>
+      {step && <Loading step={step} />}
+      <canvas ref={ref} role="application" aria-label={STRINGS.canvasLabel} />
+    </>
   );
 }

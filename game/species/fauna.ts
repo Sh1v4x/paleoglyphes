@@ -1,7 +1,8 @@
 import { M } from "../render/materials";
 import type { Prim } from "../render/raster";
 import { CM } from "./carnivores.mat";
-import { c, e, lerp } from "./raptor";
+import { lerp } from "../math";
+import { c, e } from "./kit";
 import type { Pose } from "./types";
 
 /**

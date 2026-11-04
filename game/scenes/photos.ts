@@ -1,6 +1,7 @@
 import { clockLabel } from "../daycycle";
 import { blitPhoto, copyText, downloadPng } from "../features/photo-export";
 import { starsText } from "../features/photo-score";
+import { copyGameLink, GAME_URL, sharePhoto } from "../features/photo-share";
 import { album, loadAlbum, MAX_PHOTOS, removePhoto, type Photo } from "../features/photo-store";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
@@ -82,8 +83,9 @@ export const photosScene: Scene = {
     if (ps.view >= 0) {
       const p = album.photos[ps.view];
       for (const k of input.pressed) {
-        if (k === "ArrowLeft" || k === "KeyA" || k === "KeyQ") open(s, ps.view - 1);
+        if (k === "ArrowLeft" || k === "KeyA") open(s, ps.view - 1);
         if (k === "ArrowRight" || k === "KeyD") open(s, ps.view + 1);
+        if (k === "KeyP" && p && !ps.confirm) void sharePhoto(s, p);
       }
       for (const id of input.ui) {
         if (id === "photos:prev") open(s, ps.view - 1);
@@ -92,8 +94,11 @@ export const photosScene: Scene = {
         if (id === "photos:del") ps.confirm = true;
         if (id === "photos:del:no") ps.confirm = false;
         if (id === "photos:del:yes" && p) {
-          removePhoto(p.id);
           ps.confirm = false;
+          if (!removePhoto(p.id)) {
+            toast(s, "Album pas encore prêt", "Réessaie dans un instant.");
+            continue;
+          }
           toast(s, "Photo supprimée", p.title);
           if (!album.photos.length) ps.view = -1;
           else ps.view = Math.min(ps.view, album.photos.length - 1);
@@ -101,6 +106,8 @@ export const photosScene: Scene = {
         if (id === "photos:png" && p) {
           void downloadPng(p, photoCaption(p)).then((ok) => toast(s, ok ? "Image téléchargée" : "Téléchargement impossible", ok ? `paleoglyphes-${p.id}.png` : ""));
         }
+        if (id === "photos:share" && p) void sharePhoto(s, p);
+        if (id === "photos:link") void copyGameLink(s);
         if (id === "photos:txt" && p) {
           void copyText(p, photoCaption(p)).then((ok) => toast(s, ok ? "Copiée en texte !" : "Copie impossible", ok ? "Colle-la dans un éditeur en police à chasse fixe." : "Le presse-papiers n'est pas accessible."));
         }
@@ -112,7 +119,7 @@ export const photosScene: Scene = {
     if (Math.abs(ps.wheel) >= 60) { ps.scroll += Math.sign(ps.wheel); ps.wheel = 0; }
     for (const k of input.pressed) {
       if (k === "ArrowDown" || k === "KeyS") ps.scroll++;
-      if (k === "ArrowUp" || k === "KeyW" || k === "KeyZ") ps.scroll--;
+      if (k === "ArrowUp" || k === "KeyW") ps.scroll--;
     }
     ps.scroll = Math.max(0, ps.scroll);
     for (const id of input.ui) {
@@ -173,7 +180,7 @@ export const photosScene: Scene = {
     const ps = s.photos;
     if (ps.view >= 0 && album.photos[ps.view]) {
       if (ps.confirm) return [["Echap", "annuler"]];
-      return [["Fleches", "photo precedente / suivante"], ["Echap", "retour a l'album"]];
+      return [["Fleches", "photo precedente / suivante"], ["P", "partager"], ["Echap", "retour a l'album"]];
     }
     return album.photos.length ? [["Clic", "voir en grand"], ["Molette", "defiler"]] : [];
   },
@@ -183,6 +190,7 @@ export const photosScene: Scene = {
       ["Clic", "ouvrir une photo en grand (ou Tab puis Entree)"],
       ["Molette", "defiler l'album (fleches haut / bas aussi)"],
       ["Fleches", "en grand : photo precedente / suivante"],
+      ["P", "en grand : partager la photo (image + lien du jeu)"],
       ["Echap", "annuler la suppression, puis revenir a l'album"],
     ];
   },
@@ -225,7 +233,12 @@ function drawFull(s: GameState, th: Theme, world: Frame, ui: Frame, p: Photo) {
   const notes = p.notes.length ? `  -  ${p.notes.join(", ")}` : "";
   const line2 = `${when}${notes}`;
   text(ui, cx0, cy + 1, line2.length > cw ? `${line2.slice(0, cw - 3)}...` : line2, [120, 108, 96], null);
-  if (k < 1) text(ui, 18, UI_TOP, clip("Apercu reduit (fenetre trop petite)", ui.cols - 20), u.dim, u.panel, 0.7);
+  // Partage en haut à droite (la rangée du bas est pleine).
+  const sx = ps.confirm ? ui.cols : actions(ui, th, SP.margin, UI_TOP, ui.cols - 2 * SP.margin, [
+    { id: "photos:link", label: "Copier le lien du jeu", tip: GAME_URL },
+    { id: "photos:share", label: "Partager", key: "P", variant: "primary", tip: "Partager une jolie carte de la photo" },
+  ]);
+  if (k < 1) text(ui, 18, UI_TOP, clip("Apercu reduit (fenetre trop petite)", sx - 20), u.dim, u.panel, 0.7);
 
   // Boutons, au-dessus de la ligne d'aide : navigation à gauche, actions à droite (Retour tout à droite).
   const by = ui.rows - 2;
@@ -249,10 +262,14 @@ function drawFull(s: GameState, th: Theme, world: Frame, ui: Frame, p: Photo) {
     { id: "photos:del", label: "Supprimer", variant: "danger" },
     { id: "photos:back", label: "Retour", key: "Echap", variant: "primary", tip: "Retour a l'album" },
   ];
-  const ax = actions(ui, th, SP.margin, by, ui.cols - 2 * SP.margin, right);
+  // Fenêtre étroite : libellés courts à droite, navigation sur la rangée du dessus.
+  const SHORT: Record<string, string> = { "photos:png": "PNG", "photos:txt": "Texte", "photos:del": "Suppr." };
+  const fits = right.reduce((n, a) => n + buttonW(a.label, a) + SP.gap, 0) <= ui.cols - 2 * SP.margin;
+  const ax = actions(ui, th, SP.margin, by, ui.cols - 2 * SP.margin, fits ? right : right.map((a) => ({ ...a, label: SHORT[a.id] ?? a.label, tip: a.tip ?? a.label })));
+  const ny = nav.reduce<number>((n, b) => n + buttonW(b.label) + SP.gap, x) >= ax - 1 ? by - 2 : by;
   for (const b of nav) {
     const w = buttonW(b.label);
-    if (x + w >= ax - 1) break;
-    x += button(ui, th, b.id, x, by, b.label, b) + SP.gap;
+    if (x + w >= (ny === by ? ax - 1 : ui.cols)) break;
+    x += button(ui, th, b.id, x, ny, b.label, b) + SP.gap;
   }
 }

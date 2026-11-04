@@ -29,6 +29,8 @@ export interface Scene {
   compose(s: GameState, th: Theme, world: Frame, ui: Frame): void;
   /** Aides de la ligne du bas (touches les plus utiles, selon l'état de l'écran). */
   hints?(s: GameState): readonly Hint[];
+  /** Écran tactile : aides en gestes et boutons (à défaut, `hints` traduites par kit.touchHints). */
+  touchHints?(s: GameState): readonly Hint[];
   /** Liste complète des commandes de l'écran, pour la fenêtre d'aide (H) ; à défaut, `hints`. */
   help?(s: GameState): readonly Hint[];
   /**

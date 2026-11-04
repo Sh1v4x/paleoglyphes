@@ -1,10 +1,16 @@
 import { CELL_H, CELL_W, WORLD_H, WORLD_W } from "../config";
+import { resetDay } from "../daycycle";
 import { addAt } from "../features/lenia";
+import { createPhotoState } from "../features/photo";
+import { clearAlbum } from "../features/photo-store";
+import { pointer } from "../input";
+import { clamp01 } from "../math";
 import type { RGB } from "../palette";
 import { emptyProgress, saveProgress } from "../progress";
 import { createFrame, setBg, setFg, type Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
 import { hash2 } from "../rng";
+import { clearSave } from "../save";
 import { calm } from "../settings";
 import { worldFor, type GameState } from "../state";
 import { resetUi, text, wrap } from "../ui/kit";
@@ -12,9 +18,11 @@ import { toast } from "../ui/toast";
 import { knockTree, regrowAll } from "../world/trees";
 import { drawSpace, SPACE_DURATION } from "./meteor-space";
 import { createDigState } from "./dig";
-import { createJournalState } from "./journal";
+import { createJournalState, resetSeen } from "./journal";
 import { createLabState } from "./lab";
+import { createMuseumState } from "./museum";
 import { createParkState, parkScene, syncPopulation } from "./park";
+import { createPhotosState } from "./photos";
 import type { Scene } from "./types";
 
 /**
@@ -26,9 +34,9 @@ import type { Scene } from "./types";
  */
 
 /** Chronologie de la réserve (s depuis la fin de la séquence spatiale). */
-const T = { debris: 0.8, shock: 2.2, dust: 5.5, black: 8, reset: 8.6, dawn: 9.2, end: 15 };
+export const T = { debris: 0.8, shock: 2.2, dust: 5.5, black: 8, reset: 8.6, dawn: 9.2, end: 15 };
 
-export interface MeteorState {
+interface MeteorState {
   t: number;
   /** Origine de l'onde de choc (px monde, hors écran) et rayon courant. */
   ox: number;
@@ -37,22 +45,26 @@ export interface MeteorState {
 }
 
 let m: MeteorState = { t: 0, ox: 0, oy: 0, done: false };
-
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+/** Temps écoulé dans la cinématique (s), pour le son (features/sound-watch.ts). */
+export const meteorTime = () => m.t;
 
 /** Efface toute la progression et repeuple une réserve vide (les arbres repoussent vite). */
 function resetAll(s: GameState) {
   s.progress = emptyProgress();
   saveProgress(s.progress);
-  try {
-    localStorage.removeItem("ascii-dino-journal-seen-v1");
-  } catch {
-    // Stockage indisponible : rien à effacer.
-  }
-  // Fouille, atelier et carnet repartent de zéro : nouveau site, établi vide.
+  clearSave();
+  resetSeen();
+  void clearAlbum().then((cleared) => {
+    if (!cleared) toast(s, "Album photo non effacé", "Le navigateur a refusé : tes anciennes photos peuvent revenir au rechargement.");
+  });
+  resetDay(s);
+  // Fouille, atelier, carnet, musée et album repartent de zéro : nouveau site, établi vide.
   s.dig = createDigState();
   s.lab = createLabState();
   s.journal = createJournalState();
+  s.museum = createMuseumState();
+  s.photo = createPhotoState();
+  s.photos = createPhotosState();
   const keep = { cam: { ...s.park.cam }, regrow: 2 };
   s.park = { ...createParkState(), ...keep };
   parkScene.enter?.(s);
@@ -75,8 +87,8 @@ export const meteorScene: Scene = {
   update(s, input, dt) {
     m.t += dt;
     const tp = m.t - SPACE_DURATION;
-    // Échap : passer la cinématique (la remise à zéro a quand même lieu).
-    if (input.pressed.includes("Escape") && !m.done) { m.t = SPACE_DURATION + T.reset - 0.01; }
+    // Échap (au doigt : toucher l'écran) : passer la cinématique (la remise à zéro a quand même lieu).
+    if ((input.pressed.includes("Escape") || (pointer.touch && input.mouse.clicks.length)) && !m.done) { m.t = SPACE_DURATION + T.reset - 0.01; }
     if (tp < 0) return;
     const p = s.park;
     if (m.ox === 0) {
@@ -122,7 +134,7 @@ export const meteorScene: Scene = {
     if (tp < 0) {
       drawSpace(world, Math.min(SPACE_DURATION, m.t));
       resetUi(ui);
-      caption(ui, [225, 220, 205], "Echap : passer");
+      caption(ui, [225, 220, 205], SKIP());
       return;
     }
     parkScene.compose(s, th, world, ui);
@@ -130,9 +142,12 @@ export const meteorScene: Scene = {
     overlay(s, world, tp);
     if (tp > T.dawn + 1 && tp < T.end) caption(ui, [255, 255, 255], "66 millions d'annees plus tard... la vie reprend ses droits.", true);
     else if (tp > T.shock && tp < T.black) caption(ui, [255, 230, 200], "L'onde de choc balaie Hell Creek. La poussiere va cacher le soleil pendant des annees.", true);
-    if (!m.done) caption(ui, [225, 220, 205], "Echap : passer");
+    if (!m.done) caption(ui, [225, 220, 205], SKIP());
   },
 };
+
+/** Comment passer la cinématique. */
+const SKIP = () => (pointer.touch ? "Toucher : passer" : "Echap : passer");
 
 /** Texte centré en bas (calque d'interface), sur un fond sombre pour rester lisible sur le blanc ; coupé en lignes si besoin. */
 function caption(ui: Frame, c: RGB, str: string, big = false) {

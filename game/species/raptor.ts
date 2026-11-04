@@ -2,6 +2,8 @@ import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { CM } from "./carnivores.mat";
+import { lerp } from "../math";
+import { c, e, REST_RIG, rot, theroLegs, win, type TheroLegSpec, type TheroRig } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -12,77 +14,6 @@ import type { Pose, Species } from "./types";
 const LENGTH_M = 5;
 /** Le modèle brut mesure ~255 px de la queue au museau. */
 export const RAPTOR_SCALE = (LENGTH_M * PX_PER_M) / 255;
-
-export const e = (x: number, y: number, rx: number, ry: number, m: number, z: number, h: number, yMin?: number, yMax?: number): Prim =>
-  ({ k: "e", x, y, rx, ry, m, z, h, yMin, yMax });
-export const c = (ax: number, ay: number, bx: number, by: number, ra: number, rb: number, m: number, z: number, h: number, stroke = false): Prim =>
-  ({ k: "c", ax, ay, bx, by, ra, rb, m, z, h, stroke });
-
-// --- Outils de pose, partagés avec le tyrannosaure ---
-export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-/** Fenêtre lissée : 0 avant a, 1 après b. */
-export const win = (t: number, a: number, b: number) => {
-  const u = Math.min(1, Math.max(0, (t - a) / (b - a)));
-  return u * u * (3 - 2 * u);
-};
-
-/** Tourne (a rad, + = sens horaire à l'écran, donc museau vers le bas) autour de (px, py), puis décale. */
-export function rot(ps: Prim[], px: number, py: number, a: number, dx = 0, dy = 0): Prim[] {
-  const co = Math.cos(a), si = Math.sin(a);
-  const R = (x: number, y: number): [number, number] => [px + (x - px) * co - (y - py) * si + dx, py + (x - px) * si + (y - py) * co + dy];
-  return ps.map((p) => {
-    if (p.k === "c") {
-      const [ax, ay] = R(p.ax, p.ay), [bx, by] = R(p.bx, p.by);
-      return { ...p, ax, ay, bx, by };
-    }
-    const [x, y] = R(p.x, p.y);
-    if (p.k === "cut") return { ...p, x, y };
-    const sh = y - p.y;
-    return { ...p, x, y, yMin: p.yMin === undefined ? undefined : p.yMin + sh, yMax: p.yMax === undefined ? undefined : p.yMax + sh };
-  });
-}
-
-/** Cinématique inverse à deux segments, genou vers l'avant (+x) : position du genou. */
-export function knee(hx: number, hy: number, ax: number, ay: number, l1: number, l2: number): [number, number] {
-  const dx = ax - hx, dy = ay - hy;
-  const d = Math.min(l1 + l2 - 0.01, Math.max(Math.abs(l1 - l2) + 0.01, Math.hypot(dx, dy)));
-  const a = Math.atan2(dy, dx);
-  const b = Math.acos(Math.min(1, Math.max(-1, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d))));
-  return [hx + l1 * Math.cos(a - b), hy + l1 * Math.sin(a - b)];
-}
-
-/** Réglages de pose d'un théropode, déduits de l'action. */
-export interface TheroRig {
-  /** Décalage du bassin (px bruts, + = vers le bas). */
-  dx: number;
-  dy: number;
-  /** Tangage du corps autour du bassin (+ = museau vers le bas). */
-  pitch: number;
-  /** Rotation du cou autour de sa base, puis de la tête autour de la nuque. */
-  neck: number;
-  head: number;
-  /** Ouverture de la mâchoire 0..1. */
-  jaw: number;
-  /** Bras : 0 repliés, 1 déployés (ailes ouvertes chez le raptor). */
-  arms: number;
-  /** Plumes de la nuque hérissées 0..1. */
-  crest: number;
-  /** Lève (px) le bout de la queue ; enroule la queue vers l'avant (0..1). */
-  tailUp: number;
-  curl: number;
-  /** Amplitude de foulée. */
-  stride: number;
-  /** Pattes : debout, accroupi (repos), en l'air (bond), allongé (mort). */
-  legs: "stand" | "sit" | "air" | "lie";
-  /** Écart des pieds (posture campée), px bruts : pied proche en avant, lointain en arrière. */
-  stance: number;
-  closed: boolean;
-}
-
-export const REST_RIG: TheroRig = {
-  dx: 0, dy: 0, pitch: 0, neck: 0, head: 0, jaw: 0, arms: 0, crest: 0, tailUp: 0, curl: 0,
-  stride: 1, legs: "stand", stance: 0, closed: false,
-};
 
 function raptorRig({ action, actionT: t, time }: Pose): TheroRig {
   const r = { ...REST_RIG };
@@ -143,6 +74,15 @@ function raptorRig({ action, actionT: t, time }: Pose): TheroRig {
 export const RAPTOR_EYE = { x: 66, y: -104 };
 /** Bassin (pivot du corps) et base du cou, px bruts. */
 const HIP = { x: 2, y: -60 };
+const LEGS: TheroLegSpec = {
+  hip: HIP, farHip: 4, lift: 11, reach: 6, swing: 26, footY: -3,
+  // Métatarse en marche : vecteur de la cheville vers la base des orteils.
+  mx: 13, my: 21, metaLift: 0.3,
+  sit: { dx: 14, far: 6, y: -3, mx: 25, my: 3 },
+  lie: { dx: 58, far: -8, y: -5, nearDy: 4, mx: 18, my: 3 },
+  air: { dx: 34, far: -6, near: 4, y: 44, mx: 16, my: 12 },
+  kneeDy: 4, thigh: 24, shin: 30,
+};
 const NECK = { x: 30, y: -74 };
 const NAPE = { x: 50, y: -96 };
 
@@ -155,21 +95,10 @@ export function raptorModel(pose: Pose): Prim[] {
   const P: Prim[] = [];
 
   // --- Pattes (cinématique inverse : la patte suit le bassin) ---
-  for (const L of [{ phase: 0, far: true }, { phase: Math.PI, far: false }]) {
-    const ph = walk + L.phase;
-    const sw = Math.sin(ph) * moving * r.stride;
-    const lift = Math.max(0, Math.cos(ph)) * moving * 11 * r.stride;
+  for (const L of theroLegs(pose, r, bx, by, LEGS)) {
     const m = L.far ? M.RFar : M.RSkin;
     const z = L.far ? -40 : 22;
-    const hx = HIP.x + (L.far ? 4 : 0) + bx, hy = HIP.y + by;
-    let fx = hx + 6 + sw * 26 + (L.far ? -r.stance : r.stance), fy = -3 - lift;
-    // Métatarse : vecteur de la cheville vers la base des orteils.
-    let mx = 13, my = 21 - lift * 0.3;
-    if (r.legs === "sit") { fx = hx + 14 + (L.far ? 6 : 0); fy = -3; mx = 25; my = 3; }
-    else if (r.legs === "air") { fx = hx + 34 + (L.far ? -6 : 4); fy = hy + 44; mx = 16; my = 12; }
-    else if (r.legs === "lie") { fx = hx + 58 + (L.far ? -8 : 0); fy = -5 - (L.far ? 0 : 4); mx = 18; my = 3; }
-    const ax = fx - mx, ay = fy - my;
-    const [kx, ky] = knee(hx, hy + 4, ax, ay, 24, 30);
+    const { hx, hy, fx, fy, ax, ay, kx, ky } = L;
     P.push(e(hx, hy, 17, 20, m, z - 4, 13));
     P.push(c(hx, hy + 4, kx, ky, 12, 7, m, z, 10));
     P.push(c(kx, ky, ax, ay, 6.5, 4, m, z + 2, 6));

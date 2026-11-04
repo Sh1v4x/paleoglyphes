@@ -2,12 +2,14 @@
  * Aperçu terminal de la fouille ou de l'atelier (calque monde + interface en texte brut).
  * Usage : npx tsx scripts/preview-dig.ts [dig|lab|labsynth] [dark|cartoon] [dug 0..1] [cols] [rows] [synthT 0..1] [espece]
  *   dug : part du sédiment retirée partout (pour voir les fossiles), ex. 1.
+ *   Variables : SITE=hellcreek|princecreek|djadochta|niobrara, ASSEMBLED=n, PICKER=1.
  */
 import { THEMES, type Style } from "../game/palette";
 import { createFrame } from "../game/render/frame";
 import { metrics } from "../game/render/metrics";
 import { SCENES } from "../game/scenes";
-import { SPECIES } from "../game/species";
+import type { DigSiteId } from "../game/scenes/dig-sites";
+import { isSpeciesId, SPECIES, SPECIES_LIST } from "../game/species";
 import { createState } from "../game/state";
 import { beginUi } from "../game/ui/kit";
 
@@ -21,13 +23,19 @@ const world = createFrame(cols, rows), ui = createFrame(metrics.ucols, metrics.u
 const input = { dx: 0, dy: 0, pressed: [], mouse: { x: -1, y: -1, inside: false, down: false, clicks: [], presses: [], releases: [], dragX: 0, dragY: 0, wheel: 0 }, ui: [], worldClicks: [] };
 const synthAt = mode === "labsynth" ? Number(process.argv[7] ?? "0.5") : -1;
 if (mode.startsWith("lab")) {
-  const sp = (process.argv[8] ?? "ankylo") as "ankylo";
-  const spec = SPECIES[sp]!;
+  const sp = process.argv[8] ?? "ankylo";
+  if (!isSpeciesId(sp)) throw new Error(`Unknown species: ${sp}`);
+  const spec = SPECIES[sp];
   s.mode = "lab";
   s.progress.bones[sp] = synthAt >= 0 ? spec.bones.map((b) => b.id) : spec.bones.slice(0, 4).map((b) => b.id);
   if (synthAt >= 0) s.lab.placed[sp] = spec.bones.map((b) => b.id);
   s.lab.species = sp;
 }
+// Site de fouille : ASSEMBLED=n (n premières espèces assemblées), SITE=niobrara, PICKER=1 (fenêtre de choix).
+const { SITE, ASSEMBLED, PICKER } = process.env;
+if (ASSEMBLED) s.progress.assembled = SPECIES_LIST.slice(0, Number(ASSEMBLED)).map((sp) => sp.id);
+if (SITE) s.progress.digSite = SITE as DigSiteId;
+s.dig.picker = !!PICKER;
 SCENES[s.mode].enter?.(s);
 SCENES[s.mode].update(s, input, 1 / 60);
 if (mode === "dig" && s.dig.site) {

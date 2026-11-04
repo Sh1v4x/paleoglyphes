@@ -1,7 +1,7 @@
 import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
-import { c, e, squash, strike, turn } from "./ankylo";
+import { c, e, rot, squash, strike } from "./kit";
 import { H } from "./herbivores.mat";
 import type { Pose, Species } from "./types";
 
@@ -116,7 +116,7 @@ function pachyParts(L: PachyLook, walk: number, moving: number): Prim[] {
     Q.push(c(ax, ay, bx, by, ra, Math.max(2, rb), H.PSkin, 2, 12));
     if (k % 2 === 0) Q.push(e((ax + bx) / 2, (ay + by) / 2 - ra * 0.3, 3, ra * 0.6, H.PStripe, 2 + ra, 3));
   }
-  P.push(...turn(Q, HIP_X, HIP_Y, -L.tailUp, X, bob));
+  P.push(...rot(Q, HIP_X, HIP_Y, -L.tailUp, X, bob));
 
   // --- Buste : corps, bras, cou et tête, qui basculent autour de la hanche ---
   const B: Prim[] = [];
@@ -134,7 +134,7 @@ function pachyParts(L: PachyLook, walk: number, moving: number): Prim[] {
   const T: Prim[] = [];
   T.push(c(84, -104, 120, -94, 12, 6, H.PSkin, 8, 10));
   if (L.mouth > 0.05) T.push(e(110, -90 + L.mouth * 2, 10, 1.5 + L.mouth * 3, M.Mouth, 20, 1));
-  T.push(...turn([c(88, -94, 116, -88, 5, 3, H.PSkin, 18, 4)], 86, -96, L.mouth * 0.35));
+  T.push(...rot([c(88, -94, 116, -88, 5, 3, H.PSkin, 18, 4)], 86, -96, L.mouth * 0.35));
   T.push(e(122, -95, 4, 4, H.PKnob, 18, 3));
   T.push(e(91, -119, 25, 22, H.PDome, 14, 22, undefined, -105));
   // Motif du dôme : bandes et taches.
@@ -150,8 +150,8 @@ function pachyParts(L: PachyLook, walk: number, moving: number): Prim[] {
   }
   for (const nx of [106, 113]) T.push(c(nx, -102, nx + 2, -107, 2.5, 1, H.PKnob, 22, 2));
   if (L.eye) T.push(e(104, -107, 3, 3, M.Eye, 40, 1));
-  B.push(...turn(T, 80, -102, L.headA));
-  P.push(...turn(B, HIP_X, HIP_Y, L.pitch, X, bob));
+  B.push(...rot(T, 80, -102, L.headA));
+  P.push(...rot(B, HIP_X, HIP_Y, L.pitch, X, bob));
   return P;
 }
 

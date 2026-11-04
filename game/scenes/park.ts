@@ -1,6 +1,6 @@
 import { CELL_H, CELL_W, DEV, WORLD_H, WORLD_W } from "../config";
-import { CLOCK_SPEEDS, clockLabel, daylight, litTheme, periodName } from "../daycycle";
-import type { Input } from "../input";
+import { CLOCK_SPEEDS, clockLabel, litTheme } from "../daycycle";
+import { dragToWheel, pointer, type Input } from "../input";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { composeMap, composeWorld, type Actor, type Critter, type MapMark } from "../render/compose";
@@ -10,7 +10,7 @@ import { mulberry32 } from "../rng";
 import { SPECIES, SPECIES_LIST } from "../species";
 import type { Action, FactUnlock, Species, SpeciesId } from "../species/types";
 import { worldFor, type GameState } from "../state";
-import { actions, bar, emptyState, hitAt, panel, put, region, SP, text, toolbar, wrap, type Hint, type ToolItem } from "../ui/kit";
+import { actions, bar, buttonW, emptyState, hitAt, panel, put, region, SP, text, toolbar, wrap, type Hint, type ToolItem } from "../ui/kit";
 import { unlockTrigger } from "../unlock";
 import { polarSummer } from "../features/weather";
 import { BIOME, type BiomeId } from "../world/biomes";
@@ -18,16 +18,18 @@ import type { World } from "../world/generate";
 import { isWater, T } from "../world/tiles";
 import { faunaActors, faunaAt, faunaDef, noteFauna, type Bug } from "./eco-fauna";
 import { activity, migrating, stepEcosystem, type EcoState } from "./ecosystem";
-import { deName } from "./dig-fossils";
+import { de } from "../fr";
 import { activeTrees, treeRaster, updateTrees } from "../world/trees";
 import { drawDocuLog, drawDocumentary, missedCount, stopDocumentary, updateDocumentary } from "../features/documentary";
 import { drawPhoto, updatePhoto } from "../features/photo";
-import { drawThunder, drawWeather, drawWeatherRows, updateWeather, weatherClick, weatherTheme } from "../features/weather";
+import { censusClick, sampleCensus, type CensusState } from "../features/census";
+import { drawThunder, drawWeather, drawWeatherRows, seenDaylight, seenGolden, seenPeriod, updateWeather, weatherClick, weatherTheme } from "../features/weather";
+import { recordVisit } from "./journal-travel";
 import { INCUBATION, juvenilePrims, lifespan, STAGE_AT } from "../species/life";
 import { nestModel } from "../species/eggs";
 import { toast } from "../ui/toast";
 import { addTestCouple, retireAnimal } from "./eco-nest";
-import { displayName, drawAnimalCard, drawNestCard, drawRoster, nestCrack, rosterOver, ROSTER_STEP, theName } from "./park-roster";
+import { displayName, drawAnimalCard, drawNestCard, drawRoster, nestCrack, ROSTER_MIN_W, rosterOver, ROSTER_STEP, theName } from "./park-roster";
 import { NAV, navOk, standable } from "./nav";
 import { UI_TOP, type Scene } from "./types";
 
@@ -173,6 +175,8 @@ export interface ParkState {
   /** Mini-carte masquée (touche M). */
   hideMap?: boolean;
   rosterScroll?: number;
+  /** Historique des effectifs et onglet « Graphique » du recensement (voir features/census.ts). */
+  census?: CensusState;
   /** Animal pour lequel on demande confirmation avant de le retirer. */
   confirmRetire?: number;
   /** Niveau de zoom (indice dans ZOOMS ; défaut ZOOM_DEFAULT) et pincement cumulé. */
@@ -195,7 +199,7 @@ const ZOOMS: readonly { z: number; m: number; name: string }[] = [
 const ZOOM_DEFAULT = 2;
 
 /** Zoom effectif : documentaire, appareil photo et cinématiques restent au zoom normal. */
-function zoomLevel(s: GameState) {
+export function zoomLevel(s: GameState) {
   if (s.mode !== "park" || s.photo.aiming || s.docu.on) return ZOOMS[ZOOM_DEFAULT];
   return ZOOMS[s.park.zoom ?? ZOOM_DEFAULT];
 }
@@ -206,8 +210,8 @@ export function worldZoom(s: GameState): number {
 }
 
 /** Taille de la vue en px monde (fenêtre / zoom des glyphes x cellules par bloc de la carte). */
-const viewW = (s: GameState) => (metrics.cols * metrics.cellW * zoomLevel(s).m) / zoomLevel(s).z;
-const viewH = (s: GameState) => (metrics.rows * metrics.cellH * zoomLevel(s).m) / zoomLevel(s).z;
+export const viewW = (s: GameState) => (metrics.cols * metrics.cellW * zoomLevel(s).m) / zoomLevel(s).z;
+export const viewH = (s: GameState) => (metrics.rows * metrics.cellH * zoomLevel(s).m) / zoomLevel(s).z;
 
 /** Change de niveau de zoom en gardant le point (px monde) `ax, ay` sous le même endroit de l'écran. */
 function setZoom(s: GameState, level: number, ax?: number, ay?: number) {
@@ -253,7 +257,7 @@ const TAU = Math.PI * 2;
 
 /** Raster d'un animal à sa pose actuelle, quantifiée pour réutiliser le cache. */
 export function animalRaster(a: Animal, time: number): Raster {
-  const spec = SPECIES[a.sp]!;
+  const spec = SPECIES[a.sp];
   const moving = a.moving > 0.5 ? 1 : 0;
   const wq = Math.floor(((a.walk % TAU) + TAU) % TAU / (TAU / 12));
   const tq = moving ? 0 : Math.floor(((time + a.phase) % 4.8) * 6);
@@ -379,7 +383,6 @@ export function migrationArrived(s: GameState, sp: SpeciesId, x: number, y: numb
 /** Prochaine étape (px monde, ~1 300 px plus loin) sur l'itinéraire vers le cœur de la zone de saison, ou null. */
 export function migrationStep(s: GameState, sp: SpeciesId, x: number, y: number): { x: number; y: number } | null {
   const spec = SPECIES[sp];
-  if (!spec) return null;
   const w = worldFor(s), R = routeMap(w), d = zoneMaps(w, homeBiomes(s, spec)).dist;
   // Depuis la case de l'animal (ou la plus proche reliée), on descend la carte des distances.
   let c = Math.floor(y / CELL_H / MG.ch) * R.gw + Math.floor(x / CELL_W / MG.cw);
@@ -412,7 +415,6 @@ export function migrationStep(s: GameState, sp: SpeciesId, x: number, y: number)
 /** Point praticable le plus proche (px monde) dans la zone où l'espèce vit en ce moment. */
 export function nearestHome(s: GameState, sp: SpeciesId, x: number, y: number): { x: number; y: number } | null {
   const spec = SPECIES[sp];
-  if (!spec) return null;
   const w = worldFor(s);
   let pts = landmarks.get(w);
   if (!pts) {
@@ -449,7 +451,7 @@ function spawn(s: GameState, sp: SpeciesId, near?: { x: number; y: number }) {
       gx: x, gy: y, best: Infinity, stall: 0, vx: 0, vy: 0, vt: 0,
       path: null, pi: 0, pgx: x, pgy: y, repath: 0, prog: Infinity, progT: 0, stuckT: 0, alt: 0,
       // Arrivée en jeune adulte (âge tiré au hasard dans la vie adulte).
-      life: (SPECIES[sp] ? lifespan(SPECIES[sp]!) : 1800) * (STAGE_AT.adult + 0.05 + rng() * 0.4), growth: 1, parentId: 0, nestId: 0, breedCool: 120 + rng() * 300,
+      life: lifespan(SPECIES[sp]) * (STAGE_AT.adult + 0.05 + rng() * 0.4), growth: 1, parentId: 0, nestId: 0, breedCool: 120 + rng() * 300,
     };
     p.animals.push(a);
     return a;
@@ -572,6 +574,7 @@ export const MINI_W = 28, MINI_H = 10;
 const MINI_GLYPH: Partial<Record<SpeciesId, string>> = {
   ankylo: "A", raptor: "R", trike: "T", edmonto: "E", pachy: "P", trex: "X",
   nanuq: "N", pachyrhino: "H", velociraptor: "V", protoceratops: "O", citipati: "C",
+  ornithomimus: "M", deinosuchus: "D", troodon: "Y", shuvuuia: "S", pinacosaurus: "K", elasmosaurus: "L", therizino: "G",
 };
 
 export function centerOn(s: GameState, x: number, y: number) {
@@ -592,6 +595,7 @@ export const parkScene: Scene = {
     const w = worldFor(s);
     // Fonctions de la réserve : météo, documentaire (peut piloter la caméra), appareil photo.
     updateWeather(s, dt * s.clockSpeed);
+    recordVisit(s); // carnet de voyage : le biome au centre de la caméra
     const docuCam = updateDocumentary(s, input, dt);
     const photoCaptures = updatePhoto(s, input, dt);
     void docuCam; void photoCaptures;
@@ -605,6 +609,8 @@ export const parkScene: Scene = {
       setZoom(s, (p.zoom ?? ZOOM_DEFAULT) + Math.sign(p.zoomAcc), p.cam.x + input.mouse.x * k, p.cam.y + input.mouse.y * k);
       p.zoomAcc = 0;
     }
+    // Au doigt, glisser sur le recensement le fait défiler (la caméra ne bouge pas).
+    if (p.roster && rosterOver(input.mouse.x, input.mouse.y)) dragToWheel(input, metrics.uiH);
     // Caméra : clavier + glisser (plus vite quand on voit plus large).
     const zk = zoomLevel(s).m / zoomLevel(s).z;
     const speed = 700 * dt * zk;
@@ -635,6 +641,7 @@ export const parkScene: Scene = {
       stepEcosystem(s, sdt);
       updateTrees(w, sdt, p.regrow ?? 1);
     }
+    sampleCensus(s);
 
     const sel = p.animals.find((a) => a.id === p.selected);
     if (!sel) p.selected = undefined;
@@ -661,7 +668,6 @@ export const parkScene: Scene = {
       for (const a of p.animals) {
         if (a.moving < 0.3) continue;
         const spec = SPECIES[a.sp];
-        if (!spec) continue;
         for (const fx of spec.feet) {
           const i = Math.floor(a.y / CELL_H) * w.cols + Math.floor((a.x + fx * a.facing) / CELL_W);
           if (i > 0 && i < tr.length - 1) { tr[i] = now; tr[i + 1] = now; tr[i - 1] = now; }
@@ -707,9 +713,10 @@ export const parkScene: Scene = {
       if (id === "park:map") p.hideMap = !p.hideMap;
       if (id === "park:zoomin") setZoom(s, (p.zoom ?? ZOOM_DEFAULT) - 1);
       if (id === "park:zoomout") setZoom(s, (p.zoom ?? ZOOM_DEFAULT) + 1);
+      if (id === "park:prev" || id === "park:next") cycle(s, id === "park:next" ? 1 : -1);
       if (id === "park:gotodig") s.mode = "dig";
       if (id === "park:close") { p.selected = undefined; p.bug = undefined; p.nestSel = undefined; p.follow = false; p.confirmRetire = undefined; }
-      if (weatherClick(s, id)) continue;
+      if (weatherClick(s, id) || censusClick(s, id)) continue;
       if (id === "park:roster") p.roster = !p.roster;
       if (id === "park:couple") {
         // Test : un couple prêt à nicher, au centre de l'écran, de l'espèce sélectionnée si possible.
@@ -717,7 +724,7 @@ export const parkScene: Scene = {
         const cur = p.animals.find((a) => a.id === p.selected);
         const m = addTestCouple(s, cx, cy, cur?.sp);
         if (m) {
-          const name = SPECIES[m.sp]?.name ?? m.sp;
+          const name = SPECIES[m.sp].name;
           toast(s, "Couple ajoute (test)", `Deux ${name}s prets a nicher : regarde-les construire un nid !`);
           p.selected = m.id; p.follow = true; p.nestSel = undefined;
         } else toast(s, "Pas de place", "Toutes les especes assemblees sont deja au complet dans la reserve.");
@@ -734,7 +741,7 @@ export const parkScene: Scene = {
       if (id === "park:retire" && sel && sel.task !== "dead") p.confirmRetire = sel.id;
       if (id === "park:retire:no") p.confirmRetire = undefined;
       if (id === "park:retire:yes" && sel && p.confirmRetire === sel.id) {
-        const name = SPECIES[sel.sp]?.name ?? "dinosaure";
+        const name = SPECIES[sel.sp].name;
         retireAnimal(s, sel);
         toast(s, `${theName(name)} a quitté la réserve.`);
         p.selected = undefined; p.confirmRetire = undefined; p.follow = false;
@@ -767,7 +774,7 @@ export const parkScene: Scene = {
         const color = a.id === p.selected ? u.hi : spec.habitat === "sea" ? th.pal.waterShore : spec.behavior.diet === "carnivore" ? u.bad : u.ok;
         marks.push({ x: a.x, y: a.y - a.alt, glyph: (MINI_GLYPH[a.sp] ?? spec.name[0].toUpperCase()).charCodeAt(0), color });
       }
-      composeMap(th, world, { world: w, time: s.time, camX, camY, k: zv.m, light: daylight(s.clock), veg: p.eco?.veg, plankton: p.eco?.plankton, marks });
+      composeMap(th, world, { world: w, time: s.time, camX, camY, k: zv.m, light: seenDaylight(s), veg: p.eco?.veg, plankton: p.eco?.plankton, marks });
       drawHud(s, th, world, ui);
       return;
     }
@@ -778,10 +785,9 @@ export const parkScene: Scene = {
     for (const a of p.animals) {
       if (a.x < vx0 || a.x > vx1 || a.y < vy0 || a.y > vy1) continue;
       const spec = SPECIES[a.sp];
-      if (!spec) continue;
       const sea = spec.habitat === "sea";
       actors.push({
-        id: a.id, r: animalRaster(a, s.time), x: a.x, y: a.y, inWater: a.inWater && !sea && a.alt < 2, submerged: sea && a.task !== "dead" && a.action !== "land" && a.action !== "takeoff", // tortue sur la plage : dessinée hors de l'eau
+        id: a.id, r: animalRaster(a, s.time), x: a.x, y: a.y, inWater: a.inWater && !sea && a.alt < 2, submerged: (sea && a.task !== "dead" && a.action !== "land" && a.action !== "takeoff") || (a.mood === "ambush" && a.inWater && a.action === "idle"), // tortue sur la plage : dessinée hors de l'eau ; crocodile à l'affût : à demi immergé
         sortY: a.alt > 4 ? 1e7 + a.alt : undefined,
         // Ombre au sol pour les volants (plus petite quand ils sont haut), aucune pour les nageurs.
         shadowRx: sea ? 0 : spec.halfLen * spec.shadow * (a.task === "dead" ? 1.1 : 1) * (a.alt > 0 ? Math.max(0.35, 1 - a.alt / 400) : 1),
@@ -801,7 +807,7 @@ export const parkScene: Scene = {
       if (r) actors.push({ id: -100000 - t.id, r: placed(r, Math.floor(t.x / CELL_W), Math.floor(t.y / CELL_H)), x: t.x, y: t.y, inWater: false, shadowRx: t.state === "down" ? 60 : 18, eyeX: t.x, eyeY: -1e6 });
     }
     // La réserve suit le cycle jour / nuit ; l'interface garde ses couleurs.
-    composeWorld(weatherTheme(s, litTheme(th, s.clock)), world, {
+    composeWorld(weatherTheme(s, litTheme(th, s.clock, seenDaylight(s), seenGolden(s))), world, {
       world: w, time: s.time, camX, camY,
       glowX: p.cam.x + world.cols * CELL_W / 2, glowY: p.cam.y + world.rows * CELL_H / 2,
       actors, critters: p.critters, trample: p.trample ?? undefined, trampleNow: trampleNow(s), veg: p.eco?.veg, plankton: p.eco?.plankton, selected: p.selected ?? (p.bug !== undefined ? 1_000_000 + p.bug : p.nestSel !== undefined ? nestActorId(p.nestSel) : undefined),
@@ -823,7 +829,6 @@ export const parkScene: Scene = {
         const a = p.animals.find((b) => b.id === id);
         if (!a) continue;
         const spec = SPECIES[a.sp];
-        if (!spec) continue;
         const r = animalRaster(a, s.time);
         const at = toUi(r.cx + r.w / 2, r.cy);
         const isSel = id === p.selected;
@@ -855,7 +860,7 @@ export const parkScene: Scene = {
         if (!n) continue;
         const r = nestRaster(n);
         const at = toUi(r.cx + r.w / 2, r.cy);
-        const label = ` Nid ${deName(SPECIES[n.sp]?.name ?? "dinosaure")} `;
+        const label = ` Nid ${de(SPECIES[n.sp].name)} `;
         const isSel = id === p.nestSel;
         tag(Math.round(at.x - label.length / 2), Math.round(at.y - 1.2), label, isSel ? u.panel : u.text, isSel ? u.hi : u.panel, 0.9);
       }
@@ -870,6 +875,16 @@ export const parkScene: Scene = {
       ? [["Fleches", "camera"], ["Glisser", "camera"], ["Clic", "y plonger"], ["= )", "zoom"]]
       : [["Fleches", "camera"], ["Glisser", "camera"], ["Clic", "observer"], ["Molette", "animal suivant"], ["= )", "zoom"]];
     if (s.park.selected !== undefined || s.park.nestSel !== undefined || s.park.bug !== undefined) h.push(["Echap", "fermer la fiche"]);
+    return h;
+  },
+
+  touchHints(s) {
+    if (s.photo.aiming) return [["Toucher", "declencher"], ["Pincer", "cadrage"], ["Glisser", "deplacer"]];
+    if (s.docu.on) return [["Glisser", "reprendre la camera"]];
+    const h: Hint[] = zoomLevel(s).m > 1
+      ? [["Glisser", "camera"], ["Toucher", "y plonger"], ["Pincer", "zoom"]]
+      : [["Glisser", "camera"], ["Toucher", "observer"], ["Pincer", "zoom"], ["<< >>", "animal suivant"]];
+    if (s.park.selected !== undefined || s.park.nestSel !== undefined || s.park.bug !== undefined) h.push(["<", "fermer la fiche"]);
     return h;
   },
 
@@ -924,19 +939,20 @@ function drawHud(s: GameState, th: Theme, world: Frame, ui: Frame) {
   if (d.on) { drawDocumentary(s, th, ui); drawPhoto(s, th, world, ui); drawThunder(s, th, ui); return; }
 
   // --- Fiche (bas gauche) ---
+  // Petit écran : le recensement se pose au-dessus de la fiche s'il ne tient pas à côté ; sans la hauteur
+  // pour les deux, la fiche s'efface tant qu'il est ouvert.
+  const cardRight = SP.margin + 1 + Math.min(52, ui.cols - 2 * SP.margin - 2);
+  const besides = ui.cols - cardRight - 2 * SP.margin >= ROSTER_MIN_W;
   const sel = p.animals.find((a) => a.id === p.selected);
   const nest = p.nests.find((n) => n.id === p.nestSel);
   const bug = p.bug !== undefined ? p.eco?.fauna.find((f) => f.uid === p.bug) : undefined;
   let cardTop = ui.rows - 1;
-  if (sel) cardTop = drawAnimalCard(s, th, ui, sel);
-  else if (bug) cardTop = drawBugCard(s, th, ui, bug);
-  else if (nest) cardTop = drawNestCard(s, th, ui, nest);
-
-  // --- Temps et météo (haut gauche) : complet, compact ou masqué selon la place laissée par la fiche ---
-  const room = cardTop - 1 - UI_TOP;
-  const full = 6 + (DEV ? 3 : 2) + 1;
-  const timeH = room >= full ? full : room >= 4 ? 4 : 0;
-  if (timeH) drawTime(s, th, ui, SP.margin, UI_TOP, TIME_W, timeH);
+  if (!(p.roster && !besides && ui.rows < 40)) {
+    if (sel) cardTop = drawAnimalCard(s, th, ui, sel);
+    else if (bug) cardTop = drawBugCard(s, th, ui, bug);
+    else if (nest) cardTop = drawNestCard(s, th, ui, nest);
+  }
+  const card = cardTop < ui.rows - 1;
 
   // --- Barre d'outils ---
   const missed = missedCount(s);
@@ -947,20 +963,49 @@ function drawHud(s: GameState, th: Theme, world: Frame, ui: Frame) {
   tools.push(
     { id: "photo:toggle", label: "Appareil photo", short: "Photo", icon: "@", key: "P", tip: "Appareil photo : cadrer, puis declencher" },
     { id: "park:roster", label: "Recensement", short: "Liste", icon: "#", key: "C", toggle: true, active: !!p.roster, tip: "Recensement : tous les animaux de la reserve" },
-    { id: "park:map", label: "Carte", icon: "%", key: "M", toggle: true, active: !p.hideMap, tip: "Afficher / masquer la carte" },
+  );
+  // Carte : seulement si la fenêtre a la place de l'afficher (sinon, dézoomer montre toute la carte).
+  const mapFits = ui.cols >= 90 && ui.rows >= 30;
+  if (mapFits) tools.push({ id: "park:map", label: "Carte", icon: "%", key: "M", toggle: true, active: !p.hideMap, tip: "Afficher / masquer la carte" });
+  tools.push(
     { id: "park:zoomout", label: "Zoom -", short: "-", icon: "-", tip: "Dezoomer (touche a droite du 0, pincement) : jusqu'a toute la carte" },
     { id: "park:zoomin", label: "Zoom +", short: "+", icon: "+", tip: "Zoomer (touche =, pincement)" },
     { id: "park:speed", label: `Temps x${s.clockSpeed}`, short: `x${s.clockSpeed}`, icon: `x${s.clockSpeed}`, key: "T", active: s.clockSpeed > 1, tip: "Accelerer le temps (x1, x4, x16)" },
   );
+  // Au doigt, pas de molette : deux boutons pour passer d'un animal à l'autre.
+  if (pointer.touch) tools.push(
+    { id: "park:prev", label: "Animal precedent", short: "Prec.", icon: "<<", tip: "Animal precedent (la camera le suit)" },
+    { id: "park:next", label: "Animal suivant", short: "Suiv.", icon: ">>", tip: "Animal suivant (la camera le suit)" },
+  );
   if (DEV) tools.push({ id: "park:couple", label: "Couple (test)", short: "Couple", icon: "+", variant: "ghost", tip: "Test : ajouter un couple pret a nicher" });
-  const tx = timeH ? SP.margin + TIME_W + SP.gap + 1 : SP.margin;
-  toolbar(ui, th, tx, UI_TOP, ui.cols - tx - SP.margin, tools);
 
-  // --- Carte (bas droite) et recensement (droite) ---
-  const mapShown = !p.hideMap && ui.cols >= 90 && ui.rows >= 30;
+  // --- Temps et météo (haut gauche) : complet, compact ou masqué selon la place laissée par la fiche ---
+  // La barre d'outils se met à sa droite si elle y tient (en icônes) ; sinon pleine largeur au-dessus,
+  // en deux rangées s'il le faut (fenêtre étroite), et le temps passe en compact dessous.
+  const iconsW = (list: ToolItem[]) => list.reduce((n, it) => n + buttonW(it.icon ?? it.short ?? it.label, it), 0) + SP.gap * (list.length - 1);
+  const beside = ui.cols - (SP.margin + TIME_W + SP.gap + 1) - SP.margin >= iconsW(tools);
+  const cut = tools.findIndex((t) => t.id === "park:zoomout");
+  const rows = beside || ui.cols - 2 * SP.margin >= iconsW(tools) ? [tools] : [tools.slice(0, cut), tools.slice(cut)];
+  const timeY = beside ? UI_TOP : UI_TOP + 2 * rows.length;
+  const room = cardTop - 1 - timeY;
+  const full = 6 + (DEV ? 3 : 2) + 1;
+  // Le recensement ouvert prend la largeur quand le temps ne lui laisse pas sa place.
+  const timeFree = !p.roster || ui.cols - TIME_W - 2 * SP.margin - SP.gap >= ROSTER_MIN_W;
+  const timeH = !timeFree ? 0 : room >= full && beside ? full : room >= 4 ? 4 : 0;
+  if (timeH) drawTime(s, th, ui, SP.margin, timeY, TIME_W, timeH);
+  const tx = beside && timeH ? SP.margin + TIME_W + SP.gap + 1 : SP.margin;
+  rows.forEach((r, i) => toolbar(ui, th, tx, UI_TOP + 2 * i, ui.cols - tx - SP.margin, r));
+
+  // --- Carte (bas droite) et recensement (droite, ou au-dessus de la fiche) ---
+  const mapShown = !p.hideMap && mapFits;
   const mapTop = ui.rows - MINI_H - 2;
   if (mapShown) drawMini(s, th, ui, ui.cols - MINI_W - SP.margin, mapTop);
-  if (p.roster) drawRoster(s, th, ui, UI_TOP + 2, mapShown ? mapTop - 1 : ui.rows - 2, timeH ? SP.margin + TIME_W + SP.gap : 0);
+  if (p.roster) {
+    let left = timeH ? SP.margin + TIME_W + SP.gap : 0, bottom = mapShown ? mapTop - 1 : ui.rows - 2;
+    if (card && besides) left = Math.max(left, cardRight);
+    else if (card) bottom = Math.min(bottom, cardTop - 1);
+    drawRoster(s, th, ui, UI_TOP + 2 * rows.length, bottom, left);
+  }
 
   if (!p.animals.some((a) => a.task !== "dead")) {
     emptyState(ui, th, "Reserve vide", "Aucun dinosaure ici pour l'instant. Fouille des os, assemble un squelette a l'atelier, puis synthetise-le : il viendra vivre ici.",
@@ -1022,9 +1067,9 @@ function drawMini(s: GameState, th: Theme, ui: Frame, x0: number, y0: number) {
     const i = Math.floor(a.x / cw), j = Math.floor(a.y / ch);
     if (i < 0 || j < 0 || i >= iw || j >= ih) continue;
     const dead = a.task === "dead";
-    const glyph = MINI_GLYPH[a.sp] ?? SPECIES[a.sp]?.name[0] ?? "?";
+    const glyph = MINI_GLYPH[a.sp] ?? SPECIES[a.sp].name[0];
     const g = a.id === p.selected ? "@" : dead ? "%" : a.growth < 1 ? glyph.toLowerCase() : glyph;
-    const col = a.id === p.selected ? u.hi : dead ? u.dim : SPECIES[a.sp]?.behavior.diet === "carnivore" ? u.bad : u.text;
+    const col = a.id === p.selected ? u.hi : dead ? u.dim : SPECIES[a.sp].behavior.diet === "carnivore" ? u.bad : u.text;
     text(ui, x0 + 1 + i, y0 + 1 + j, g, col, null);
   }
 }
@@ -1043,7 +1088,7 @@ const TIME_W = 34;
 function drawTime(s: GameState, th: Theme, ui: Frame, x: number, y: number, W: number, H: number) {
   const u = th.ui;
   const hour = s.clock;
-  const day = daylight(hour) > 0.5;
+  const day = seenDaylight(s) > 0.5;
   panel(ui, th, x, y, W, H, "Temps et meteo");
   region("park:clock", x, y, W, 4, { tip: "Clic : accelerer le temps (T)" });
   const iw = W - 4, ix = x + 2;
@@ -1052,7 +1097,7 @@ function drawTime(s: GameState, th: Theme, ui: Frame, x: number, y: number, W: n
   text(ui, ix, y + 1, day ? "(O)" : "(C", day ? sun : moon, u.panel, u.alpha);
   text(ui, ix + 4, y + 1, clockLabel(hour), u.text, u.panel, u.alpha);
   const sp = `x${s.clockSpeed}`;
-  text(ui, ix + 10, y + 1, periodName(hour).slice(0, iw - 11 - sp.length), u.hi, u.panel, u.alpha);
+  text(ui, ix + 10, y + 1, seenPeriod(s).slice(0, iw - 11 - sp.length), u.hi, u.panel, u.alpha);
   text(ui, ix + iw - sp.length, y + 1, sp, s.clockSpeed > 1 ? u.hi : u.dim, u.panel, u.alpha);
   if (H <= 4) {
     drawWeatherRows(s, th, ui, ix, y + 2, iw, true);
@@ -1064,7 +1109,7 @@ function drawTime(s: GameState, th: Theme, ui: Frame, x: number, y: number, W: n
   text(ui, tx + track, ty, "]", u.border, u.panel, u.alpha);
   for (let i = 0; i < track; i++) {
     const h = (i / track) * 24;
-    const lit = daylight(h);
+    const lit = seenDaylight(s, h);
     put(ui, tx + i, ty, lit > 0.5 ? 61 : lit > 0 ? 45 : 46, lit > 0.5 ? u.hi : u.dim, u.panel, u.alpha);
   }
   const cur = Math.min(track - 1, Math.floor((hour / 24) * track));

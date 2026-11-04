@@ -3,7 +3,8 @@ import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { CM } from "./carnivores.mat";
 import { AM } from "./allosaurus.mat";
-import { REST_RIG, c, e, knee, lerp, rot, win, type TheroRig } from "./raptor";
+import { lerp } from "../math";
+import { c, e, REST_RIG, rot, theroLegs, win, type TheroLegSpec, type TheroRig } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -72,6 +73,13 @@ function allosaurusRig({ action, actionT: t, time }: Pose): TheroRig {
 }
 
 const HIP = { x: 0, y: -104 };
+const LEGS: TheroLegSpec = {
+  hip: HIP, farHip: 7, lift: 15, reach: 10, swing: 40, footY: -5,
+  mx: 15, my: 28, metaLift: 0.3,
+  sit: { dx: 32, far: 10, y: -5, mx: 34, my: 5 },
+  lie: { dx: 86, far: -12, y: -7, nearDy: 6, mx: 28, my: 4 },
+  kneeDy: 6, thigh: 44, shin: 44,
+};
 const NECK = { x: 58, y: -116 };
 const NAPE = { x: 90, y: -144 };
 export const ALLO_EYE = { x: 112, y: -152 };
@@ -85,19 +93,10 @@ export function allosaurusModel(pose: Pose): Prim[] {
   const P: Prim[] = [];
 
   // --- Pattes longues et puissantes (cinématique inverse) ---
-  for (const L of [{ phase: 0, far: true }, { phase: Math.PI, far: false }]) {
-    const ph = walk + L.phase;
-    const sw = Math.sin(ph) * moving * r.stride;
-    const lift = Math.max(0, Math.cos(ph)) * moving * 15 * r.stride;
+  for (const L of theroLegs(pose, r, bx, by, LEGS)) {
     const m = L.far ? AM.Far : AM.Skin;
     const z = L.far ? -60 : 40;
-    const hx = HIP.x + (L.far ? 7 : 0) + bx, hy = HIP.y + by;
-    let fx = hx + 10 + sw * 40 + (L.far ? -r.stance : r.stance), fy = -5 - lift;
-    let mx = 15, my = 28 - lift * 0.3;
-    if (r.legs === "sit") { fx = hx + 32 + (L.far ? 10 : 0); fy = -5; mx = 34; my = 5; }
-    else if (r.legs === "lie") { fx = hx + 86 + (L.far ? -12 : 0); fy = -7 - (L.far ? 0 : 6); mx = 28; my = 4; }
-    const ax = fx - mx, ay = fy - my;
-    const [kx, ky] = knee(hx, hy + 6, ax, ay, 44, 44);
+    const { hx, hy, fx, fy, ax, ay, kx, ky } = L;
     // Cuisse, jambe, métatarse, trois orteils à griffes.
     P.push(e(hx + 2, hy + 2, 23, 34, m, z - 6, 18));
     P.push(c(hx, hy + 8, kx, ky, 19, 11, m, z, 15));

@@ -6,9 +6,11 @@ import { discovered, SPECIES } from "../species";
 import type { Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
 import { uiCellAt } from "../render/metrics";
-import { button, buttonW, fill, hitAt, over, panel, put, region, text, wrap } from "../ui/kit";
+import { button, buttonW, clip, emptyState, fill, hitAt, over, panel, put, region, text, wrap } from "../ui/kit";
 import { toast } from "../ui/toast";
-import { ageMid, ageRange, box, du, fitSprite, known, knownList, le, lerp } from "./journal-common";
+import { du, le } from "../fr";
+import { mixRgb } from "../math";
+import { ageMid, ageRange, box, fitSprite, known, knownList } from "./journal-common";
 import { UI_TOP } from "./types";
 
 /**
@@ -65,7 +67,7 @@ function epochOf(ma: number): [number, number] {
 }
 const epochName = (ei: number, si: number) => ei === ERAS.length - 1 ? "Cénozoïque (après les dinosaures)" : `${ERAS[ei].name} ${ERAS[ei].subs[si][0]}`;
 
-const eraBg = (th: Theme, c: RGB, k = 0.55): RGB => lerp(th.ui.panel, c, th.style === "dark" ? k * 0.75 : k);
+const eraBg = (th: Theme, c: RGB, k = 0.55): RGB => mixRgb(th.ui.panel, c, th.style === "dark" ? k * 0.75 : k);
 
 // ---------------------------------------------------------------------------
 // Mini-jeu
@@ -171,9 +173,16 @@ export function timelinePage(s: GameState, th: Theme, world: Frame, ui: Frame) {
   const x0 = 3, W = ui.cols - 6;
   const X = (ma: number) => Math.round(maToX(ma, x0, W));
   const top = UI_TOP;
+  // ponytail: frise trop serrée sous 70 colonnes (téléphone en portrait) : on demande de tourner l'écran.
+  if (ui.cols < 70) {
+    emptyState(ui, th, "Frise du temps", "La frise a besoin de largeur : tourne ton appareil en paysage (ou agrandis la fenetre).");
+    return;
+  }
+  // Écran bas (téléphone en paysage) : frise resserrée ; pendant le jeu, sans les vignettes.
+  const short = ui.rows < 34, bare = short && t.game;
 
   text(ui, 2, top, "Frise du temps : 252 millions d'années d'histoire", u.hi);
-  text(ui, 2, top + 1, t.game ? "Glisse l'animal sur la bonne période de la frise (ou clique la période)." : "Chaque espèce découverte est posée à son âge. Clique une vignette pour ouvrir sa fiche.", u.dim);
+  if (!short || bare) text(ui, 2, top + 1, clip(t.game ? "Glisse l'animal sur la bonne période de la frise (ou clique la période)." : "Chaque espèce découverte est posée à son âge. Clique une vignette pour ouvrir sa fiche.", ui.cols - 4), u.dim);
   const gl = t.game ? "Quitter le jeu" : "Jeu : place-le sur la frise";
   const stars = (p.timeline ?? []).length;
   const bw = button(ui, th, "journal:tl:game", ui.cols - buttonW(gl) - 2, top, gl, { toggle: true, active: t.game, tip: t.game ? "Revenir a la frise" : "Petit jeu : retrouver l'epoque de chaque espece" });
@@ -181,20 +190,20 @@ export function timelinePage(s: GameState, th: Theme, world: Frame, ui: Frame) {
   text(ui, ui.cols - bw - st.length - 5, top, st, u.text);
 
   // --- Rangées de vignettes (au-dessus et au-dessous de la frise) ---
-  const iconH = 4;
+  const iconH = short ? 3 : 4;
   // Lignes de routage des traits de rappel (plus si l'écran est haut).
-  const nRoute = Math.max(3, Math.min(6, Math.floor((ui.rows - 36) / 2) + 2));
-  const yA = top + 3; // vignettes du haut : yA..yA+3, nom en yA+4
-  const yBand = yA + iconH + nRoute + 3; // ère
+  const nRoute = short ? 1 : Math.max(3, Math.min(6, Math.floor((ui.rows - 36) / 2) + 2));
+  const yA = top + (short ? 2 : 3); // vignettes du haut : yA..yA+3, nom en yA+4
+  const yBand = bare ? top + 3 : yA + iconH + nRoute + 3; // ère
   const ySub = yBand + 1, yAxis = yBand + 2, yLab = yBand + 3;
-  const yB = yLab + nRoute + 3; // nom en yB, vignettes yB+1..yB+4
+  const yB = bare ? yLab : yLab + nRoute + 3; // nom en yB, vignettes yB+1..yB+4
   const shown = [...new Set([...discovered(p), ...knownList(s)])]
-    .filter((sp) => !(t.game && sp.id === t.target))
+    .filter((sp) => !(t.game && sp.id === t.target) && !bare)
     .sort((a, b) => ageMid(b) - ageMid(a));
   const rows: Species[][] = [[], []];
   shown.forEach((sp, i) => rows[i % 2].push(sp));
   const perRow = Math.max(1, rows[0].length);
-  const iconW = Math.max(8, Math.min(16, Math.floor(W / perRow) - 1));
+  const iconW = Math.max(6, Math.min(16, Math.floor(W / perRow) - 1));
   let hovered: Species | undefined;
   rows.forEach((row, ri) => {
     const pos = spread(row.map((sp) => X(ageMid(sp))), iconW, 1, x0, x0 + W);
@@ -249,7 +258,7 @@ export function timelinePage(s: GameState, th: Theme, world: Frame, ui: Frame) {
   text(ui, x0 + W - 14, yLab + 1, "humains (auj.)", u.hi);
 
   // --- Bas de page : encadrés pédagogiques, ou le mini-jeu ---
-  const yC = yB + iconH + 3, hC = ui.rows - 2 - yC;
+  const yC = bare ? yLab + 3 : yB + iconH + 3, hC = ui.rows - 2 - yC;
   if (hC < 3) return;
   if (t.game) gamePanel(s, th, world, ui, x0, yC, W, hC, dropHot);
   else callouts(s, th, ui, x0, yC, W, hC);

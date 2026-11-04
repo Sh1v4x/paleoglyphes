@@ -11,12 +11,13 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
-import type { Input } from "../game/input";
+import { pointer, type Input } from "../game/input";
 import { createFrame, type Frame } from "../game/render/frame";
 import { metrics } from "../game/render/metrics";
 import { composeGame, setMode, updateGame } from "../game/scenes";
 import { HEADER_ROWS } from "../game/scenes/types";
-import { settings, type UiScale } from "../game/settings";
+import { settings, uiScaleFor, type UiScale } from "../game/settings";
+import { factKey } from "../game/progress";
 import { SPECIES_LIST } from "../game/species";
 import { createState, type GameState } from "../game/state";
 import { album } from "../game/features/photo-store";
@@ -27,13 +28,18 @@ import { toast } from "../game/ui/toast";
 const [dir = "/tmp/ui-snap", only = "", sizeOnly = ""] = process.argv.slice(2);
 mkdirSync(dir, { recursive: true });
 
-const SIZES: { name: string; w: number; h: number; k: UiScale }[] = [
+// `touch` : écran tactile (téléphone, tablette), interface au doigt.
+const SIZES: { name: string; w: number; h: number; k: UiScale; touch?: boolean }[] = [
   { name: "1024x640", w: 1024, h: 640, k: 1 },
   { name: "1280x720", w: 1280, h: 720, k: 1 },
   { name: "1440x900", w: 1440, h: 900, k: 1 },
   { name: "1920x1080", w: 1920, h: 1080, k: 1 },
   { name: "1920x1080@1.5", w: 1920, h: 1080, k: 1.5 },
   { name: "1280x720@1.25", w: 1280, h: 720, k: 1.25 },
+  { name: "390x844", w: 390, h: 844, k: 1, touch: true },
+  { name: "844x390", w: 844, h: 390, k: 1, touch: true },
+  { name: "768x1024@1.25", w: 768, h: 1024, k: 1.25, touch: true },
+  { name: "1024x768@1.5", w: 1024, h: 768, k: 1.5, touch: true },
 ];
 
 const blank = (): Input => ({ dx: 0, dy: 0, pressed: [], ui: [], worldClicks: [], mouse: { x: -1, y: -1, inside: false, down: false, clicks: [], presses: [], releases: [], dragX: 0, dragY: 0, wheel: 0 } });
@@ -45,7 +51,7 @@ for (const spec of SPECIES_LIST) {
   s.progress.bones[spec.id] = spec.bones.map((b) => b.id);
   if (!s.progress.assembled.includes(spec.id)) s.progress.assembled.push(spec.id);
   s.progress.population[spec.id] = 2;
-  for (const f of spec.facts.slice(0, 3)) s.progress.facts.push(`${spec.id}:${f.id}`);
+  for (const f of spec.facts.slice(0, 3)) s.progress.facts.push(factKey(spec.id, f.id));
 }
 s.progress.extras = ["fauna:dragonfly"];
 s.progress.hints = 2;
@@ -82,6 +88,7 @@ const firstAnimal = () => s.park.animals.find((a) => a.task !== "dead")!;
 const SCREENS: { name: string; setup: () => void; post?: () => void }[] = [
   { name: "park", setup: () => setMode(s, "park") },
   { name: "park-sel", setup: () => { setMode(s, "park"); s.park.selected = firstAnimal().id; s.park.roster = true; toast(s, "Nouvelle entree au carnet !", "Le Tricératops mange : un fait de plus."); } },
+  { name: "park-census", setup: () => { setMode(s, "park"); s.park.selected = firstAnimal().id; s.park.roster = true; s.park.census = { t: [], n: {}, tab: "chart", view: "species" }; step(s, 1); } },
   { name: "park-log", setup: () => { setMode(s, "park"); s.docu.listOpen = true; } },
   { name: "park-docu", setup: () => { setMode(s, "park"); s.docu.on = true; s.docu.since = s.time - 10; } },
   { name: "park-photo", setup: () => { setMode(s, "park"); s.photo.aiming = true; } },
@@ -163,7 +170,7 @@ const fmt = (r: UiRect) => `${r.kind}:${r.id || "?"}@${r.x},${r.y} ${r.w}x${r.h}
 
 function check(ui: Frame, rects: UiRect[], clipped: typeof uiLog.clipped, header: boolean): string[] {
   const out: string[] = [];
-  const fixed = rects.filter((r) => r.kind !== "overlay" && !r.id.startsWith("tab:") && !["menu:open", "help:open"].includes(r.id));
+  const fixed = rects.filter((r) => r.kind !== "overlay" && !r.id.startsWith("tab:") && !["menu:open", "help:open", "nav:back"].includes(r.id));
   const panels = fixed.filter((r) => r.kind === "panel"), buttons = fixed.filter((r) => r.kind === "button");
   for (let i = 0; i < panels.length; i++) for (let j = i + 1; j < panels.length; j++) if (inter(panels[i], panels[j])) out.push(`panneaux qui se chevauchent : ${fmt(panels[i])} / ${fmt(panels[j])}`);
   for (let i = 0; i < buttons.length; i++) for (let j = i + 1; j < buttons.length; j++) if (inter(buttons[i], buttons[j]) && buttons[i].id !== buttons[j].id) out.push(`boutons qui se chevauchent : ${fmt(buttons[i])} / ${fmt(buttons[j])}`);
@@ -171,7 +178,7 @@ function check(ui: Frame, rects: UiRect[], clipped: typeof uiLog.clipped, header
   for (const r of rects) {
     if (r.x < 0 || r.y < 0 || r.x + r.w > ui.cols || r.y + r.h > ui.rows) out.push(`hors de l'écran : ${fmt(r)}`);
     if (r.kind === "overlay") continue;
-    if (header && r.y < HEADER_ROWS && !r.id.startsWith("tab:") && !["menu:open", "help:open"].includes(r.id)) out.push(`sur l'en-tête : ${fmt(r)}`);
+    if (header && r.y < HEADER_ROWS && !r.id.startsWith("tab:") && !["menu:open", "help:open", "nav:back"].includes(r.id)) out.push(`sur l'en-tête : ${fmt(r)}`);
     if (header && r.y + r.h > ui.rows - 1) out.push(`sur la ligne d'aide : ${fmt(r)}`);
   }
   for (const c of clipped) out.push(`texte coupé (${c.x},${c.y}) : "${c.t.slice(0, 50)}"`);
@@ -183,7 +190,12 @@ uiLog.enabled = true;
 let problems = 0;
 for (const size of SIZES) {
   if (sizeOnly && !size.name.includes(sizeOnly)) continue;
+  // Écran tactile : la taille d'interface « auto » doit retomber sur celle de la liste.
+  settings.uiScale = "auto";
+  if (size.touch && uiScaleFor(size.w, size.h, true) !== size.k) { problems++; console.log(`!! ${size.name} : taille auto ${uiScaleFor(size.w, size.h, true)} au lieu de ${size.k}`); }
   settings.uiScale = size.k;
+  pointer.touch = !!size.touch;
+  s.dig.site = null; // le site se taille sur la fenêtre (petit écran : plus petit)
   const uw = 8 * size.k, uh = 15 * size.k;
   const cols = Math.ceil(size.w / 4), rows = Math.ceil(size.h / 7);
   const ucols = Math.floor(size.w / uw), urows = Math.floor(size.h / uh);

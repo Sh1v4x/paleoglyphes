@@ -2,7 +2,7 @@ import { BIOME } from "../world/biomes";
 import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
-import { c, e, squash, strike, turn } from "./ankylo";
+import { c, e, rot, squash, strike } from "./kit";
 import { H } from "./herbivores.mat";
 import type { Pose, Species } from "./types";
 
@@ -171,16 +171,16 @@ function edmontoParts(L: EdmontoLook, walk: number, moving: number): Prim[] {
   T.push(e(156, -150, 7, 4, H.EComb, 26, 3));
   if (L.sac > 0.05) T.push(e(178, -132 - L.sac * 3, 10 + L.sac * 6, 5 + L.sac * 5, H.EComb, 30, 6));
   if (L.mouth > 0.05) T.push(e(176, -114 + L.mouth * 3, 18, 2 + L.mouth * 4, M.Mouth, 28, 1));
-  T.push(...turn([c(140, -124, 192, -112, 8, 4, H.ESkin, 24, 6), e(196, -110, 10, 3.5, H.EBill, 28, 3)], 138, -126, L.mouth * 0.3));
+  T.push(...rot([c(140, -124, 192, -112, 8, 4, H.ESkin, 24, 6), e(196, -110, 10, 3.5, H.EBill, 28, 3)], 138, -126, L.mouth * 0.3));
   // Bec de canard : large, plat, débordant.
   T.push(e(198, -117, 16, 6, H.EBill, 26, 5));
   T.push(e(150, -126, 10, 8, H.ESkin, 18, 6));
   if (L.eye) T.push(e(150, -138, 3.5, 3.5, M.Eye, 50, 1));
-  B.push(...turn(T, 100, -118, L.headA, 0, L.headDy));
+  B.push(...rot(T, 100, -118, L.headA, 0, L.headDy));
 
   // Bascule autour de la hanche, puis respiration et appuis.
-  P.push(...turn(Q, HIP_X, HIP_Y, -L.pitch * 0.4, 0, bob));
-  P.push(...turn(B, HIP_X, HIP_Y, L.pitch, 0, bob));
+  P.push(...rot(Q, HIP_X, HIP_Y, -L.pitch * 0.4, 0, bob));
+  P.push(...rot(B, HIP_X, HIP_Y, L.pitch, 0, bob));
   return P;
 }
 

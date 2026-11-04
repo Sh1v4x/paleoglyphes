@@ -1,4 +1,5 @@
 import { PX_PER_M } from "../config";
+import { mixRgb } from "../math";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { M } from "../render/materials";
@@ -12,11 +13,8 @@ import { put, text } from "../ui/kit";
 
 /**
  * Outils partagés par les pages du carnet (espèces, frise du temps, quiz, tailles) :
- * cache de rendus de studio, papier réglé, cadres, formats de nombres, espèces connues.
+ * cache de rendus de studio, papier réglé, cadres, espèces connues.
  */
-
-export const factKey = (sp: SpeciesId, id: string) => `${sp}:${id}`;
-export const hasF = (s: GameState, sp: SpeciesId, id: string) => s.progress.facts.includes(factKey(sp, id));
 
 /** Une espèce est connue (nom, fiche) une fois son squelette assemblé : avant, c'est une espèce mystère. */
 export function known(s: GameState, sp: SpeciesId): boolean {
@@ -40,6 +38,8 @@ export const GROUP: Record<SpeciesId, string> = {
   quetzal: "ptérosaure (reptile volant)", pteranodon: "ptérosaure (reptile volant)", nyctosaurus: "ptérosaure (reptile volant)",
   mosa: "reptile marin (cousin des lézards)", archelon: "tortue marine géante", xiphactinus: "poisson géant",
   nanuq: "dinosaure", pachyrhino: "dinosaure", velociraptor: "dinosaure", protoceratops: "dinosaure", citipati: "dinosaure",
+  ornithomimus: "dinosaure", troodon: "dinosaure", shuvuuia: "dinosaure", pinacosaurus: "dinosaure", therizino: "dinosaure",
+  deinosuchus: "crocodilien géant (pas un dinosaure)", elasmosaurus: "plésiosaure (reptile marin)",
 };
 export const isDino = (id: SpeciesId) => GROUP[id] === "dinosaure";
 
@@ -70,14 +70,12 @@ export function human(): Prim[] {
   ].map((p) => scalePrim(p, H));
 }
 
-export const lerp = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-
 /** Fond « papier » réglé du carnet sur le calque monde. */
 export function paper(th: Theme, world: Frame) {
   const u = th.ui;
-  const bg = th.style === "dark" ? lerp(u.panel, u.panelAlt, 0.6) : lerp(u.panel, u.panelAlt, 0.5);
+  const bg = th.style === "dark" ? mixRgb(u.panel, u.panelAlt, 0.6) : mixRgb(u.panel, u.panelAlt, 0.5);
   clearWorld(world, bg);
-  const line = lerp(bg, u.border, th.style === "dark" ? 0.35 : 0.18);
+  const line = mixRgb(bg, u.border, th.style === "dark" ? 0.35 : 0.18);
   for (let y = 5; y < world.rows; y += 9) {
     for (let x = 0; x < world.cols; x++) {
       const i = y * world.cols + x;
@@ -130,22 +128,6 @@ export function groundLine(world: Frame, th: Theme, x0: number, x1: number, y: n
   }
 }
 
-export function fmtNum(v: number, digits = 1): string {
-  const f = 10 ** digits;
-  return String(Math.round(v * f) / f).replace(".", ",");
-}
-export function fmtM(m: number) { return `${fmtNum(m)} m`; }
-export function fmtKg(kg: number) { return kg >= 1000 ? `${fmtNum(kg / 1000)} t` : `${Math.round(kg)} kg`; }
-
-/** « le Tricératops », « l'Ankylosaure ». */
-export function le(name: string): string {
-  return /^[aeiouyhAEIOUYHÉÈéè]/.test(name) ? `l'${name}` : `le ${name}`;
-}
-/** « du Tricératops », « de l'Ankylosaure ». */
-export function du(name: string): string {
-  return /^[aeiouyhAEIOUYHÉÈéè]/.test(name) ? `de l'${name}` : `du ${name}`;
-}
-
 /** Âge d'une espèce (Ma) lu dans sa période : « Crétacé supérieur, 68-66 Ma » -> [68, 66]. */
 export function ageRange(sp: Species): [number, number] {
   const m = /(\d+(?:[.,]\d+)?)\s*(?:-\s*(\d+(?:[.,]\d+)?))?\s*Ma/.exec(sp.period);
@@ -154,3 +136,23 @@ export function ageRange(sp: Species): [number, number] {
   return [Math.max(a, b), Math.min(a, b)];
 }
 export const ageMid = (sp: Species) => { const [a, b] = ageRange(sp); return (a + b) / 2; };
+
+export interface Line { t: string; c: RGB; tag?: string }
+
+/** Écrit une liste de lignes avec défilement (molette, flèches haut/bas). */
+export function drawLines(ui: Frame, th: Theme, j: { scroll: number }, lines: Line[], x: number, y: number, h: number, w: number) {
+  const u = th.ui;
+  const max = Math.max(0, lines.length - h);
+  j.scroll = Math.max(0, Math.min(max, j.scroll));
+  const off = j.scroll;
+  for (let i = 0; i < h && i + off < lines.length; i++) {
+    const l = lines[i + off];
+    const n = text(ui, x, y + i, l.t, l.c, u.panel, u.alpha);
+    if (l.tag) text(ui, x + n + 1, y + i, l.tag, u.panel, u.hi, 1);
+  }
+  if (max > 0) {
+    // Ascenseur.
+    const pos = Math.round((off / max) * (h - 1));
+    for (let i = 0; i < h; i++) put(ui, x + w + 1, y + i, i === pos ? 35 : 58, i === pos ? u.hi : u.dim, u.panel, u.alpha);
+  }
+}

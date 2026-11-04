@@ -1,21 +1,34 @@
 /**
  * Réglages du joueur (menu Échap > Réglages), gardés dans le navigateur.
- * - `uiScale` : taille du calque d'interface (cellules 8x15 px multipliées), appliquée par le Renderer.
+ * - `uiScale` : taille du calque d'interface (cellules 8x15 px multipliées), appliquée par le Renderer ;
+ *   « auto » (défaut) : voir `uiScaleFor`.
  * - `reduceMotion` : coupe secousses, éclairs, flashs et clignotements rapides.
  * - `showFps` : compteur d'images dans l'en-tête (outil de développement).
+ * - `volume`, `mute` : volume du son (une des valeurs de VOLUMES) et coupure (touche B).
  * Sans stockage (navigation privée, scripts Node) : valeurs par défaut, sans erreur.
  */
 
+import { UI_CELL_H, UI_CELL_W } from "./config";
+import { STORAGE_KEYS } from "./storage-keys";
+
 export const UI_SCALES = [1, 1.25, 1.5] as const;
 export type UiScale = (typeof UI_SCALES)[number];
+export const VOLUMES = [0.25, 0.5, 0.75, 1] as const;
+
+/** Grille d'interface minimale (cellules) pour grossir l'interface en mode « auto ». */
+const AUTO_MIN = { cols: 72, rows: 34 };
 
 export interface Settings {
-  uiScale: UiScale;
+  uiScale: UiScale | "auto";
   reduceMotion: boolean;
   showFps: boolean;
+  volume: number;
+  mute: boolean;
 }
 
-const KEY = "paleoglyphes:settings";
+export const isUiScale = (v: unknown): v is UiScale => (UI_SCALES as readonly unknown[]).includes(v);
+const isVolume = (v: unknown): v is number => (VOLUMES as readonly unknown[]).includes(v);
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 
 function defaults(): Settings {
   let reduce = false;
@@ -24,19 +37,22 @@ function defaults(): Settings {
   } catch {
     // Pas de navigateur : on garde les animations.
   }
-  return { uiScale: 1, reduceMotion: reduce, showFps: false };
+  return { uiScale: "auto", reduceMotion: reduce, showFps: false, volume: 0.5, mute: false };
 }
 
 function load(): Settings {
   const d = defaults();
   try {
-    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(KEY) : null;
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEYS.settings) : null;
     if (!raw) return d;
-    const v = JSON.parse(raw) as Partial<Settings>;
+    const v: unknown = JSON.parse(raw);
+    if (!isRecord(v)) return d;
     return {
-      uiScale: UI_SCALES.includes(v.uiScale as UiScale) ? (v.uiScale as UiScale) : d.uiScale,
+      uiScale: v.uiScale === "auto" || isUiScale(v.uiScale) ? v.uiScale : d.uiScale,
       reduceMotion: typeof v.reduceMotion === "boolean" ? v.reduceMotion : d.reduceMotion,
       showFps: typeof v.showFps === "boolean" ? v.showFps : d.showFps,
+      volume: isVolume(v.volume) ? v.volume : d.volume,
+      mute: typeof v.mute === "boolean" ? v.mute : d.mute,
     };
   } catch {
     return d;
@@ -48,10 +64,25 @@ export const settings: Settings = load();
 
 export function saveSettings() {
   try {
-    localStorage.setItem(KEY, JSON.stringify(settings));
+    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
   } catch {
     // Sans stockage : le réglage vaut pour la session.
   }
+}
+
+/**
+ * Échelle d'interface appliquée pour une fenêtre de `w` x `h` px CSS. En « auto » : à la souris, 100 % ;
+ * sur écran tactile (tablette), la plus grande qui garde une grille d'au moins AUTO_MIN cellules, pour des
+ * textes et des boutons à la taille du doigt (un téléphone garde 100 % : la place y manque déjà).
+ */
+export function uiScaleFor(w: number, h: number, touch: boolean): UiScale {
+  if (settings.uiScale !== "auto") return settings.uiScale;
+  if (!touch) return 1;
+  for (let i = UI_SCALES.length - 1; i > 0; i--) {
+    const k = UI_SCALES[i];
+    if (w / (UI_CELL_W * k) >= AUTO_MIN.cols && h / (UI_CELL_H * k) >= AUTO_MIN.rows) return k;
+  }
+  return 1;
 }
 
 /** Animations réduites ? (raccourci lisible pour les effets). */

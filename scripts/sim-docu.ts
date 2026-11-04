@@ -50,7 +50,7 @@ const t0 = performance.now();
 let worst = 0;
 for (let k = 0; k < steps; k++) {
   s.time += dt;
-  s.clock = advanceClock(s.clock, dt, s.clockSpeed);
+  advanceClock(s, dt);
   // Seconde moitié : documentaire allumé (touche V).
   input.pressed = k === Math.floor(steps / 2) ? ["KeyV"] : [];
   if (input.pressed.length) console.log("=== Documentaire allumé ===");

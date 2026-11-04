@@ -4,7 +4,8 @@ import { PX_PER_M } from "../config";
 import { BIOME } from "../world/biomes";
 import { CM } from "./carnivores.mat";
 import { NM } from "./nanuq.mat";
-import { REST_RIG, c, e, knee, lerp, rot, win, type TheroRig } from "./raptor";
+import { lerp } from "../math";
+import { c, e, REST_RIG, rot, theroLegs, win, type TheroLegSpec, type TheroRig } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -73,6 +74,13 @@ function nanuqRig({ action, actionT: t, time }: Pose): TheroRig {
 }
 
 const HIP = { x: 0, y: -100 };
+const LEGS: TheroLegSpec = {
+  hip: HIP, farHip: 6, lift: 16, reach: 10, swing: 44, footY: -5,
+  mx: 14, my: 30, metaLift: 0.3,
+  sit: { dx: 30, far: 8, y: -5, mx: 30, my: 5 },
+  lie: { dx: 78, far: -12, y: -6, nearDy: 5, mx: 26, my: 4 },
+  kneeDy: 6, thigh: 40, shin: 40,
+};
 const NECK = { x: 52, y: -112 };
 const NAPE = { x: 80, y: -134 };
 export const NANUQ_EYE = { x: 110, y: -142 };
@@ -95,19 +103,10 @@ export function nanuqModel(pose: Pose): Prim[] {
   const P: Prim[] = [];
 
   // --- Longues pattes de coureur (cinématique inverse), métatarse allongé ---
-  for (const L of [{ phase: 0, far: true }, { phase: Math.PI, far: false }]) {
-    const ph = walk + L.phase;
-    const sw = Math.sin(ph) * moving * r.stride;
-    const lift = Math.max(0, Math.cos(ph)) * moving * 16 * r.stride;
+  for (const L of theroLegs(pose, r, bx, by, LEGS)) {
     const m = L.far ? NM.Far : NM.Coat;
     const z = L.far ? -60 : 38;
-    const hx = HIP.x + (L.far ? 6 : 0) + bx, hy = HIP.y + by;
-    let fx = hx + 10 + sw * 44 + (L.far ? -r.stance : r.stance), fy = -5 - lift;
-    let mx = 14, my = 30 - lift * 0.3;
-    if (r.legs === "sit") { fx = hx + 30 + (L.far ? 8 : 0); fy = -5; mx = 30; my = 5; }
-    else if (r.legs === "lie") { fx = hx + 78 + (L.far ? -12 : 0); fy = -6 - (L.far ? 0 : 5); mx = 26; my = 4; }
-    const ax = fx - mx, ay = fy - my;
-    const [kx, ky] = knee(hx, hy + 6, ax, ay, 40, 40);
+    const { hx, hy, fx, fy, ax, ay, kx, ky } = L;
     // Cuisse musclée mais plus fine que celle du T. rex, jambe, métatarse, trois orteils griffus.
     P.push(e(hx + 2, hy + 2, 20, 30, m, z - 6, 18));
     P.push(c(hx, hy + 8, kx, ky, 17, 10, m, z, 14));

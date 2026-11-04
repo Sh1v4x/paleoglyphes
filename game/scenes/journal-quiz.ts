@@ -1,13 +1,15 @@
 import type { Input } from "../input";
 import type { Theme } from "../palette";
 import type { Frame } from "../render/frame";
-import { saveProgress } from "../progress";
+import { fmtKg, fmtM } from "../format";
+import { du, le } from "../fr";
+import { hasFact, saveProgress } from "../progress";
 import { SPECIES } from "../species";
 import type { Fact, Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
-import { ascii, button, text, wrap } from "../ui/kit";
+import { ascii, button, clip, text, wrap } from "../ui/kit";
 import { toast } from "../ui/toast";
-import { box, DEFENSE, du, fitSprite, fmtKg, fmtM, GROUP, hasF, isDino, knownList, le } from "./journal-common";
+import { box, DEFENSE, fitSprite, GROUP, isDino, knownList } from "./journal-common";
 import { UI_TOP } from "./types";
 
 /**
@@ -175,11 +177,11 @@ const GENS: [Gen, number][] = [
 
 function pools(s: GameState): Pools {
   const K = knownList(s);
-  const F = K.flatMap((sp) => sp.facts.filter((f) => hasF(s, sp.id, f.id)).map((f) => ({ sp, f })));
+  const F = K.flatMap((sp) => sp.facts.filter((f) => hasFact(s.progress, sp.id, f.id)).map((f) => ({ sp, f })));
   return { K, F };
 }
 
-export const quizReady = (s: GameState) => pools(s).F.length >= MIN_FACTS;
+const quizReady = (s: GameState) => pools(s).F.length >= MIN_FACTS;
 
 function nextQuestion(s: GameState) {
   const qz = s.journal.quiz;
@@ -236,10 +238,12 @@ export function quizPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
   const W = Math.min(110, ui.cols - 6), x = Math.floor((ui.cols - W) / 2);
   const st = p.quiz ?? { correct: 0, answered: 0, bestStreak: 0 };
   text(ui, x, top, "Quiz du carnet", u.hi);
-  const info = `Score ${qz.score}/${qz.asked}   Série ${qz.streak}   Record ${st.bestStreak}   Indices de fouille : ${p.hints ?? 0}`;
+  // Fenêtre étroite : score résumé, pas d'illustration à côté des réponses.
+  const thin = W < 80;
+  const info = thin ? `Score ${qz.score}/${qz.asked}  Indices ${p.hints ?? 0}` : `Score ${qz.score}/${qz.asked}   Série ${qz.streak}   Record ${st.bestStreak}   Indices de fouille : ${p.hints ?? 0}`;
   text(ui, x + W - ascii(info).length, top, info, u.text);
   const left = HINT_EVERY - (st.correct % HINT_EVERY);
-  text(ui, x, top + 1, `Toutes les ${HINT_EVERY} bonnes réponses : un indice de fouille (encore ${left}). Il révèle les fossiles cachés d'un site.`, u.dim);
+  text(ui, x, top + 1, clip(`Toutes les ${HINT_EVERY} bonnes réponses : un indice de fouille (encore ${left}). Il révèle les fossiles cachés d'un site.`, W), u.dim);
 
   const H = ui.rows - 3 - (top + 3);
   // Cadre sans fond : les illustrations du calque monde restent visibles.
@@ -259,18 +263,18 @@ export function quizPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
   }
   const tw = W - 8;
   let yy = top + 5;
-  const ill = 22; // place pour l'illustration à droite
-  const qw = q.pre.length || qz.picked >= 0 ? tw - ill - 2 : tw;
+  const ill = thin ? 0 : 22; // place pour l'illustration à droite
+  const qw = !thin && (q.pre.length || qz.picked >= 0) ? tw - ill - 2 : tw;
   for (const l of wrap(q.prompt, qw)) text(ui, x + 4, yy++, l, u.hi, u.panel, u.alpha);
   if (q.quote) { yy++; for (const l of wrap(`« ${q.quote} »`, qw)) text(ui, x + 4, yy++, l, u.text, u.panel, u.alpha); }
   yy++;
   const done = qz.picked >= 0;
-  const bw = Math.min(qw - 20, Math.max(30, ...q.options.map((o) => ascii(o).length + 10)));
+  const bw = Math.min(thin ? qw : qw - 20, Math.max(30, ...q.options.map((o) => ascii(o).length + 10)));
   q.options.forEach((o, i) => {
     const lab = `${String.fromCharCode(65 + i)})  ${o}`;
     button(ui, th, `journal:q:opt:${i}`, x + 4, yy, lab, { w: bw, disabled: done && i !== q.answer, active: done && i === q.answer });
-    if (done && i === q.answer) text(ui, x + 6 + bw, yy, "<- [OK] bonne réponse", u.ok, u.panel, u.alpha);
-    else if (done && i === qz.picked) text(ui, x + 6 + bw, yy, "<- [X] ta réponse", u.bad, u.panel, u.alpha);
+    if (done && !thin && i === q.answer) text(ui, x + 6 + bw, yy, "<- [OK] bonne réponse", u.ok, u.panel, u.alpha);
+    else if (done && !thin && i === qz.picked) text(ui, x + 6 + bw, yy, "<- [X] ta réponse", u.bad, u.panel, u.alpha);
     yy += 2;
   });
   if (done) {
@@ -280,11 +284,10 @@ export function quizPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
     button(ui, th, "journal:q:next", x + 4, Math.min(yy + 1, top + 3 + H - 2), "Question suivante", { key: "Entree", variant: "primary" });
   }
   // Illustrations (calque monde).
-  const show = [...q.pre, ...(done ? q.post : [])];
+  const show = thin ? [] : [...q.pre, ...(done ? q.post : [])];
   const ih = Math.max(4, Math.min(12, Math.floor((H - 4) / Math.max(1, show.length)) - 1));
   show.forEach((id, i) => {
     const sp = SPECIES[id];
-    if (!sp) return;
     const ix = x + W - ill - 3, iy = top + 5 + i * (ih + 1);
     fitSprite(world, th, `quiz:${id}`, sp.model, ix, iy, ill, ih - 1, s.time, 1.2, undefined, 0.05);
     // Pas de nom sous l'image si la question porte justement sur le nom.

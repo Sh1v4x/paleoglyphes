@@ -59,8 +59,11 @@ function bloomPoint(s: GameState, a: Animal): boolean {
   return true;
 }
 
-/** Proies des grands nageurs : poissons et tortues du large (rarement attrapés adultes). */
-const SEA_PREY: ReadonlySet<SpeciesId> = new Set<SpeciesId>(["xiphactinus", "archelon"]);
+/**
+ * Proies des grands nageurs : poissons, tortues et plésiosaures du large (rarement attrapés adultes ;
+ * on a trouvé des restes de plésiosaures dans l'estomac de mosasaures).
+ */
+const SEA_PREY: ReadonlySet<SpeciesId> = new Set<SpeciesId>(["xiphactinus", "archelon", "elasmosaurus"]);
 
 /** Le mosasaure affamé repère un Xiphactinus ou une Archelon au large, à portée de vue. */
 function seaPrey(s: GameState, a: Animal, spec: Species): Animal | undefined {
@@ -112,7 +115,7 @@ export function liveSea(k: WildKit, s: GameState, a: Animal, spec: Species, dt: 
         if (prey) {
           // Un adulte s'échappe presque toujours ; un jeune beaucoup moins.
           const p = prey.growth < 0.999 ? 0.45 : 0.1;
-          if (prey.task !== "dead" && Math.hypot(prey.x - a.x, prey.y - a.y) < (SPECIES[a.sp]?.halfLen ?? 100) && k.count(prey.sp) > 1 && Math.random() < p) {
+          if (prey.task !== "dead" && Math.hypot(prey.x - a.x, prey.y - a.y) < SPECIES[a.sp].halfLen && k.count(prey.sp) > 1 && Math.random() < p) {
             k.kill(s, a, prey);
             prey.meat = Math.min(prey.meat, 0.15); // avalé presque en entier
             specialStats.seaKills++;

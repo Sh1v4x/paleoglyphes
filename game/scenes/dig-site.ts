@@ -1,5 +1,6 @@
 import { liveBirth } from "../species/life";
 import { CELL_H, CELL_W } from "../config";
+import { mixRgb } from "../math";
 import type { RGB, Theme } from "../palette";
 import type { Progress } from "../progress";
 import { rasterize, type Raster } from "../render/raster";
@@ -9,6 +10,7 @@ import type { SpeciesId } from "../species/types";
 import { ofName } from "../species";
 import { eggModel } from "../species/eggs";
 import { bonePrims, EXTRAS, fitScale, orient, primBounds, scaleAll } from "./dig-fossils";
+import { DIG_SITE, sitesOf, type DigSiteId, type StratumDef } from "./dig-sites";
 import { SM } from "./scenes.mat";
 
 /**
@@ -16,12 +18,7 @@ import { SM } from "./scenes.mat";
  * fossiles bonus enfouis. Chaque cellule garde l'épaisseur de sédiment qui reste (`cover`).
  */
 
-export interface Stratum {
-  mat: number;
-  name: string;
-  /** Dureté : 1 = argile ; le pinceau va 2x moins vite dans une roche de dureté 2. */
-  hard: number;
-  fact: string;
+export interface Stratum extends StratumDef {
   /** Profondeur du toit de la couche (lignes sous le sol) et ondulation. */
   top: number;
   amp: number;
@@ -55,6 +52,8 @@ export interface Fossil {
 export interface Site {
   n: number;
   name: string;
+  /** Gisement (roches, décor, espèces). */
+  where: DigSiteId;
   seed: number;
   W: number;
   H: number;
@@ -76,16 +75,6 @@ export interface Site {
 /** En dessous de cette épaisseur, on atteint la gangue qui entoure les fossiles. */
 export const SUB = 1;
 
-const POOL: Omit<Stratum, "top" | "amp" | "f" | "ph">[] = [
-  { mat: SM.Sand, name: "Sable", hard: 0.6, fact: "Du sable de riviere : depose tres vite, il a protege les os de l'air." },
-  { mat: SM.Silt, name: "Limon", hard: 0.8, fact: "Une boue fine laissee par les crues de la riviere." },
-  { mat: SM.Clay, name: "Argile", hard: 1, fact: "L'argile garde les os a l'abri : un ideal pour les fossiles." },
-  { mat: SM.Sandstone, name: "Gres", hard: 2, fact: "Du sable devenu roche dure en des millions d'annees. Le burin aide ici." },
-  { mat: SM.Shale, name: "Argilite", hard: 1.4, fact: "De la boue tassee en fines feuilles, couche apres couche." },
-  { mat: SM.Lignite, name: "Lignite", hard: 1.1, fact: "Un charbon tendre : ce sont d'anciennes plantes de marais ecrasees." },
-  { mat: SM.Conglo, name: "Conglomerat", hard: 1.6, fact: "Des galets cimentes : la trace d'une ancienne riviere rapide." },
-];
-const TOPSOIL = { mat: SM.Topsoil, name: "Terre vegetale", hard: 0.5, fact: "Le sol d'aujourd'hui, plein de racines. Les fossiles sont bien plus bas." };
 export const MATRIX_INFO = { name: "Gangue", fact: "La roche collee autour d'un fossile s'appelle la gangue : on la retire tout doucement." };
 
 /** Ordre de déblocage des espèces en fouille : [espèce, squelettes assemblés requis]. */
@@ -105,7 +94,7 @@ const NAMES = ["Hell Creek, Montana", "Formation de Lance, Wyoming", "Badlands, 
 
 /** Nom du lieu à partir de celui de l'espèce : « Formation de Hell Creek, Montana (États-Unis) » -> « Hell Creek, Montana ». */
 function placeName(sp: SpeciesId | null, rng: () => number): string {
-  const raw = sp ? SPECIES[sp]?.place : undefined;
+  const raw = sp ? SPECIES[sp].place : undefined;
   if (!raw) return NAMES[Math.floor(rng() * NAMES.length)];
   return raw.replace(/\s*\(.*\)\s*$/, "").replace(/^Formation de\s+/i, "");
 }
@@ -128,10 +117,17 @@ function shuffle<T>(a: T[], rng: () => number): T[] {
 
 interface Pick { sp: SpeciesId; id: string; dup: boolean }
 
-/** Choisit les os enfouis : surtout des os manquants d'une espèce débloquée, rarement un doublon. */
-function pickBones(p: Progress, rng: () => number): { picks: Pick[]; primary: SpeciesId | null } {
-  const unlocked = unlockedSpecies(p);
-  const missingOf = (sp: SpeciesId) => (SPECIES[sp]?.bones ?? []).filter((b) => !(p.bones[sp] ?? []).includes(b.id)).map((b) => b.id);
+/** Espèces débloquées dont on trouve les os sur ce site. */
+export function siteSpecies(p: Progress, where: DigSiteId): SpeciesId[] {
+  return unlockedSpecies(p).filter((sp) => sitesOf(sp).includes(where));
+}
+
+/** Choisit les os enfouis : surtout des os manquants d'une espèce débloquée du site, rarement un doublon. */
+function pickBones(p: Progress, where: DigSiteId, rng: () => number): { picks: Pick[]; primary: SpeciesId | null } {
+  const here = siteSpecies(p, where);
+  // (garde-fou : un site sans espèce débloquée fouille celles des autres sites)
+  const unlocked = here.length ? here : unlockedSpecies(p);
+  const missingOf = (sp: SpeciesId) => SPECIES[sp].bones.filter((b) => !(p.bones[sp] ?? []).includes(b.id)).map((b) => b.id);
   const withMissing = unlocked.filter((sp) => missingOf(sp).length > 0);
   // L'espèce du site est tirée au hasard parmi celles débloquées qui ont encore des os à trouver.
   const primary: SpeciesId | null = withMissing[Math.floor(rng() * withMissing.length)] ?? null;
@@ -142,7 +138,7 @@ function pickBones(p: Progress, rng: () => number): { picks: Pick[]; primary: Sp
   const others = shuffle(withMissing.filter((sp) => sp !== primary).flatMap((sp) => missingOf(sp).map((id) => ({ sp, id, dup: false }))), rng);
   while (picks.length < n && others.length) picks.push(others.pop()!);
   // Doublons : rares, ou seuls quand toute la collection est complète.
-  const found = shuffle(unlocked.flatMap((sp) => (p.bones[sp] ?? []).filter((id) => SPECIES[sp]?.bones.some((b) => b.id === id)).map((id) => ({ sp, id, dup: true }))), rng);
+  const found = shuffle(unlocked.flatMap((sp) => (p.bones[sp] ?? []).filter((id) => SPECIES[sp].bones.some((b) => b.id === id)).map((id) => ({ sp, id, dup: true }))), rng);
   // (jamais au détriment d'un os manquant : un doublon ne remplace rien)
   if (found.length && (picks.length === 0 || (picks.length < 6 && rng() < 0.18))) picks.push(found.pop()!);
   while (picks.length < 3 && found.length) picks.push(found.pop()!);
@@ -185,23 +181,24 @@ function addFossil(s: Site, f: Omit<Fossil, "x" | "y" | "cells" | "exposed" | "i
   return true;
 }
 
-/** Génère un site de W x H cellules monde. */
-export function generateSite(p: Progress, W: number, H: number, seed: number): Site {
+/** Génère une falaise de W x H cellules monde sur le gisement `where` ; `missed` : os tirés mais sans place dans la roche. */
+export function generateSite(p: Progress, where: DigSiteId, W: number, H: number, seed: number): { site: Site; missed: number } {
   const rng = mulberry32(seed);
   const gTop = 5;
-  // Couches : terre végétale, puis 5 à 7 couches tirées au sort.
-  const strata: Stratum[] = [{ ...TOPSOIL, top: 0, amp: 0, f: 0, ph: 0 }];
+  const def0 = DIG_SITE[where];
+  // Couches : sol de surface, puis 5 à 7 couches tirées au sort parmi les roches du site.
+  const strata: Stratum[] = [{ ...def0.topsoil, top: 0, amp: 0, f: 0, ph: 0 }];
   let d = 3 + rng() * 2;
   const total = H + gTop + 20;
   while (d < total) {
-    const def = POOL[Math.floor(rng() * POOL.length)];
+    const def = def0.pool[Math.floor(rng() * def0.pool.length)];
     if (def.mat === strata[strata.length - 1].mat) continue;
     strata.push({ ...def, top: d, amp: 1 + rng() * 2.5, f: 0.02 + rng() * 0.04, ph: rng() * 6.28 });
-    d += def.mat === SM.Lignite ? 3 + rng() * 3 : 9 + rng() * 16;
+    d += def.thin ? 3 + rng() * 3 : 9 + rng() * 16;
   }
   const n = W * H;
   const s: Site = {
-    n: p.digs + 1, name: "", seed, W, H, gTop,
+    n: p.digs + 1, name: "", where, seed, W, H, gTop,
     cover: new Float32Array(n), cover0: new Float32Array(n), layer: new Uint8Array(n), deco: new Uint8Array(n),
     owner: new Int16Array(n).fill(-1), strata, fossils: [], complete: false,
   };
@@ -215,10 +212,10 @@ export function generateSite(p: Progress, W: number, H: number, seed: number): S
     }
 
   // Os et fossiles bonus.
-  const { picks, primary } = pickBones(p, rng);
+  const { picks, primary } = pickBones(p, where, rng);
+  let missed = 0;
   for (const pk of picks) {
     const spec = SPECIES[pk.sp];
-    if (!spec) continue;
     const raw = bonePrims(spec, pk.id);
     const name = spec.bones.find((b) => b.id === pk.id)?.name ?? pk.id;
     const label = `${name} ${ofName(p, pk.sp)}`;
@@ -233,10 +230,12 @@ export function generateSite(p: Progress, W: number, H: number, seed: number): S
       const r = rasterize(scaleAll(ps, sc), 0, 0, rng() < 0.5);
       placed = addFossil(s, { kind: "bone", sp: pk.sp, id: pk.id, label, dup: pk.dup, r }, rng);
     }
+    if (!placed) missed++;
   }
   const nx = rng() < 0.55 ? (rng() < 0.3 ? 2 : 1) : 0;
-  const fresh = shuffle(EXTRAS.filter((x) => !p.extras.includes(x.id)), rng);
-  const old = shuffle(EXTRAS.filter((x) => p.extras.includes(x.id)), rng);
+  const local = EXTRAS.filter((x) => def0.extras.includes(x.id));
+  const fresh = shuffle(local.filter((x) => !p.extras.includes(x.id)), rng);
+  const old = shuffle(local.filter((x) => p.extras.includes(x.id)), rng);
   for (let i = 0; i < nx; i++) {
     const def = fresh.pop() ?? old.pop();
     if (!def) break;
@@ -245,9 +244,9 @@ export function generateSite(p: Progress, W: number, H: number, seed: number): S
     addFossil(s, { kind: "extra", sp: null, id: def.id, label: def.name, dup: p.extras.includes(def.id), r }, rng);
   }
 
-  // Œuf fossile, parfois, d'une espèce déjà assemblée qui pond (pas les vivipares comme le mosasaure).
-  const ovip = p.assembled.filter((sp) => SPECIES[sp] && !liveBirth(SPECIES[sp]));
-  if (ovip.length && rng() < 0.25) {
+  // Œuf fossile, parfois, d'une espèce du site déjà assemblée qui pond (pas les vivipares comme le mosasaure).
+  const ovip = p.assembled.filter((sp) => !liveBirth(SPECIES[sp]) && sitesOf(sp).includes(where));
+  if (ovip.length && rng() < def0.eggs) {
     const sp = ovip[Math.floor(rng() * ovip.length)];
     const ps = eggModel(sp, 0);
     const r = rasterize(scaleAll(ps, fitScale(ps, 16 * CELL_W, 9 * CELL_H, 1.6, 3)), 0, 0, rng() < 0.5);
@@ -264,7 +263,7 @@ export function generateSite(p: Progress, W: number, H: number, seed: number): S
       }
   };
   for (let i = 0; i < (W * H) / 900; i++) blob(rng() * W, rng() * H, 1 + rng() * 2, 0.6 + rng() * 1, 1);
-  for (let k = 0; k < n; k++) if (strata[s.layer[k]].mat === SM.Conglo && s.owner[k] < 0 && hash2(k, 7, seed) < 0.16) s.deco[k] = 1;
+  for (let k = 0; k < n; k++) if (s.owner[k] < 0 && hash2(k, 7, seed) < (strata[s.layer[k]].pebbles ?? 0)) s.deco[k] = 1;
   const walk = (x: number, y: number, len: number, v: number, dx: number) => {
     for (let t = 0; t < len; t++) {
       if (x < 0 || x >= W || y < 0 || y >= H) break;
@@ -279,8 +278,8 @@ export function generateSite(p: Progress, W: number, H: number, seed: number): S
   for (let k = 0; k < n; k++) if (!s.deco[k] && s.owner[k] < 0 && hash2(k, 3, seed) < 0.004) s.deco[k] = 4;
   for (let k = 0; k < n; k++) if (s.deco[k] === 1) { s.cover[k] += 0.4; s.cover0[k] += 0.4; }
 
-  s.name = `Site ${s.n} - ${placeName(primary, rng)}`;
-  return s;
+  s.name = `Site ${s.n} - ${def0.byPlace ? placeName(primary, rng) : `${def0.name}, ${def0.place}`}`;
+  return { site: s, missed };
 }
 
 /** Dureté d'une cellule (galets durs, racines tendres, gangue un peu plus ferme). */
@@ -303,8 +302,6 @@ export interface Backdrop {
   bg: Uint8ClampedArray;
 }
 
-const lerp = (a: RGB, b: RGB, t: number): [number, number, number] => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-
 /** Ligne du sol (rangée monde) pour un site posé en `oy`. */
 export const groundRow = (s: Site, oy: number) => oy - s.gTop;
 
@@ -320,7 +317,8 @@ export function buildBackdrop(s: Site, th: Theme, cols: number, rows: number, ox
   const g = groundRow(s, oy);
   const skyTop: RGB = cart ? [92, 184, 240] : [7, 7, 13];
   const skyLow: RGB = cart ? [205, 238, 252] : [30, 28, 44];
-  const butte = th.mats[SM.Butte].color;
+  const site = DIG_SITE[s.where];
+  const butte = th.mats[site.butte].color;
   const sunX = Math.floor(cols * 0.78), sunY = Math.max(2, Math.floor(g * 0.4));
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
@@ -328,32 +326,32 @@ export function buildBackdrop(s: Site, th: Theme, cols: number, rows: number, ox
       if (y < g) {
         // Ciel et buttes au loin.
         const t = g > 1 ? y / (g - 1) : 1;
-        const sky = lerp(skyTop, skyLow, t * t);
-        const bt = g - 1 - Math.floor((g * 0.5) * (0.45 + 0.3 * Math.sin(x * 0.021 + s.seed) + 0.2 * Math.sin(x * 0.057 + 2) + 0.15 * Math.sign(Math.sin(x * 0.011 + s.seed * 0.3))));
+        const sky = mixRgb(skyTop, skyLow, t * t);
+        const bt = g - 1 - Math.floor((g * site.hills) * (0.45 + 0.3 * Math.sin(x * 0.021 + s.seed) + 0.2 * Math.sin(x * 0.057 + 2) + 0.15 * Math.sign(Math.sin(x * 0.011 + s.seed * 0.3))));
         if (y >= bt) {
           const band = 0.78 + 0.22 * ((y % 3) / 2);
-          const c = lerp(butte, sky, cart ? 0.15 : 0.35).map((v) => v * band);
+          const c = mixRgb(butte, sky, cart ? 0.15 : 0.35).map((v) => v * band);
           set(k, (y + x) % 7 === 0 ? 61 : 45, c.map((v) => v * (cart ? 0.85 : 1.25)), c);
           continue;
         }
         const dx = (x - sunX) / 2, dy = y - sunY;
         const dd = Math.hypot(dx, dy);
-        if (dd < 2.2) { set(k, cart ? 64 : 79, cart ? [255, 230, 90] : [216, 212, 192], cart ? [255, 214, 74] : lerp(sky, [120, 120, 130], 0.4)); continue; }
+        if (dd < 2.2) { set(k, cart ? 64 : 79, cart ? [255, 230, 90] : [216, 212, 192], cart ? [255, 214, 74] : mixRgb(sky, [120, 120, 130], 0.4)); continue; }
         if (cart) {
           const cl = Math.sin(x * 0.05 + y * 0.4 + s.seed) + Math.sin(x * 0.013 - s.seed);
-          if (cl > 1.35 && y < g - 3) { set(k, 32, [255, 255, 255], lerp(sky, [255, 255, 255], 0.85)); continue; }
+          if (cl > 1.35 && y < g - 3) { set(k, 32, [255, 255, 255], mixRgb(sky, [255, 255, 255], 0.85)); continue; }
           set(k, dd < 4 ? 46 : 32, [255, 240, 160], sky);
         } else {
           const h = hash2(x, y, 41);
-          set(k, h < 0.004 ? 42 : h < 0.02 ? 46 : 32, [150 + 80 * h * 40, 150, 180], dd < 5 ? lerp(sky, [60, 60, 80], (5 - dd) / 8) : sky);
+          set(k, h < 0.004 ? 42 : h < 0.02 ? 46 : 32, [150 + 80 * h * 40, 150, 180], dd < 5 ? mixRgb(sky, [60, 60, 80], (5 - dd) / 8) : sky);
         }
         continue;
       }
       if (y === g) {
-        // Herbe au bord de la falaise.
-        const gc = th.mats[SM.Grass].color;
+        // Herbe (neige, sable) au bord de la falaise.
+        const gm = th.mats[site.ground], gc = gm.color;
         const h = hash2(x, y, 5);
-        set(k, h < 0.3 ? 118 : h < 0.6 ? 34 : 44, gc.map((v) => v * 1.2), cart ? gc : gc.map((v) => v * 0.4));
+        set(k, site.ground === SM.Grass ? (h < 0.3 ? 118 : h < 0.6 ? 34 : 44) : gm.ramp.charCodeAt(Math.floor(h * gm.ramp.length)), gc.map((v) => v * 1.2), cart ? gc : gc.map((v) => v * 0.4));
         continue;
       }
       // Falaise : mêmes couches que le site, prolongées.

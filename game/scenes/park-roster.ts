@@ -1,13 +1,17 @@
+import { de } from "../fr";
+import { pointer } from "../input";
+import { clamp01 } from "../math";
 import { isFish } from "./eco-special";
 import type { RGB, Theme } from "../palette";
+import { hasFact } from "../progress";
 import type { Frame } from "../render/frame";
 import { uiCellAt } from "../render/metrics";
 import { SPECIES, SPECIES_LIST } from "../species";
 import { INCUBATION, lifespan, MAX_PER_SPECIES, stageOf, type Stage } from "../species/life";
 import type { Species } from "../species/types";
 import type { GameState } from "../state";
-import { actions, bar, over, panel, put, region, SP, text, wrap, type Action } from "../ui/kit";
-import { deName } from "./dig-fossils";
+import { actions, bar, button, clip, over, panel, put, region, SP, text, wrap, type Action } from "../ui/kit";
+import { drawCensus } from "../features/census";
 import { activity } from "./ecosystem";
 import { UNLOCK_HINT } from "./journal";
 import type { Animal, Nest } from "./park";
@@ -22,6 +26,8 @@ import { UI_TOP } from "./types";
 export const DAY_S = 480;
 /** Lignes défilées par cran de molette dans le recensement. */
 export const ROSTER_STEP = 3;
+/** Largeur minimale du recensement (cellules d'interface).*/
+export const ROSTER_MIN_W = 40;
 
 /** Nom du stade, avec ses accents (le kit les retire à l'affichage). */
 export const STAGE_LABEL: Record<Stage, string> = { baby: "bébé", juvenile: "juvénile", adult: "adulte", old: "âgé" };
@@ -59,7 +65,6 @@ export function nestCrack(n: Nest): number {
  */
 export function drawAnimalCard(s: GameState, th: Theme, ui: Frame, a: Animal): number {
   const spec = SPECIES[a.sp];
-  if (!spec) return ui.rows - 1;
   const u = th.ui, p = s.park;
   const dead = a.task === "dead";
   const confirm = !dead && p.confirmRetire === a.id;
@@ -106,7 +111,7 @@ export function drawAnimalCard(s: GameState, th: Theme, ui: Frame, a: Animal): n
   }
   // Ce qui reste à découvrir : on pointe le prochain fait verrouillé.
   const facts = spec.facts;
-  const got = facts.filter((f) => s.progress.facts.includes(`${a.sp}:${f.id}`)).length;
+  const got = facts.filter((f) => hasFact(s.progress, a.sp, f.id)).length;
   text(ui, x + 2, r + 1, `Carnet : ${got}/${facts.length} faits`, u.text, u.panel, u.alpha);
   if (confirm) {
     wrap("! Retirer ce dinosaure de la réserve ? Il disparaîtra.", W - 4).slice(0, 2)
@@ -117,7 +122,7 @@ export function drawAnimalCard(s: GameState, th: Theme, ui: Frame, a: Animal): n
     ]);
     return y;
   }
-  const locked = facts.filter((f) => !s.progress.facts.includes(`${a.sp}:${f.id}`) && f.unlock !== "assemble");
+  const locked = facts.filter((f) => !hasFact(s.progress, a.sp, f.id) && f.unlock !== "assemble");
   const now = locked.find((f) => f.unlock === a.action || f.unlock === a.mood || (f.unlock === "nest" && a.nestId) || (f.unlock === "baby" && a.growth < 1));
   let teaser: string, hot = false;
   if (now) { teaser = "Clique-le maintenant pour en apprendre plus !"; hot = true; }
@@ -139,13 +144,12 @@ export function drawAnimalCard(s: GameState, th: Theme, ui: Frame, a: Animal): n
 /** Fiche d'un nid (bas gauche). Renvoie sa ligne du haut. */
 export function drawNestCard(s: GameState, th: Theme, ui: Frame, n: Nest): number {
   const spec = SPECIES[n.sp];
-  if (!spec) return ui.rows - 1;
   const u = th.ui, p = s.park;
   const W = Math.min(52, ui.cols - 2 * SP.margin - 2), x = SP.margin + 1;
   const guard = n.guard ? p.animals.find((a) => a.id === n.guard && a.task !== "dead") : undefined;
   const info = wrap("Comme les oiseaux d'aujourd'hui, beaucoup de dinosaures pondaient dans un nid creusé au sol, et un parent le gardait jusqu'à l'éclosion.", W - 4).slice(0, 3);
   const H = 11 + info.length, y = Math.max(UI_TOP, ui.rows - H - 2);
-  panel(ui, th, x, y, W, H, `Nid ${deName(spec.name)}`, { close: "park:close" });
+  panel(ui, th, x, y, W, H, `Nid ${de(spec.name)}`, { close: "park:close" });
   let r = y + 1;
   const T = (t: string, c: RGB = u.text) => text(ui, x + 2, r++, t, c, u.panel, u.alpha);
   if (n.hatched !== undefined) T("Éclos ! Il ne reste que des coquilles vides.", u.ok);
@@ -191,7 +195,7 @@ type Row =
  */
 export function drawRoster(s: GameState, th: Theme, ui: Frame, top: number, bottom: number, left = 0) {
   const u = th.ui, p = s.park;
-  const W = Math.max(40, Math.min(58, ui.cols - left - 2 * SP.margin)), x = ui.cols - W - SP.margin;
+  const W = Math.max(ROSTER_MIN_W, Math.min(58, ui.cols - left - 2 * SP.margin)), x = ui.cols - W - SP.margin;
   const rows: Row[] = [];
   for (const spec of SPECIES_LIST) {
     if (!s.progress.assembled.includes(spec.id)) continue;
@@ -204,10 +208,11 @@ export function drawRoster(s: GameState, th: Theme, ui: Frame, top: number, bott
     for (const n of nests) rows.push({ k: "nest", n });
   }
   const avail = bottom - top;
-  if (avail < 6) { rosterRect = null; return; }
+  if (avail < 7) { rosterRect = null; return; }
+  const chart = p.census?.tab === "chart";
   const body = Math.max(1, rows.length);
-  const H = Math.min(avail, body + 4);
-  const view = H - 4; // lignes visibles (titre, légende, bordures)
+  const H = chart ? Math.min(avail, 34) : Math.min(avail, body + 5);
+  const view = H - 5; // lignes visibles (titre, onglets, légende, bordures)
   const max = Math.max(0, body - view);
   p.rosterScroll = Math.max(0, Math.min(max, p.rosterScroll ?? 0));
   const off = p.rosterScroll;
@@ -216,11 +221,15 @@ export function drawRoster(s: GameState, th: Theme, ui: Frame, top: number, bott
   region("park:roster:bg", x, top, W, H);
   rosterRect = { x, y: top, w: W, h: H };
   panel(ui, th, x, top, W, H, "Recensement", { key: "C", close: "park:roster" });
-  text(ui, x + 2, top + 1, "Stade : b bébé  j juvénile  A adulte  V âgé   o nid", u.dim, u.panel, u.alpha);
-  if (!rows.length) text(ui, x + 2, top + 2, "Aucun dinosaure dans la réserve.", u.dim, u.panel, u.alpha);
+  // Onglets : la liste des animaux, ou le graphique des populations (features/census.ts).
+  const tx = x + 2 + button(ui, th, "park:census:list", x + 2, top + 1, "Liste", { active: !chart, tip: "Liste des animaux" }) + 1;
+  button(ui, th, "park:census:chart", tx, top + 1, "Graphique", { active: chart, tip: "Populations au fil des jours" });
+  if (chart) { drawCensus(s, th, ui, x, top, W, H); return; }
+  text(ui, x + 2, top + 2, clip("Stade : b bébé  j juvénile  A adulte  V âgé   o nid", W - 4), u.dim, u.panel, u.alpha);
+  if (!rows.length) text(ui, x + 2, top + 3, "Aucun dinosaure dans la réserve.", u.dim, u.panel, u.alpha);
   const inner = W - 5;
   for (let i = 0; i < view && i + off < rows.length; i++) {
-    const row = rows[i + off], ry = top + 2 + i;
+    const row = rows[i + off], ry = top + 3 + i;
     if (row.k === "gap") continue;
     if (row.k === "head") {
       const t = `${row.spec.name}  ${row.n}/${MAX_PER_SPECIES}${row.nests ? `   nids : ${row.nests}` : ""}`;
@@ -255,13 +264,13 @@ export function drawRoster(s: GameState, th: Theme, ui: Frame, top: number, bott
   // Ascenseur et aide.
   if (max > 0) {
     const pos = Math.round((off / max) * (view - 1));
-    for (let i = 0; i < view; i++) put(ui, x + W - 2, top + 2 + i, i === pos ? 35 : 58, i === pos ? u.hi : u.dim, u.panel, u.alpha);
+    for (let i = 0; i < view; i++) put(ui, x + W - 2, top + 3 + i, i === pos ? 35 : 58, i === pos ? u.hi : u.dim, u.panel, u.alpha);
   }
-  text(ui, x + 2, top + H - 2, max > 0 ? "Clic : aller le voir   Molette : défiler" : "Clic : aller le voir", u.dim, u.panel, u.alpha);
+  text(ui, x + 2, top + H - 2, pointer.touch ? (max > 0 ? "Toucher : aller le voir   Glisser : défiler" : "Toucher : aller le voir") : max > 0 ? "Clic : aller le voir   Molette : défiler" : "Clic : aller le voir", u.dim, u.panel, u.alpha);
 }
 
 /** Petite barre sans crochets (recensement). */
 function miniBar(ui: Frame, th: Theme, x: number, y: number, w: number, v: number, col: RGB, bg: RGB) {
-  const n = Math.round(Math.max(0, Math.min(1, v)) * w);
+  const n = Math.round(clamp01(v) * w);
   for (let i = 0; i < w; i++) put(ui, x + i, y, i < n ? 35 : 46, i < n ? col : th.ui.dim, bg, th.ui.alpha);
 }

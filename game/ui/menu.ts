@@ -1,17 +1,13 @@
 import { DEV } from "../config";
-import { hex, type RGB, type Theme } from "../palette";
-import { setBg, setFg, type Frame } from "../render/frame";
+import { pointer } from "../input";
+import type { RGB, Theme } from "../palette";
+import type { Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
-import { calm, settings, UI_SCALES } from "../settings";
-import { actions, button, keyChip, panel, region, SP, text, wrap } from "./kit";
+import { calm, settings, UI_SCALES, VOLUMES } from "../settings";
+import { actions, button, keyChip, panel, put, region, SP, text, wrap } from "./kit";
 import type { GameState } from "../state";
+import { STRINGS } from "../strings";
 import { BIG, type BigLabel } from "./bigtext";
-
-/** Couleurs du panneau selon le style (contrastes AA, comme l'interface). */
-const SKIN = {
-  dark: { panel: hex("#100e15"), border: hex("#4a4458"), dim: hex("#8f89a3"), text: hex("#a9a3b8"), hi: hex("#9be88a"), veil: 0.3 },
-  cartoon: { panel: hex("#fff6e0"), border: hex("#1b1f2e"), dim: hex("#6b604c"), text: hex("#1b1f2e"), hi: hex("#b83c1c"), veil: 0.45 },
-} as const;
 
 // Valeurs de la ligne « Style » (désactivée, voir plus bas) :
 // const VALUES: Record<string, BigLabel> = { dark: "dark", cartoon: "cartoon" };
@@ -19,14 +15,6 @@ const SKIN = {
 /** Lignes du menu Échap, dans l'ordre : la plus sûre (reprendre) en premier. */
 export const MENU_ITEMS = ["resume", "settings", "unlock", "restart"] as const;
 export type MenuItem = (typeof MENU_ITEMS)[number];
-
-function put(f: Frame, x: number, y: number, ch: number, fg: RGB, bg: RGB) {
-  if (x < 0 || y < 0 || x >= f.cols || y >= f.rows) return;
-  const i = y * f.cols + x;
-  f.ch[i] = ch;
-  setFg(f, i, fg[0], fg[1], fg[2]);
-  setBg(f, i, bg[0], bg[1], bg[2]);
-}
 
 function big(f: Frame, label: BigLabel, x: number, y: number, fg: RGB, bg: RGB) {
   const lines = BIG[label];
@@ -51,8 +39,8 @@ function veil(f: Frame, k: number) {
 
 /** Menu pause en grandes lettres ASCII, dessiné directement dans la grille. */
 export function drawMenu(s: GameState, th: Theme, f: Frame) {
-  const sk = SKIN[th.style];
-  veil(f, sk.veil);
+  const sk = th.ui;
+  veil(f, sk.menuVeil);
   // Page Réglages : le voile seul, le panneau est sur le calque d'interface (voir drawSettings).
   if (s.menu.page === "settings") return;
 
@@ -66,11 +54,11 @@ export function drawMenu(s: GameState, th: Theme, f: Frame) {
     }
   }
   // Ombre portée du panneau.
-  for (let y = 1; y <= H; y++) for (let x = 1; x <= 2; x++) put(f, x0 + W - 1 + x, y0 + y, 32, sk.panel, [0, 0, 0]);
-  for (let x = 2; x <= W + 1; x++) put(f, x0 + x, y0 + H, 32, sk.panel, [0, 0, 0]);
+  for (let y = 1; y <= H; y++) for (let x = 1; x <= 2; x++) put(f, x0 + W - 1 + x, y0 + y, 32, sk.panel, sk.menuShadow);
+  for (let x = 2; x <= W + 1; x++) put(f, x0 + x, y0 + H, 32, sk.panel, sk.menuShadow);
 
   const cx = (w: number) => x0 + Math.floor((W - w) / 2);
-  big(f, "title", cx(BIG.title[0].length), y0 + 2, sk.text, sk.panel);
+  big(f, "title", cx(BIG.title[0].length), y0 + 2, sk.menuText, sk.panel);
 
   // Style dark fantasy mis de côté pour l'instant (le code reste en place) :
   // { label: "style", value: VALUES[s.style], y: ... },
@@ -82,10 +70,10 @@ export function drawMenu(s: GameState, th: Theme, f: Frame) {
     const value = labels[item];
     const vw = BIG[value][0].length;
     const vx = cx(vw);
-    big(f, value, vx, vy, sel ? sk.hi : sk.text, sk.panel);
+    big(f, value, vx, vy, sel ? sk.hi : sk.menuText, sk.panel);
     // Sélection : flèche (forme) en plus de la couleur.
     if (sel && blink) big(f, "right", vx - 8, vy, sk.hi, sk.panel);
-    if (item === "unlock") small(f, "(mode test)", cx(11), vy + 5, sk.dim, sk.panel);
+    if (item === "unlock") small(f, STRINGS.menu.unlockCaption, cx(STRINGS.menu.unlockCaption.length), vy + 5, sk.dim, sk.panel);
     // Ligne cliquable : zone convertie des cellules monde vers les cellules d'interface.
     const ux = Math.floor(((vx - 8) * metrics.cellW) / metrics.uiW), uy = Math.floor((vy * metrics.cellH) / metrics.uiH);
     const uw = Math.ceil(((vw + 16) * metrics.cellW) / metrics.uiW), uh = Math.ceil((5 * metrics.cellH) / metrics.uiH);
@@ -93,10 +81,10 @@ export function drawMenu(s: GameState, th: Theme, f: Frame) {
   });
 
   if (s.menu.confirm) {
-    const warn = "Toute ta progression sera effacee ! Valide encore pour confirmer, Echap pour annuler.";
+    const warn = pointer.touch ? STRINGS.menu.restartWarnTouch : STRINGS.menu.restartWarnKeys;
     small(f, warn, cx(warn.length), y0 + 9 + 3 * 7 + 5, sk.hi, sk.panel);
   }
-  const hint = "clic ou fleches / Tab + Entree : choisir    Echap : fermer";
+  const hint = pointer.touch ? STRINGS.menu.hintTouch : STRINGS.menu.hintKeys;
   small(f, hint, cx(hint.length), y0 + H - 2, sk.dim, sk.panel);
 }
 
@@ -106,40 +94,52 @@ export function drawMenu(s: GameState, th: Theme, f: Frame) {
 
 /** Panneau des réglages, centré. */
 export function drawSettings(s: GameState, th: Theme, ui: Frame) {
-  const u = th.ui;
+  const u = th.ui, t = STRINGS.settings;
   const W = Math.min(64, ui.cols - 2 * SP.margin), iw = W - 2 * SP.pad;
+  const yesNo = (on: boolean) => (on ? t.yes : t.no);
   const rows: { title: string; help: string; draw: (x: number, y: number) => void }[] = [
     {
-      title: "Taille de l'interface",
-      help: "Agrandit les textes et les boutons (le monde ne change pas).",
+      title: t.scale,
+      help: t.scaleHelp,
       draw: (x, y) => {
-        for (const k of UI_SCALES) {
+        for (const k of ["auto", ...UI_SCALES] as const) {
           const on = settings.uiScale === k;
-          x += button(ui, th, `set:scale:${k}`, x, y, `${Math.round(k * 100)} %`, { active: on, toggle: true, tip: on ? "Taille actuelle" : "Choisir cette taille" }) + SP.gap;
+          x += button(ui, th, `set:scale:${k}`, x, y, k === "auto" ? t.scaleAuto : `${Math.round(k * 100)} %`, { active: on, toggle: true, tip: on ? t.scaleCurrent : t.scalePick }) + SP.gap;
         }
       },
     },
     {
-      title: "Animations",
-      help: "Reduire : pas de secousses, d'eclairs, de flashs ni de clignotements rapides.",
+      title: t.sound,
+      help: t.soundHelp,
       draw: (x, y) => {
-        const n = button(ui, th, "set:motion", x, y, "Reduire les animations", { toggle: true, active: settings.reduceMotion });
-        text(ui, x + n + 2, y, settings.reduceMotion ? "Oui" : "Non", settings.reduceMotion ? u.ok : u.dim, u.panel, u.alpha);
+        for (const v of VOLUMES) {
+          const on = !settings.mute && settings.volume === v;
+          x += button(ui, th, `set:vol:${v}`, x, y, `${v * 100} %`, { active: on, toggle: true, tip: on ? t.volumeCurrent : t.volumePick }) + SP.gap;
+        }
+        button(ui, th, "set:mute", x, y, t.mute, { toggle: true, active: settings.mute, key: "B", tip: t.muteTip });
+      },
+    },
+    {
+      title: t.motion,
+      help: t.motionHelp,
+      draw: (x, y) => {
+        const n = button(ui, th, "set:motion", x, y, t.motionToggle, { toggle: true, active: settings.reduceMotion });
+        text(ui, x + n + 2, y, yesNo(settings.reduceMotion), settings.reduceMotion ? u.ok : u.dim, u.panel, u.alpha);
       },
     },
   ];
   if (DEV) rows.push({
-    title: "Compteur d'images (dev)",
-    help: "Affiche les images par seconde dans l'en-tete.",
+    title: t.fps,
+    help: t.fpsHelp,
     draw: (x, y) => {
-      const n = button(ui, th, "set:fps", x, y, "Afficher le FPS", { toggle: true, active: settings.showFps });
-      text(ui, x + n + 2, y, settings.showFps ? "Oui" : "Non", settings.showFps ? u.ok : u.dim, u.panel, u.alpha);
+      const n = button(ui, th, "set:fps", x, y, t.fpsToggle, { toggle: true, active: settings.showFps });
+      text(ui, x + n + 2, y, yesNo(settings.showFps), settings.showFps ? u.ok : u.dim, u.panel, u.alpha);
     },
   });
   const helps = rows.map((r) => wrap(r.help, iw - 2));
   const H = 2 + rows.reduce((n, _, i) => n + 3 + helps[i].length, 0) + 2;
   const x = Math.floor((ui.cols - W) / 2), y = Math.max(0, Math.floor((ui.rows - H) / 2));
-  panel(ui, th, x, y, W, H, "Reglages", { close: "set:back", overlay: true });
+  panel(ui, th, x, y, W, H, t.title, { close: "set:back", overlay: true });
   let yy = y + 2;
   rows.forEach((r, i) => {
     text(ui, x + SP.pad, yy++, r.title, u.hi, u.panel, u.alpha);
@@ -148,7 +148,9 @@ export function drawSettings(s: GameState, th: Theme, ui: Frame) {
     yy++;
   });
   const hx = x + SP.pad;
-  const k = keyChip(ui, th, hx, y + H - 2, "Tab");
-  text(ui, hx + k + 1, y + H - 2, "choisir", u.dim, u.panel, u.alpha);
-  actions(ui, th, x + SP.pad, y + H - 2, iw, [{ id: "set:back", label: "Retour", key: "Echap", variant: "primary" }]);
+  if (!pointer.touch) {
+    const k = keyChip(ui, th, hx, y + H - 2, "Tab");
+    text(ui, hx + k + 1, y + H - 2, t.pick, u.dim, u.panel, u.alpha);
+  }
+  actions(ui, th, x + SP.pad, y + H - 2, iw, [{ id: "set:back", label: t.back, key: "Echap", variant: "primary" }]);
 }

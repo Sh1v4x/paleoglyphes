@@ -3,7 +3,8 @@ import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { MR } from "./marine.mat";
 import { XR } from "./xiphactinus.mat";
-import { c, e, lerp, rot, win } from "./raptor";
+import { lerp } from "../math";
+import { c, e, flipY, rot, win } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -84,16 +85,6 @@ function xiphRig({ action, actionT: t, time, walk, moving }: Pose): XiphRig {
       break;
   }
   return r;
-}
-
-/** Retourne verticalement autour de y = cy (ventre en l'air), puis décale. */
-function flipY(ps: Prim[], cy: number, dy: number): Prim[] {
-  const f = (y: number) => 2 * cy - y + dy;
-  return ps.map((p) => {
-    if (p.k === "c") return { ...p, ay: f(p.ay), by: f(p.by) };
-    if (p.k === "cut") return { ...p, y: f(p.y) };
-    return { ...p, y: f(p.y), yMin: p.yMax === undefined ? undefined : f(p.yMax), yMax: p.yMin === undefined ? undefined : f(p.yMin) };
-  });
 }
 
 /** Raccourcit horizontalement autour de x = 0 (poisson vu de trois quarts pendant un virage). */

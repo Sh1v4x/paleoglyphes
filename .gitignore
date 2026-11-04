@@ -46,3 +46,6 @@ next-env.d.ts
 # réglages Claude locaux
 /.claude/settings.local.json
 /.claude/err
+
+# Copies de travail des agents (Claude Code)
+/.claude/worktrees/

@@ -1,7 +1,8 @@
 import { CELL_H, CELL_W, FONT_SIZE, UI_CELL_H, UI_CELL_W, UI_FONT_SIZE } from "../config";
 import { createFrame, type Frame } from "./frame";
 import { metrics, view } from "./metrics";
-import { settings } from "../settings";
+import { pointer } from "../input";
+import { uiScaleFor } from "../settings";
 
 const FIRST = 32, LAST = 126;
 
@@ -127,15 +128,15 @@ export class Renderer {
   private scale = 0;
   private zoom = 1;
 
-  /** À appeler avant de composer une image : suit le zoom du monde et la taille d'interface. */
+  /** À appeler avant de composer une image : suit le zoom du monde et la taille d'interface (réglage, doigt / souris). */
   sync() {
-    if (view.zoom !== this.zoom || settings.uiScale !== this.scale) this.resize(this.size.w, this.size.h);
+    if (view.zoom !== this.zoom || uiScaleFor(this.size.w, this.size.h, pointer.coarse) !== this.scale) this.resize(this.size.w, this.size.h);
   }
 
   resize(width: number, height: number) {
     const gl = this.gl;
     this.size = { w: width, h: height };
-    this.scale = settings.uiScale;
+    this.scale = uiScaleFor(width, height, pointer.coarse);
     this.zoom = view.zoom;
     const k = this.scale, z = this.zoom;
     const dpr = window.devicePixelRatio || 1;

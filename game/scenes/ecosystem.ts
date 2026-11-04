@@ -13,7 +13,7 @@ import { BIOME } from "../world/biomes";
 import type { World } from "../world/generate";
 import { T, isWater } from "../world/tiles";
 import { initFauna, stepFauna, type Bug } from "./eco-fauna";
-import { huntsSp, isFish, isFisher, liveNight, preyFits } from "./eco-special";
+import { ambusher, huntsSp, isFish, isFisher, liveAmbush, liveNight, nocturnal, preyFits } from "./eco-special";
 import { liveAir, liveSea } from "./eco-wild";
 import { isBaby, isYoung, lifeBrain, lifeStats, stepLife, type NestKit } from "./eco-nest";
 import { knockTree } from "../world/trees";
@@ -286,6 +286,11 @@ function reach(s: GameState, a: Animal, spec: Species, speed: number, dt: number
 // ---------------------------------------------------------------------------
 
 /** Plantes et points d'eau du monde (generate.ts), ou repli calculé ici s'ils manquent. */
+/** Prépare l'écosystème (végétation, plancton, points d'eau) d'avance : écran de chargement. */
+export function prepareEcosystem(s: GameState): void {
+  ensureEco(s);
+}
+
 function ensureEco(s: GameState): EcoState {
   const w = worldFor(s);
   const p = s.park;
@@ -632,7 +637,7 @@ function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
   const run = spec.runSpeed * (a.energy < 0.15 ? 0.7 : 1);
   // Cycle de vie (petits qui suivent, nid, parade, pillage) puis comportements propres (nocturne) :
   // prioritaires sur l'IA ordinaire.
-  if (!lifeBrain(kit(eco), s, a, spec, dt) && !(a.sp === "pectinodon" && liveNight(kit(eco), s, a, spec, dt, done))) switch (a.task) {
+  if (!lifeBrain(kit(eco), s, a, spec, dt) && !(nocturnal(a.sp) && liveNight(kit(eco), s, a, spec, dt, done)) && !(ambusher(a.sp) && liveAmbush(kit(eco), s, a, spec, dt))) switch (a.task) {
     case "wander": {
       const ld = leader[a.sp];
       a.mood = a.herd > 1 ? "herd" : "wander";
@@ -1050,8 +1055,10 @@ export function activity(a: Animal): string {
   }
   if (a.task === "feed" && a.targetId === 0 && a.mood === "scavenge") return a.action === "eat" ? "gobe des œufs dans un nid !" : "s'approche d'un nid";
   // Pectinodon : chasseur de nuit, dort caché le jour.
-  if (a.sp === "pectinodon" && a.mood === "den" && a.task === "rest") return still ? "dort caché dans la forêt" : "rejoint sa cachette dans la forêt";
-  if (a.sp === "pectinodon" && a.task === "graze") return a.action === "eat" ? "avale une petite proie" : a.action === "attack" ? "happe une proie dans le noir" : "chasse dans la nuit";
+  if (a.mood === "ambush" && a.task === "rest") return still ? "guette à l'affût, immobile dans l'eau" : "gagne son affût au bord de l'eau";
+  if (nocturnal(a.sp) && a.mood === "den" && a.task === "rest") return still ? (a.sp === "pectinodon" ? "dort caché dans la forêt" : "dort à l'abri") : "rejoint sa cachette";
+  if (a.sp === "shuvuuia" && a.task === "graze") return a.action === "eat" ? "avale un insecte" : a.action === "attack" ? "creuse le sable d'un coup de griffe" : "chasse les insectes dans la nuit";
+  if (nocturnal(a.sp) && a.task === "graze") return a.action === "eat" ? "avale une petite proie" : a.action === "attack" ? "happe une proie dans le noir" : a.sp === "troodon" ? "chasse dans la nuit polaire" : "chasse dans la nuit";
   if (spec?.habitat === "sea" && a.task !== "dead") {
     const fish = isFish(spec);
     switch (a.task) {

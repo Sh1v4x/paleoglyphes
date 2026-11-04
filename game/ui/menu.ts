@@ -1,8 +1,9 @@
 import { DEV } from "../config";
+import { pointer } from "../input";
 import { hex, type RGB, type Theme } from "../palette";
 import { setBg, setFg, type Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
-import { calm, settings, UI_SCALES } from "../settings";
+import { calm, settings, UI_SCALES, VOLUMES } from "../settings";
 import { actions, button, keyChip, panel, region, SP, text, wrap } from "./kit";
 import type { GameState } from "../state";
 import { BIG, type BigLabel } from "./bigtext";
@@ -93,10 +94,11 @@ export function drawMenu(s: GameState, th: Theme, f: Frame) {
   });
 
   if (s.menu.confirm) {
-    const warn = "Toute ta progression sera effacee ! Valide encore pour confirmer, Echap pour annuler.";
+    const warn = pointer.touch ? "Toute ta progression sera effacee ! Touche encore pour confirmer, a cote pour annuler."
+      : "Toute ta progression sera effacee ! Valide encore pour confirmer, Echap pour annuler.";
     small(f, warn, cx(warn.length), y0 + 9 + 3 * 7 + 5, sk.hi, sk.panel);
   }
-  const hint = "clic ou fleches / Tab + Entree : choisir    Echap : fermer";
+  const hint = pointer.touch ? "Toucher : choisir    Toucher a cote : fermer" : "clic ou fleches / Tab + Entree : choisir    Echap : fermer";
   small(f, hint, cx(hint.length), y0 + H - 2, sk.dim, sk.panel);
 }
 
@@ -111,12 +113,23 @@ export function drawSettings(s: GameState, th: Theme, ui: Frame) {
   const rows: { title: string; help: string; draw: (x: number, y: number) => void }[] = [
     {
       title: "Taille de l'interface",
-      help: "Agrandit les textes et les boutons (le monde ne change pas).",
+      help: "Agrandit les textes et les boutons (le monde ne change pas). Auto : plus grand sur tablette.",
       draw: (x, y) => {
-        for (const k of UI_SCALES) {
+        for (const k of ["auto", ...UI_SCALES] as const) {
           const on = settings.uiScale === k;
-          x += button(ui, th, `set:scale:${k}`, x, y, `${Math.round(k * 100)} %`, { active: on, toggle: true, tip: on ? "Taille actuelle" : "Choisir cette taille" }) + SP.gap;
+          x += button(ui, th, `set:scale:${k}`, x, y, k === "auto" ? "Auto" : `${Math.round(k * 100)} %`, { active: on, toggle: true, tip: on ? "Taille actuelle" : "Choisir cette taille" }) + SP.gap;
         }
+      },
+    },
+    {
+      title: "Son",
+      help: "Ambiance, cris des animaux et outils, tout synthetise. Touche B : couper / remettre.",
+      draw: (x, y) => {
+        for (const v of VOLUMES) {
+          const on = !settings.mute && settings.volume === v;
+          x += button(ui, th, `set:vol:${v}`, x, y, `${v * 100} %`, { active: on, toggle: true, tip: on ? "Volume actuel" : "Choisir ce volume" }) + SP.gap;
+        }
+        button(ui, th, "set:mute", x, y, "Muet", { toggle: true, active: settings.mute, key: "B", tip: "Couper / remettre le son" });
       },
     },
     {
@@ -148,7 +161,9 @@ export function drawSettings(s: GameState, th: Theme, ui: Frame) {
     yy++;
   });
   const hx = x + SP.pad;
-  const k = keyChip(ui, th, hx, y + H - 2, "Tab");
-  text(ui, hx + k + 1, y + H - 2, "choisir", u.dim, u.panel, u.alpha);
+  if (!pointer.touch) {
+    const k = keyChip(ui, th, hx, y + H - 2, "Tab");
+    text(ui, hx + k + 1, y + H - 2, "choisir", u.dim, u.panel, u.alpha);
+  }
   actions(ui, th, x + SP.pad, y + H - 2, iw, [{ id: "set:back", label: "Retour", key: "Echap", variant: "primary" }]);
 }

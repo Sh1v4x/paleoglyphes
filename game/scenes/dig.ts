@@ -9,10 +9,11 @@ import { hash2 } from "../rng";
 import { ofName, SPECIES } from "../species";
 import type { GameState } from "../state";
 import { calm } from "../settings";
-import { bar, button, hitAt, panel, text, wrap, type Hint } from "../ui/kit";
+import { bar, button, hitAt, keyboardMode, overlay, panel, setFocus, text, toolbar, wrap, type Hint, type ToolItem } from "../ui/kit";
 import { toast } from "../ui/toast";
 import { EGG_FACT, EXTRA_BY_ID } from "./dig-fossils";
-import { buildBackdrop, generateSite, hardness, MATRIX_INFO, SUB, type Backdrop, type Fossil, type Site } from "./dig-site";
+import { buildBackdrop, generateSite, hardness, MATRIX_INFO, siteSpecies, SUB, type Backdrop, type Fossil, type Site } from "./dig-site";
+import { currentDigSite, DIG_SITE, DIG_SITES, noteNewSites, siteOpen, type DigSiteId } from "./dig-sites";
 import { SM } from "./scenes.mat";
 import { UI_TOP, type Scene } from "./types";
 
@@ -46,10 +47,12 @@ export interface DigState {
   backdrop: Backdrop | null;
   /** Indice de fouille (gagné au quiz du carnet) : contours des fossiles cachés visibles jusqu'à cet instant. */
   reveal: number;
+  /** Fenêtre de choix du site de fouille ouverte (touche M). */
+  picker: boolean;
 }
 
 export function createDigState(): DigState {
-  return { site: null, tool: "brush", dust: [], digging: false, last: null, focus: -1, hover: null, tip: 0, tipT: 0, shake: -9, hint: null, backdrop: null, reveal: -9 };
+  return { site: null, tool: "brush", dust: [], digging: false, last: null, focus: -1, hover: null, tip: 0, tipT: 0, shake: -9, hint: null, backdrop: null, reveal: -9, picker: false };
 }
 
 const TOOLS: Record<Tool, { name: string; key: string; code: string; rx: number; ry: number; rate: number; desc: string }> = {
@@ -67,21 +70,29 @@ const TIPS = [
   "Chaque couche de roche est une page d'histoire : plus elle est profonde, plus elle est ancienne.",
   "Un fossile, c'est un os ou la roche a remplace la matiere, petit a petit, en des millions d'annees.",
   "Les os se fossilisent surtout s'ils sont vite recouverts de sable ou de boue, a l'abri de l'air.",
-  "A Hell Creek, on trouve les derniers dinosaures, juste avant la chute de la grande meteorite.",
   "Un oeuf fossile, c'est rare ! Sa coquille poreuse laissait respirer le petit qui grandissait dedans.",
 ];
 
 const LEFT_W = 27, RIGHT_W = 34;
 
+/**
+ * Petit écran (téléphone) : pas la place des deux panneaux autour du site. Les outils et l'état du site
+ * passent en deux rangées de boutons au-dessus, le site prend toute la largeur (voir `drawCompactUi`).
+ */
+const compact = () => metrics.ucols < LEFT_W + RIGHT_W + 40 || metrics.urows < 34;
+/** Lignes d'interface prises par les deux rangées du mode compact. */
+const COMPACT_ROWS = 4;
+
 /** Zone du site sur le calque monde (cellules), selon la taille de l'écran. */
 function layout(site: Site | null) {
   const { cols, rows, uiW, uiH, cellW, cellH, ucols } = metrics;
-  const left = Math.ceil(((LEFT_W + 2) * uiW) / cellW) + 2;
-  const right = Math.floor(((ucols - RIGHT_W - 2) * uiW) / cellW) - 2;
-  const top = Math.ceil((uiH * (UI_TOP - 0.6)) / cellH);
+  const small = compact();
+  const left = small ? 2 : Math.ceil(((LEFT_W + 2) * uiW) / cellW) + 2;
+  const right = small ? cols - 2 : Math.floor(((ucols - RIGHT_W - 2) * uiW) / cellW) - 2;
+  const top = Math.ceil((uiH * (UI_TOP + (small ? COMPACT_ROWS - 1 : 0) - 0.6)) / cellH);
   const bottom = Math.ceil((uiH * 1.6) / cellH) + 1;
-  const W = site?.W ?? Math.max(90, Math.min(240, right - left));
-  const H = site?.H ?? Math.max(45, Math.min(110, rows - top - bottom - 10));
+  const W = site?.W ?? (small ? Math.max(40, Math.min(240, right - left)) : Math.max(90, Math.min(240, right - left)));
+  const H = site?.H ?? (small ? Math.max(24, Math.min(110, rows - top - bottom - 6)) : Math.max(45, Math.min(110, rows - top - bottom - 10)));
   const gTop = site?.gTop ?? 5;
   const ox = left + Math.floor((right - left - W) / 2);
   const oy = Math.max(top + 4 + gTop, rows - bottom - H);
@@ -98,7 +109,7 @@ function ensureSite(s: GameState): Site | null {
   const d = s.dig;
   if (!d.site && metrics.cols > 20) {
     const L = layout(null);
-    d.site = generateSite(s.progress, L.W, L.H, (Math.random() * 1e9) | 0);
+    d.site = generateSite(s.progress, currentDigSite(s.progress).id, L.W, L.H, (Math.random() * 1e9) | 0);
     d.dust = []; d.focus = -1; d.backdrop = null;
   }
   return d.site;
@@ -134,7 +145,7 @@ function checkComplete(s: GameState, site: Site) {
   site.complete = true;
   s.progress.digs++;
   saveProgress(s.progress);
-  toast(s, "Site termine !", "Bravo ! Clique sur << Site suivant >> pour explorer une nouvelle falaise.");
+  toast(s, "Site termine !", "Bravo ! Clique sur << Site suivant >> pour une nouvelle falaise, ou change de site (touche M).");
 }
 
 /** Le fossile arrive au camp : on l'ajoute à la collection. */
@@ -233,12 +244,43 @@ function nextSite(s: GameState) {
   ensureSite(s);
 }
 
+/** Ouvre ou ferme le choix du site (focus sur le site en cours, visible si ouvert au clavier). */
+function togglePicker(s: GameState, open: boolean, byKey = false) {
+  s.dig.picker = open;
+  setFocus(open ? `dig:site:${currentDigSite(s.progress).id}` : undefined, open && (byKey || keyboardMode()));
+}
+
+/** Va fouiller un autre site : la falaise en cours est abandonnée (les fossiles récoltés restent acquis). */
+function chooseSite(s: GameState, id: DigSiteId) {
+  const p = s.progress;
+  togglePicker(s, false);
+  if (!siteOpen(p, id)) return;
+  p.digSite = id;
+  saveProgress(p);
+  if (s.dig.site?.where !== id) nextSite(s);
+}
+
+/** « Le savais-tu ? » : faits du site, puis conseils de fouille. */
+const tipsOf = (site: Site) => [...DIG_SITE[site.where].facts, ...TIPS];
+
 export const digScene: Scene = {
   update(s, input: Input, dt) {
     const d = s.dig;
     const site = ensureSite(s);
     if (!site) return;
     const L = layout(site);
+    noteNewSites(s);
+
+    // Choix du site : fenêtre modale, la falaise attend.
+    if (d.picker) {
+      d.hover = null; d.digging = false;
+      if (input.pressed.includes("KeyM")) togglePicker(s, false);
+      for (const id of input.ui) {
+        if (id === "dig:sites:close") togglePicker(s, false);
+        if (id.startsWith("dig:site:")) { chooseSite(s, id.slice(9) as DigSiteId); return; }
+      }
+      return;
+    }
 
     const tryCollect = () => {
       const f = site.fossils.find(ready);
@@ -250,11 +292,13 @@ export const digScene: Scene = {
       // Tab sert au focus clavier (cœur) : Espace fait tourner les outils.
       if (k === "Space") d.tool = TOOL_ORDER[(TOOL_ORDER.indexOf(d.tool) + 1) % TOOL_ORDER.length];
       if (k === "Enter") tryCollect();
+      if (k === "KeyM") togglePicker(s, true, true);
     }
     for (const id of input.ui) {
       if (id.startsWith("dig:tool:")) d.tool = id.slice(9) as Tool;
       if (id === "dig:next" && site.complete) { nextSite(s); return; }
       if (id === "dig:collect") tryCollect();
+      if (id === "dig:sites") togglePicker(s, true);
       if (id === "dig:reveal") revealAll(s, site);
       // Indice de fouille (quiz du carnet) : dépense un jeton, montre les contours quelques secondes.
       if (id === "dig:hint" && (s.progress.hints ?? 0) > 0 && !site.complete) {
@@ -320,7 +364,7 @@ export const digScene: Scene = {
     }
     d.dust = d.dust.filter((p) => p.life > 0);
     d.tipT += dt;
-    if (d.tipT > 16) { d.tipT = 0; d.tip = (d.tip + 1) % TIPS.length; }
+    if (d.tipT > 16) { d.tipT = 0; d.tip = (d.tip + 1) % tipsOf(site).length; }
   },
 
   compose(s, th, world, ui) {
@@ -343,7 +387,8 @@ export const digScene: Scene = {
 
   hints(s) {
     const site = s.dig.site;
-    const h: Hint[] = [["Glisser", "creuser"], ["E R F", "outil"], ["Clic", "recolter un fossile degage"]];
+    if (s.dig.picker) return [["Tab", "site suivant"], ["Entree", "y aller"], ["Echap", "fermer"]];
+    const h: Hint[] = [["Glisser", "creuser"], ["E R F", "outil"], ["Clic", "recolter un fossile degage"], ["M", "changer de site"]];
     if (site?.complete) h.push(["Entree", "site suivant"]);
     else h.push(["Entree", "recolter"]);
     return h;
@@ -358,7 +403,14 @@ export const digScene: Scene = {
       ["Espace", "outil suivant"],
       ["Clic", "recolter un fossile assez degage"],
       ["Entree", "recolter, ou passer au site suivant une fois termine"],
+      ["M", "choisir le site de fouille (Hell Creek, Alaska, Gobi, mer du Kansas)"],
     ];
+  },
+
+  back(s) {
+    if (!s.dig.picker) return false;
+    togglePicker(s, false);
+    return true;
   },
 };
 
@@ -619,6 +671,9 @@ function drawCursor(s: GameState, th: Theme, f: Frame, site: Site, ox: number, o
 function drawUi(s: GameState, th: Theme, ui: Frame, site: Site) {
   const d = s.dig, u = th.ui;
   const T = (x: number, y: number, str: string, col: RGB = u.text) => text(ui, x, y, str, col, u.panel, u.alpha);
+  // Choix du site : seule la fenêtre reste (Tab ne parcourt que ses boutons), aussi sur petit écran.
+  if (d.picker) return drawPicker(s, th, ui, site);
+  if (compact()) { drawCompactUi(s, th, ui, site); return; }
 
   // --- Outils (gauche) ---
   const lw = LEFT_W, lx = 1, ly = UI_TOP, inner = lw - 4;
@@ -675,12 +730,15 @@ function drawUi(s: GameState, th: Theme, ui: Frame, site: Site) {
   const rw = RIGHT_W, rx = ui.cols - rw - 1, ry = UI_TOP, rin = rw - 4;
   const bones = site.fossils.filter((f) => f.kind === "bone");
   const extras = site.fossils.filter((f) => f.kind !== "bone" && f.state === "done");
-  const tip = wrap(TIPS[d.tip], rin);
+  const tips = tipsOf(site);
+  const tip = wrap(tips[d.tip % tips.length], rin);
   const name = wrap(site.name.replace(/^Site \d+ - /, ""), rin);
-  const rh = 4 + name.length + bones.length + (extras.length ? extras.length + 1 : 0) + 2 + tip.length + (site.complete ? 4 : 1);
+  const rh = 6 + name.length + bones.length + (extras.length ? extras.length + 1 : 0) + 2 + tip.length + (site.complete ? 4 : 1);
   panel(ui, th, rx, ry, rw, rh, `Site ${site.n}`);
   y = ry + 1;
   name.forEach((l) => T(rx + 2, y++, l, u.hi));
+  button(ui, th, "dig:sites", rx + 2, y++, "Changer de site", { w: rin, key: "M", tip: "Choisir un autre gisement de fossiles" });
+  y++;
   const done = bones.filter((f) => f.state === "done").length;
   T(rx + 2, y++, `Os recoltes : ${done} / ${bones.length}`);
   y++;
@@ -712,10 +770,81 @@ function drawUi(s: GameState, th: Theme, ui: Frame, site: Site) {
     else if (f && f.state === "buried" && f.exposed > 0) label = ` Degage : ${Math.round((f.exposed / f.cells) * 100)} % `;
     if (label) text(ui, Math.min(ui.cols - label.length - 1, c.x + 2), c.y - 1, label, ready(f!) ? u.panel : u.text, ready(f!) ? u.hi : u.panel, 0.95);
   }
-  if (d.hint && s.time - d.hint.t < 2.5) {
-    const w = d.hint.text.length + 4, x = Math.floor((ui.cols - w) / 2);
-    panel(ui, th, x, ui.rows - 5, w, 3);
-    T(x + 2, ui.rows - 4, d.hint.text);
-  }
+  drawDigHint(s, th, ui);
+}
 
+/** Message « Pas encore : dégage-le encore un peu », en bas au centre. */
+function drawDigHint(s: GameState, th: Theme, ui: Frame) {
+  const d = s.dig;
+  if (!d.hint || s.time - d.hint.t >= 2.5) return;
+  const lines = wrap(d.hint.text, ui.cols - 8);
+  const w = Math.max(...lines.map((l) => l.length)) + 4, x = Math.floor((ui.cols - w) / 2), y = ui.rows - 4 - lines.length;
+  panel(ui, th, x, y, w, lines.length + 2);
+  lines.forEach((l, i) => text(ui, x + 2, y + 1 + i, l, th.ui.text, th.ui.panel, th.ui.alpha));
+}
+
+/**
+ * Interface compacte (petit écran) : outils sur la première rangée, puis l'état du site et ses actions
+ * (récolter, site suivant, indice) sur la seconde. Le détail des couches et l'anecdote sont omis.
+ */
+function drawCompactUi(s: GameState, th: Theme, ui: Frame, site: Site) {
+  const d = s.dig, u = th.ui, x = 1, w = ui.cols - 2;
+  const tools: ToolItem[] = TOOL_ORDER.map((t) => ({ id: `dig:tool:${t}`, label: TOOLS[t].name, short: TOOLS[t].name.slice(0, 4), icon: TOOLS[t].name[0], toggle: true, active: d.tool === t, key: TOOLS[t].key, tip: TOOLS[t].desc }));
+  const used = toolbar(ui, th, x, UI_TOP, w, tools);
+  const bones = site.fossils.filter((f) => f.kind === "bone");
+  const status = `Site ${site.n}  Os ${bones.filter((f) => f.state === "done").length}/${bones.length}`;
+  if (used + status.length + 1 <= w) text(ui, x + w - status.length, UI_TOP, status, u.hi, u.panel, u.alpha);
+  const fo = d.focus >= 0 ? site.fossils[d.focus] : undefined;
+  const acts: ToolItem[] = [];
+  if (site.complete) acts.push({ id: "dig:next", label: "Site suivant", key: "Entree", variant: "primary" });
+  else if (site.fossils.some(ready)) acts.push({ id: "dig:collect", label: "Recolter", key: "Entree", variant: "primary" });
+  const hints = s.progress.hints ?? 0;
+  acts.push({ id: "dig:sites", label: "Site", key: "M", tip: "Choisir un autre gisement de fossiles" });
+  acts.push({ id: "dig:hint", label: `Indice (${hints})`, disabled: hints <= 0 || site.complete || s.time < d.reveal, tip: "Montre les fossiles caches quelques secondes (indices a gagner au quiz du Carnet)" });
+  if (DEV && !site.complete) acts.push({ id: "dig:reveal", label: "Tout degager (test)", short: "Test", variant: "ghost", tip: "Test : degager tout le site" });
+  const aw = toolbar(ui, th, x, UI_TOP + 2, w, acts);
+  if (fo && fo.state === "buried" && !site.complete) {
+    const pct = `Degage ${Math.round((fo.exposed / fo.cells) * 100)} %`;
+    if (aw + pct.length + 1 <= w) text(ui, x + w - pct.length, UI_TOP + 2, pct, u.text, u.panel, u.alpha);
+  }
+  drawDigHint(s, th, ui);
+}
+
+/** Fenêtre de choix du site : chaque gisement, ses espèces, et ce qu'il faut pour l'ouvrir. */
+function drawPicker(s: GameState, th: Theme, ui: Frame, site: Site) {
+  const u = th.ui, p = s.progress;
+  const T = (x: number, y: number, str: string, col: RGB = u.text) => text(ui, x, y, str, col, u.panel, u.alpha);
+  const w = Math.min(ui.cols - 4, 78), inner = w - 4;
+  const rows = DIG_SITES.map((def) => {
+    const open = siteOpen(p, def.id);
+    const sps = siteSpecies(p, def.id);
+    const known = sps.filter((sp) => p.assembled.includes(sp)).map((sp) => SPECIES[sp]?.name ?? sp);
+    const mystery = sps.length - known.length;
+    const missing = sps.reduce((n, sp) => n + (SPECIES[sp]?.bones ?? []).filter((b) => !(p.bones[sp] ?? []).includes(b.id)).length, 0);
+    const who = [...known, ...(mystery ? [`${mystery} espece${mystery > 1 ? "s" : ""} a decouvrir`] : [])].join(", ");
+    const status = !open ? `Assemble ${def.unlock} squelettes pour l'ouvrir (${p.assembled.length}/${def.unlock}).`
+      : missing ? `Especes : ${who}.` : "Tout est trouve ici pour l'instant : de nouvelles especes viendront.";
+    return { def, open, about: wrap(def.about, inner - 2), status: wrap(status, inner - 2), missing };
+  });
+  const foot = wrap("Changer de site abandonne la falaise en cours : les fossiles deja recoltes restent a toi.", inner);
+  const h = Math.min(ui.rows - UI_TOP - 2, 3 + rows.reduce((n, r) => n + 2 + r.about.length + r.status.length, 0) + foot.length);
+  const x = Math.floor((ui.cols - w) / 2), y0 = UI_TOP + 1;
+  overlay(() => {
+    panel(ui, th, x, y0, w, h, "Sites de fouille", { close: "dig:sites:close", key: "M", overlay: true });
+    let y = y0 + 2;
+    const bottom = y0 + h - 1 - foot.length;
+    for (const r of rows) {
+      if (y >= bottom) break;
+      const here = r.def.id === site.where;
+      const label = `${r.def.name}${r.open ? "" : " (ferme)"}`;
+      const bw = Math.min(inner, Math.max(22, label.length + 6));
+      button(ui, th, `dig:site:${r.def.id}`, x + 2, y, label, { w: bw, toggle: true, active: here, disabled: !r.open, tip: here ? "Tu fouilles ici" : `Aller fouiller a ${r.def.name}` });
+      T(x + 3 + bw, y, `${r.def.place}, ${r.def.age}`.slice(0, Math.max(0, inner - bw - 1)), u.dim);
+      y++;
+      for (const l of r.about) if (y < bottom) T(x + 4, y++, l);
+      for (const l of r.status) if (y < bottom) T(x + 4, y++, l, !r.open ? u.dim : r.missing ? u.ok : u.hi);
+      y++;
+    }
+    foot.forEach((l, i) => T(x + 2, y0 + h - 1 - foot.length + i, l, u.dim));
+  });
 }

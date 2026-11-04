@@ -55,9 +55,12 @@ const NIGHT_TINT: RGB = [0.5, 0.6, 1.0];
 const GOLD_TINT: RGB = [1.0, 0.72, 0.5];
 const LANTERN: RGB = [1.0, 0.85, 0.6];
 
-/** Le thème éclairé à cette heure : ambiance, teinte, lanterne, vignettage, bestioles, reflets. */
-export function litTheme(th: Theme, hour: number): Theme {
-  const d = daylight(hour), n = 1 - d, g = golden(hour);
+/**
+ * Le thème éclairé à cette heure : ambiance, teinte, lanterne, vignettage, bestioles, reflets.
+ * `d` et `g` remplacent la lumière et l'heure dorée de l'horloge (jour et nuit polaires de la toundra).
+ */
+export function litTheme(th: Theme, hour: number, d = daylight(hour), g = golden(hour)): Theme {
+  const n = 1 - d;
   const tint = mix(mix(NIGHT_TINT, th.lightTint, d), GOLD_TINT, g * 0.55);
   return {
     ...th,

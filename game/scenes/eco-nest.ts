@@ -288,7 +288,8 @@ export function lifeBrain(k: NestKit, s: GameState, a: Animal, spec: Species, dt
     if (c.mate.task === "dead" || (c.ttl -= dt) <= 0) { courting.delete(a); return false; }
     const d = Math.hypot(c.mate.x - a.x, c.mate.y - a.y);
     a.mood = "court";
-    if (d > 180) { if (k.go(s, a, spec, c.mate.x, c.mate.y, spec.walkSpeed, dt) < 0) courting.delete(a); }
+    // Vrai chemin (rivières, falaises) : sur la grande carte, le partenaire peut être loin.
+    if (d > 180) { if (k.go(s, a, spec, c.mate.x, c.mate.y, spec.walkSpeed, dt, true) < 0) courting.delete(a); }
     else { k.act(a, "idle"); k.face(a, c.mate.x); }
     return true;
   }
@@ -478,10 +479,28 @@ function turtleLay(k: NestKit, s: GameState, a: Animal, spec: Species, pl: Plan,
  * boire, dormir). Bébé ptérosaure : il reste au sol ; juvénile ptérosaure : il vole seul.
  * Petit mosasaure : il nage contre sa mère.
  */
+/** Espèces dont les jeunes vivent en crèche, entre eux. */
+const CRECHE: ReadonlySet<SpeciesId> = new Set<SpeciesId>(["pinacosaurus"]);
+
+/** Tête de la crèche d'un jeune : le plus âgé des jeunes de son espèce à moins de 900 px (peut-être lui). Seul : aucune. */
+function crecheLead(s: GameState, a: Animal): Animal | undefined {
+  let lead: Animal | undefined, n = 0;
+  for (const o of s.park.animals) {
+    if (o.sp !== a.sp || o.task === "dead" || !isYoung(o) || Math.hypot(o.x - a.x, o.y - a.y) > 900) continue;
+    n++;
+    if (!lead || o.life > lead.life) lead = o;
+  }
+  return n >= 2 ? lead : undefined;
+}
+
 function youngStep(k: NestKit, s: GameState, a: Animal, spec: Species, hab: string, dt: number): boolean {
   if (hab === "air" && !isBaby(spec, a)) return false;
   if (hab === "land" && a.task !== "wander") return false;
-  const par = a.parentId ? k.get(a.parentId) : undefined;
+  // Crèche : les jeunes Pinacosaures se regroupent entre eux, sans les adultes (des gisements du Gobi
+  // conservent des groupes de jeunes morts ensemble). Le plus âgé mène, les autres le suivent.
+  const lead = hab === "land" && CRECHE.has(spec.id) && !isBaby(spec, a) ? crecheLead(s, a) : undefined;
+  if (lead === a) return false;
+  const par = lead ?? (a.parentId ? k.get(a.parentId) : undefined);
   if (!par || par.task === "dead") {
     if (hab !== "air") return false;
     // Bébé ptérosaure orphelin : il attend au sol, sans s'envoler.
@@ -611,9 +630,13 @@ function breedScan(s: GameState, k: NestKit) {
     }
     if (!pa || !pb) continue;
     if (bd > near) {
-      // Trop loin l'un de l'autre : parade, ils se rejoignent (solitaires surtout).
-      if (bd < 4000 && !courting.has(pa) && !courting.has(pb) && pa.task === "wander" && pb.task === "wander") {
-        courting.set(pa, { mate: pb, ttl: 80 }); courting.set(pb, { mate: pa, ttl: 80 });
+      // Trop loin l'un de l'autre : parade, ils se rejoignent (solitaires surtout). Une espèce rare se
+      // cherche à travers toute la réserve (sinon, sur la grande carte, deux solitaires ne se croisent
+      // jamais et l'espèce s'éteint de vieillesse) ; le délai laisse le temps de traverser.
+      const rare = living(s, a0.sp) <= 3;
+      if ((bd < 4000 || rare) && !courting.has(pa) && !courting.has(pb) && pa.task === "wander" && pb.task === "wander") {
+        const ttl = Math.min(900, Math.max(80, bd / (spec.walkSpeed * 0.5)));
+        courting.set(pa, { mate: pb, ttl }); courting.set(pb, { mate: pa, ttl });
       }
       continue;
     }

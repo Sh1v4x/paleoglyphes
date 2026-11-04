@@ -4,12 +4,50 @@ body {
   height: 100%;
   overflow: hidden;
   background: #0b0a0f;
+  /* Écran tactile : pas de défilement, de rebond, de sélection ni de menu d'appui long du navigateur. */
+  overscroll-behavior: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
+/* Zone de jeu : tout l'écran moins les zones sûres (encoche, coins arrondis, barre d'accueil). */
 main {
+  position: fixed;
+  inset: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100vh;
   overflow: hidden;
+}
+
+/* Écran de chargement (components/Loading.tsx), aux couleurs du jeu. */
+.loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1rem;
+  background: #0b0a0f;
+  color: #9fb2c6;
+  font-size: 14px;
+  text-align: center;
+}
+.loading pre {
+  margin: 0;
+  color: #d6a77a;
+  line-height: 1.15;
+}
+.loading p {
+  margin: 0;
+}
+.loading-title {
+  color: #e9e2d0;
+  letter-spacing: 0.3em;
+  font-weight: 500;
 }

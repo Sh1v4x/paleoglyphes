@@ -8,7 +8,7 @@ import { drawRaster } from "../render/sprite";
 import { discovered, SPECIES } from "../species";
 import type { Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
-import { ascii, button, panel, put, text, wrap } from "../ui/kit";
+import { ascii, button, emptyState, panel, put, text, toolbar, wrap } from "../ui/kit";
 import { cached, fmtKg, fmtM, fmtNum, groundLine, human, idle, known, knownList, RH, RW } from "./journal-common";
 import { UI_TOP } from "./types";
 
@@ -162,6 +162,11 @@ export function sizesPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
   const u = th.ui, z = s.journal.sizes;
   const top = UI_TOP, bottom = ui.rows - 2;
   const list = knownList(s);
+  // ponytail: sous 70 colonnes (téléphone en portrait), pas la place de la liste et du dessin côte à côte.
+  if (ui.cols < 70) {
+    emptyState(ui, th, "Les tailles", "La comparaison a besoin de largeur : tourne ton appareil en paysage (ou agrandis la fenetre).");
+    return;
+  }
   // --- Liste des espèces (gauche) ---
   const LW = 26;
   panel(ui, th, 1, top, LW, bottom - top, "Espèces");
@@ -185,12 +190,12 @@ export function sizesPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
 
   // --- Choix de la référence (haut) ---
   const ax0 = LW + 3, aw0 = ui.cols - ax0 - 2;
-  let bx = ax0;
-  bx += text(ui, bx, top, "Comparer avec : ", u.dim);
-  for (const id of REF_ORDER) {
+  // Libellés raccourcis (premier mot) si la rangée ne tient pas.
+  const bx = ax0 + text(ui, ax0, top, ui.cols < 120 ? "Avec : " : "Comparer avec : ", u.dim);
+  toolbar(ui, th, bx, top, ui.cols - bx, REF_ORDER.map((id) => {
     const lab = id === "none" ? "Humain seul" : REFS[id].label;
-    bx += button(ui, th, `journal:sz:ref:${id}`, bx, top, lab, { active: refId === id }) + 1;
-  }
+    return { id: `journal:sz:ref:${id}`, label: lab, short: lab.split(" ")[0], active: refId === id };
+  }));
 
   // --- Dessin à l'échelle (calque monde) ---
   const nText = 5;
@@ -221,7 +226,7 @@ export function sizesPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
     const dx = cx - r.cx;
     drawRaster(world, th, r, dx, groundY, f.tint ? { tint: tintC, light: i === 0 ? 0.8 : 0.6 } : {});
     // Cotes : longueur au-dessus, hauteur à droite, légendes sous le sol.
-    const ux0 = Math.ceil(cx / rw), ux1 = Math.max(ux0, Math.floor((cx + r.w) / rw) - 1);
+    const ux0 = Math.ceil(cx / rw), ux1 = Math.max(ux0, Math.min(ui.cols - 1, Math.floor((cx + r.w) / rw)) - 1);
     const uTop = Math.max(top + 2, Math.floor((groundY + r.cy) / rh) - 1);
     const hM = (-r.cy * CELL_H) / (kq * PX_PER_M);
     const heightM = f.key === "human" ? 1.75 : ref && i === 2 ? ref.heightM : Math.round(hM * 2) / 2 || hM;
@@ -238,7 +243,7 @@ export function sizesPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
       put(ui, hx, hy0, 94, u.dim); // ^
       for (let yy = hy0 + 1; yy < hy1; yy++) put(ui, hx, yy, 124, u.dim);
       put(ui, hx, hy1, 118, u.dim); // v
-      text(ui, hx + 1, Math.floor((hy0 + hy1) / 2), hLab, u.text);
+      if (hx + 1 + hLab.length <= ui.cols) text(ui, hx + 1, Math.floor((hy0 + hy1) / 2), hLab, u.text);
     } else text(ui, hx, gRow, hLab, u.text);
     const mid = Math.floor((ux0 + ux1) / 2);
     const nm = ascii(f.name);

@@ -52,6 +52,14 @@ export const M = {
  *   320-329 Velociraptor (game/species/velociraptor.mat.ts)
  *   330-339 Protoceratops (game/species/protoceratops.mat.ts)
  *   340-349 Citipati (game/species/citipati.mat.ts)
+ *   350-359 Ornithomimus (game/species/ornithomimus.mat.ts)
+ *   360-369 Deinosuchus (game/species/deinosuchus.mat.ts)
+ *   370-379 Troodontidé d'Alaska (game/species/troodon.mat.ts)
+ *   380-389 Shuvuuia (game/species/shuvuuia.mat.ts)
+ *   390-399 Pinacosaurus (game/species/pinacosaurus.mat.ts)
+ *   400-409 Elasmosaurus (game/species/elasmosaurus.mat.ts)
+ *   410-419 Therizinosaurus (game/species/therizino.mat.ts)
+ *   480-499 roches des sites de fouille (game/scenes/scenes.mat.ts)
  * Les couleurs et rampes de chaque matière dépendent du thème : voir palette.ts.
  */
 

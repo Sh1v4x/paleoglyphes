@@ -14,6 +14,7 @@ import { T } from "../world/tiles";
 import { isFisher } from "./eco-special";
 import { drawLines, lerp, type Line } from "./journal-common";
 import { UI_TOP } from "./types";
+import { zoomLevel } from "./park";
 
 /**
  * Carnet de voyage : une page par biome de la réserve. Le vrai site fossilifère qu'il représente, son
@@ -104,6 +105,8 @@ function homes(sp: Species): readonly BiomeId[] {
 
 /** Note le biome au centre de la caméra de la réserve (calculé par la météo) ; une nouvelle page s'ouvre. */
 export function recordVisit(s: GameState) {
+  // Visiter, c'est regarder de près : la vue carte (dézoom) ne débloque pas de page.
+  if (zoomLevel(s).m > 1) return;
   const b = s.weather.viewBiome as BiomeId;
   const seen = (s.progress.biomes ??= []);
   if (seen.includes(b) || !BIOME_INFO[b]) return;

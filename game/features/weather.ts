@@ -9,6 +9,7 @@ import { worldFor, type GameState } from "../state";
 import { calm } from "../settings";
 import { put, region, text } from "../ui/kit";
 import { toast } from "../ui/toast";
+import { viewH, viewW } from "../scenes/park";
 import { BIOME } from "../world/biomes";
 import type { World } from "../world/generate";
 import { T, isWater } from "../world/tiles";
@@ -488,8 +489,9 @@ const seen = (s: GameState): Levels => s.weather.view;
 /** Météo locale : le biome au centre de l'écran transforme la météo globale (transition en douceur). */
 function localize(s: GameState, dt: number) {
   const st = s.weather, L = st.lv, w = worldFor(s);
-  const cx = Math.floor((s.park.cam.x + (metrics.cols * metrics.cellW) / 2) / CELL_W);
-  const cy = Math.floor((s.park.cam.y + (metrics.rows * metrics.cellH) / 2) / CELL_H);
+  // Centre réel de la vue (zoom et vue carte compris).
+  const cx = Math.floor((s.park.cam.x + viewW(s) / 2) / CELL_W);
+  const cy = Math.floor((s.park.cam.y + viewH(s) / 2) / CELL_H);
   const b = cx >= 0 && cy >= 0 && cx < w.cols && cy < w.rows ? w.biome[cy * w.cols + cx] : BIOME.HellCreek;
   st.viewBiome = b;
   const tg: Levels = { ...L };

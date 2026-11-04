@@ -6,12 +6,13 @@
 import { CARTOON, DARK } from "../game/palette";
 import { rasterize, type Prim } from "../game/render/raster";
 import { eggModel, nestModel } from "../game/species/eggs";
-import type { SpeciesId } from "../game/species/types";
+import { isSpeciesId } from "../game/species";
 
 const [id = "edmonto", n = "4", style, json] = process.argv.slice(2);
 /** Mode « json » : grilles colorées pour un rendu image externe. */
 const grids: { title: string; rows: [string, number[]][][] }[] = [];
-const sp = id as SpeciesId;
+if (!isSpeciesId(id)) throw new Error(`Unknown species: ${id}`);
+const sp = id;
 const theme = style === "cartoon" ? CARTOON : DARK;
 
 function show(title: string, prims: Prim[]) {

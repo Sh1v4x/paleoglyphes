@@ -71,7 +71,7 @@ function wantsToMove(a: Animal): boolean {
   const t = (a as Animal & { task?: string }).task;
   if (t === "dead" || t === "rest" || t === "call" || t === "attack" || t === "stunned" || t === "defend") return false;
   // Envol, atterrissage (sur place) et ponte de la tortue (elle creuse).
-  if (a.action === "takeoff" || (a.action === "land" && SPECIES[a.sp]?.habitat === "air")) return false;
+  if (a.action === "takeoff" || (a.action === "land" && SPECIES[a.sp].habitat === "air")) return false;
   if (t === "flee" || t === "chase" || t === "hunt" || t === "retreat") return true;
   if (a.action === "eat" || a.action === "drink") return false;
   // Cycle de vie : gardien posé près du nid, petit posé près du parent, parade sur place.
@@ -83,7 +83,7 @@ function wantsToMove(a: Animal): boolean {
 
 for (let k = 0; k < steps; k++) {
   s.time += dt;
-  s.clock = advanceClock(s.clock, dt, s.clockSpeed);
+  advanceClock(s, dt);
   const ts = performance.now();
   parkScene.update(s, input, dt);
   if (k > per * 5) stepMax = Math.max(stepMax, performance.now() - ts);
@@ -113,7 +113,7 @@ for (let k = 0; k < steps; k++) {
     const a = live[i], b = live[j];
     // Les petits ont un corps réduit (growth) : ils peuvent se serrer contre leur parent.
     // Sauropode : seul le tronc compte (cou et queue passent au-dessus des voisins, comme dans ecosystem.ts).
-    const need = (Math.min(250, SPECIES[a.sp]?.halfLen ?? 30) * a.growth + Math.min(250, SPECIES[b.sp]?.halfLen ?? 30) * b.growth) * 0.3;
+    const need = (Math.min(250, SPECIES[a.sp].halfLen) * a.growth + Math.min(250, SPECIES[b.sp].halfLen) * b.growth) * 0.3;
     if (Math.abs(a.x - b.x) < need && Math.abs(a.y - b.y) < 8) {
       overlaps++;
       const T = (x: Animal) => `${x.sp}:${(x as Animal & { task?: string }).task}`;
@@ -125,7 +125,7 @@ for (let k = 0; k < steps; k++) {
     altMax = Math.max(altMax, a.alt);
     if (a.sp === "quetzal" && a.alt === 0 && a.mood !== "fly") landed++;
     const w = worldFor(s);
-    const sea = SPECIES[a.sp]?.habitat === "sea";
+    const sea = SPECIES[a.sp].habitat === "sea";
     if (sea && a.sp !== "archelon" && w.terrain[Math.floor(a.y / 7) * w.cols + Math.floor(a.x / 4)] !== 3) seaBad++;
     if (sea) {
       const t = deepSea(w, a.sp, a.x, a.y) ? 0 : (dry.get(a.id) ?? 0) + 1;
@@ -167,7 +167,7 @@ console.log(`paires : ${[...ov.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6
 console.log(`arbres renversés en ce moment : ${[...activeTrees()].length} / ${worldFor(s).trees.length}`);
 const live = s.park.animals.filter((a) => a.task !== "dead");
 const stages = new Map<string, number>();
-for (const a of live) { const st = stageOf(SPECIES[a.sp]!, a.life); stages.set(st, (stages.get(st) ?? 0) + 1); }
+for (const a of live) { const st = stageOf(SPECIES[a.sp], a.life); stages.set(st, (stages.get(st) ?? 0) + 1); }
 console.log(`cycle de vie : naissances ${lifeStats.births} (dont ${lifeStats.liveBirths} en mer)  nids ${lifeStats.nests} (éclos ${lifeStats.hatched}, max simultanés ${maxNests})  œufs volés ${lifeStats.stolen}`);
 console.log(`nids par espèce : ${[...nestBy.entries()].map(([k, n]) => `${k}=${n}`).join("  ")}`);
 console.log(`morts : vieillesse ${lifeStats.oldAge}  prédation ${lifeStats.predation}  retirés ${lifeStats.retired}   vivants max ${maxAll}`);

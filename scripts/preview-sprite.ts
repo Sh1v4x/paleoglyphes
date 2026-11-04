@@ -7,15 +7,15 @@
  */
 import { DARK } from "../game/palette";
 import { rasterize } from "../game/render/raster";
-import { SPECIES } from "../game/species";
-import type { Action, SpeciesId } from "../game/species/types";
+import { isSpeciesId, SPECIES } from "../game/species";
+import type { Action } from "../game/species/types";
 
 const [id = "ankylo", action = "idle", at = "0", walk = "0", ...rest] = process.argv.slice(2);
-const spec = SPECIES[id as SpeciesId];
-if (!spec) {
+if (!isSpeciesId(id)) {
   console.error(`Espece inconnue : ${id}. Dispo : ${Object.keys(SPECIES).join(", ")}`);
   process.exit(1);
 }
+const spec = SPECIES[id];
 const pose = { walk: Number(walk), moving: action === "walk" || action === "run" ? 1 : 0, time: 0.4, action: action as Action, actionT: Number(at) };
 const prims = rest.includes("skeleton") ? spec.skeleton(pose) : spec.model(pose);
 const r = rasterize(prims, 0, 0, rest.includes("flip"));

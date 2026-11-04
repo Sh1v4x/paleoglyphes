@@ -40,6 +40,8 @@ export const GROUP: Record<SpeciesId, string> = {
   quetzal: "ptérosaure (reptile volant)", pteranodon: "ptérosaure (reptile volant)", nyctosaurus: "ptérosaure (reptile volant)",
   mosa: "reptile marin (cousin des lézards)", archelon: "tortue marine géante", xiphactinus: "poisson géant",
   nanuq: "dinosaure", pachyrhino: "dinosaure", velociraptor: "dinosaure", protoceratops: "dinosaure", citipati: "dinosaure",
+  ornithomimus: "dinosaure", troodon: "dinosaure", shuvuuia: "dinosaure", pinacosaurus: "dinosaure", therizino: "dinosaure",
+  deinosuchus: "crocodilien géant (pas un dinosaure)", elasmosaurus: "plésiosaure (reptile marin)",
 };
 export const isDino = (id: SpeciesId) => GROUP[id] === "dinosaure";
 

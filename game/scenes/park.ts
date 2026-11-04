@@ -576,6 +576,7 @@ export const MINI_W = 28, MINI_H = 10;
 const MINI_GLYPH: Partial<Record<SpeciesId, string>> = {
   ankylo: "A", raptor: "R", trike: "T", edmonto: "E", pachy: "P", trex: "X",
   nanuq: "N", pachyrhino: "H", velociraptor: "V", protoceratops: "O", citipati: "C",
+  ornithomimus: "M", deinosuchus: "D", troodon: "Y", shuvuuia: "S", pinacosaurus: "K", elasmosaurus: "L", therizino: "G",
 };
 
 export function centerOn(s: GameState, x: number, y: number) {

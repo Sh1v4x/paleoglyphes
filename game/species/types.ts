@@ -7,7 +7,9 @@ export type SpeciesId =
   | "ankylo" | "raptor" | "trike" | "edmonto" | "pachy" | "trex" | "quetzal" | "mosa"
   | "archelon" | "xiphactinus" | "pteranodon" | "nyctosaurus" | "pectinodon" | "allosaurus" | "alamosaurus"
   // Toundra (Alaska, Prince Creek) et désert (Gobi, Djadochta).
-  | "nanuq" | "pachyrhino" | "velociraptor" | "protoceratops" | "citipati";
+  | "nanuq" | "pachyrhino" | "velociraptor" | "protoceratops" | "citipati"
+  // Deuxième vague : un comportement nouveau par biome.
+  | "ornithomimus" | "deinosuchus" | "troodon" | "shuvuuia" | "pinacosaurus" | "elasmosaurus" | "therizino";
 
 /**
  * Ce que fait un animal. Chaque modèle sait dessiner chaque action (au minimum « idle » et « walk »).

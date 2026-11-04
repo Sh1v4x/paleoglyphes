@@ -105,12 +105,21 @@ export function digOrigin(s: GameState): { ox: number; oy: number } {
   return { ox: L.ox, oy: L.oy };
 }
 
+/** Tirages d'une nouvelle falaise quand aucun os n'y trouve sa place. */
+const SITE_TRIES = 5;
+
 function ensureSite(s: GameState): Site | null {
   const d = s.dig;
   if (!d.site && metrics.cols > 20) {
-    const L = layout(null);
-    d.site = generateSite(s.progress, currentDigSite(s.progress).id, L.W, L.H, (Math.random() * 1e9) | 0);
+    const L = layout(null), where = currentDigSite(s.progress).id;
+    let site = generateSite(s.progress, where, L.W, L.H, (Math.random() * 1e9) | 0).site;
+    for (let i = 1; i < SITE_TRIES && !site.fossils.some((f) => f.kind === "bone"); i++) {
+      site = generateSite(s.progress, where, L.W, L.H, (Math.random() * 1e9) | 0).site;
+    }
+    d.site = site;
     d.dust = []; d.focus = -1; d.backdrop = null;
+    // No bone at all: the player can move on, but an untouched cliff doesn't count as a dig.
+    if (!site.fossils.some((f) => f.kind === "bone")) site.complete = true;
   }
   return d.site;
 }
@@ -818,9 +827,9 @@ function drawPicker(s: GameState, th: Theme, ui: Frame, site: Site) {
   const rows = DIG_SITES.map((def) => {
     const open = siteOpen(p, def.id);
     const sps = siteSpecies(p, def.id);
-    const known = sps.filter((sp) => p.assembled.includes(sp)).map((sp) => SPECIES[sp]?.name ?? sp);
+    const known = sps.filter((sp) => p.assembled.includes(sp)).map((sp) => SPECIES[sp].name);
     const mystery = sps.length - known.length;
-    const missing = sps.reduce((n, sp) => n + (SPECIES[sp]?.bones ?? []).filter((b) => !(p.bones[sp] ?? []).includes(b.id)).length, 0);
+    const missing = sps.reduce((n, sp) => n + SPECIES[sp].bones.filter((b) => !(p.bones[sp] ?? []).includes(b.id)).length, 0);
     const who = [...known, ...(mystery ? [`${mystery} espece${mystery > 1 ? "s" : ""} a decouvrir`] : [])].join(", ");
     const status = !open ? `Assemble ${def.unlock} squelettes pour l'ouvrir (${p.assembled.length}/${def.unlock}).`
       : missing ? `Especes : ${who}.` : "Tout est trouve ici pour l'instant : de nouvelles especes viendront.";

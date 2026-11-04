@@ -1,4 +1,5 @@
 import { CELL_H, CELL_W } from "../config";
+import { smoothstep } from "../math";
 import type { Theme } from "../palette";
 import type { Frame } from "./frame";
 
@@ -9,11 +10,6 @@ export interface PointLight {
   intensity: number;
 }
 
-
-const smooth = (a: number, b: number, x: number) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
 
 /**
  * Remplit la lumière de chaque cellule : lune ou soleil ambiant + lueur autour du joueur + vignettage,
@@ -29,7 +25,7 @@ export function computeLight(f: Frame, th: Theme, camX: number, camY: number, gx
     for (let x = 0; x < cols; x++) {
       const i = y * cols + x;
       const nx = (x / cols - 0.5) * 2;
-      const vig = 1 - smooth(v0, v1, Math.hypot(nx, ny * 0.9));
+      const vig = 1 - smoothstep(v0, v1, Math.hypot(nx, ny * 0.9));
       const px = (camX + x + 0.5) * CELL_W;
       const d = Math.hypot(px - gx, (py - gy) * 1.25) / th.glowRadius;
       const g = d < 1 ? (1 - d) * (1 - d) * th.glow : 0;

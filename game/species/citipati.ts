@@ -4,7 +4,8 @@ import { PX_PER_M } from "../config";
 import { BIOME } from "../world/biomes";
 import { CM } from "./carnivores.mat";
 import { CIM } from "./citipati.mat";
-import { REST_RIG, c, e, knee, lerp, rot, win, type TheroRig } from "./raptor";
+import { lerp } from "../math";
+import { c, e, REST_RIG, rot, theroLegs, win, type TheroLegSpec, type TheroRig } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -81,6 +82,13 @@ function citipatiRig({ action, actionT: t, time }: Pose): OviRig {
 
 /** Bassin (pivot du corps), base du cou, nuque et œil, px bruts. */
 const HIP = { x: 0, y: -84 };
+const LEGS: TheroLegSpec = {
+  hip: HIP, farHip: 4, lift: 14, reach: 6, swing: 32, footY: -3,
+  mx: 10, my: 28, metaLift: 0.3,
+  sit: { dx: 22, far: 6, y: -3, mx: 30, my: 3 },
+  lie: { dx: 74, far: -8, y: -5, nearDy: 4, mx: 24, my: 3 },
+  kneeDy: 4, thigh: 30, shin: 34,
+};
 const NECK = { x: 30, y: -98 };
 const NAPE = { x: 58, y: -138 };
 const EYE = { x: 68, y: -145 };
@@ -94,19 +102,10 @@ export function citipatiModel(pose: Pose): Prim[] {
   const P: Prim[] = [];
 
   // --- Longues pattes de coureur (cinématique inverse), sans griffe en faucille ---
-  for (const L of [{ phase: 0, far: true }, { phase: Math.PI, far: false }]) {
-    const ph = walk + L.phase;
-    const sw = Math.sin(ph) * moving * r.stride;
-    const lift = Math.max(0, Math.cos(ph)) * moving * 14 * r.stride;
+  for (const L of theroLegs(pose, r, bx, by, LEGS)) {
     const m = L.far ? CIM.Far : CIM.Skin;
     const z = L.far ? -40 : 22;
-    const hx = HIP.x + (L.far ? 4 : 0) + bx, hy = HIP.y + by;
-    let fx = hx + 6 + sw * 32 + (L.far ? -r.stance : r.stance), fy = -3 - lift;
-    let mx = 10, my = 28 - lift * 0.3;
-    if (r.legs === "sit") { fx = hx + 22 + (L.far ? 6 : 0); fy = -3; mx = 30; my = 3; }
-    else if (r.legs === "lie") { fx = hx + 74 + (L.far ? -8 : 0); fy = -5 - (L.far ? 0 : 4); mx = 24; my = 3; }
-    const ax = fx - mx, ay = fy - my;
-    const [kx, ky] = knee(hx, hy + 4, ax, ay, 30, 34);
+    const { hx, hy, fx, fy, ax, ay, kx, ky } = L;
     // Cuisse emplumée (« culotte » d'émeu), jambe fine, métatarse écailleux, trois orteils.
     P.push(e(hx, hy, 16, 20, m, z - 4, 12));
     P.push(c(hx, hy + 4, kx, ky, 11, 6, m, z, 9));

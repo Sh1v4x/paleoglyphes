@@ -6,7 +6,19 @@
     "dev": "next dev -p 3107",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint .",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "preview:dig": "tsx scripts/preview-dig.ts",
+    "preview:eggs": "tsx scripts/preview-eggs.ts",
+    "preview:fauna": "tsx scripts/preview-fauna.ts",
+    "preview:journal": "tsx scripts/preview-journal.ts",
+    "preview:museum": "tsx scripts/preview-museum.ts",
+    "preview:seasons": "tsx scripts/preview-seasons.ts",
+    "preview:space": "tsx scripts/preview-space.ts",
+    "preview:sprite": "tsx scripts/preview-sprite.ts",
+    "preview:weather": "tsx scripts/preview-weather.ts",
+    "preview:world": "tsx scripts/preview-world.ts"
   },
   "dependencies": {
     "next": "^16.4.5",
@@ -15,12 +27,14 @@
     "simplex-noise": "^4.0.3"
   },
   "devDependencies": {
-    "@types/node": "^20",
+    "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "^16.4.5",
-    "typescript": "^5"
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^5.1.0"
   }
 }

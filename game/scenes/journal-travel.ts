@@ -12,7 +12,8 @@ import { BIOME, BIOME_INFO, type BiomeId } from "../world/biomes";
 import type { World } from "../world/generate";
 import { T } from "../world/tiles";
 import { isFisher } from "./eco-special";
-import { drawLines, lerp, type Line } from "./journal-common";
+import { mixRgb } from "../math";
+import { drawLines, type Line } from "./journal-common";
 import { UI_TOP } from "./types";
 import { zoomLevel } from "./park";
 
@@ -226,7 +227,7 @@ const mark = (i: number) => String.fromCharCode(65 + (i % 26));
 function drawMap(s: GameState, th: Theme, ui: Frame, b: BiomeId, x: number, y: number, W: number, H: number, open: boolean, list: Species[]): number[] {
   const u = th.ui, w = worldFor(s);
   const m = miniMap(w, b, W, H);
-  const other = lerp(u.panel, u.panelAlt, 0.6);
+  const other = mixRgb(u.panel, u.panelAlt, 0.6);
   for (let j = 0; j < m.h; j++) for (let i = 0; i < m.w; i++) {
     const c = m.cls[j * m.w + i];
     if (c < 0) put(ui, x + m.ox + i, y + m.oy + j, 32, other, other, u.alpha);
@@ -328,7 +329,7 @@ export function travelPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
   const lines: Line[] = [];
   const add = (s2: string, c: RGB) => wrap(s2, tw).forEach((l) => lines.push({ t: l, c }));
   const gap = () => lines.push({ t: "", c: u.text });
-  const body = u.dim === u.text ? u.text : lerp(u.text, u.dim, 0.35);
+  const body = u.dim === u.text ? u.text : mixRgb(u.text, u.dim, 0.35);
   const P = TEXT[b];
   if (!open) {
     add(info.name, u.hi);

@@ -38,7 +38,7 @@ const dt = 1 / 15;
 function run(s: GameState, sec: number) {
   for (let k = 0; k < sec / dt; k++) {
     s.time += dt;
-    s.clock = advanceClock(s.clock, dt, s.clockSpeed);
+    advanceClock(s, dt);
     parkScene.update(s, input, dt);
   }
 }

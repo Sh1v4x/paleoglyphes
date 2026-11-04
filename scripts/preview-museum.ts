@@ -6,7 +6,7 @@
 import { writeFileSync } from "node:fs";
 import type { Input } from "../game/input";
 import { THEMES, type Style } from "../game/palette";
-import { emptyProgress } from "../game/progress";
+import { emptyProgress, factKey } from "../game/progress";
 import { createFrame } from "../game/render/frame";
 import { metrics } from "../game/render/metrics";
 import { EXTRAS } from "../game/scenes/dig-fossils";
@@ -35,7 +35,7 @@ if (full) {
     p.bones[sp.id] = sp.bones.map((b) => b.id);
     p.assembled.push(sp.id);
     p.population[sp.id] = 3;
-    for (const f of sp.facts) p.facts.push(`${sp.id}:${f.id}`);
+    for (const f of sp.facts) p.facts.push(factKey(sp.id, f.id));
     p.eggs[sp.id] = 1;
   }
   p.extras = EXTRAS.map((x) => x.id);

@@ -2,7 +2,8 @@ import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { EL } from "./elasmosaurus.mat";
-import { c, e, lerp, rot, win } from "./raptor";
+import { lerp } from "../math";
+import { c, e, flipY, rot, win } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -124,16 +125,6 @@ function neckChain(r: ElasmoRig): { X: number[]; Y: number[]; a: number } {
     Y.push(Y[i] + Math.sin(a) * NECK_SEG);
   }
   return { X, Y, a };
-}
-
-/** Retourne verticalement autour de y = cy (ventre en l'air), puis décale. */
-function flipY(ps: Prim[], cy: number, dy: number): Prim[] {
-  const f = (y: number) => 2 * cy - y + dy;
-  return ps.map((p) => {
-    if (p.k === "c") return { ...p, ay: f(p.ay), by: f(p.by) };
-    if (p.k === "cut") return { ...p, y: f(p.y) };
-    return { ...p, y: f(p.y), yMin: p.yMax === undefined ? undefined : f(p.yMax), yMax: p.yMin === undefined ? undefined : f(p.yMin) };
-  });
 }
 
 /** Une nageoire : bras court puis longue pale étroite en hydroptère, pointée vers l'arrière, tournée de `a`. */

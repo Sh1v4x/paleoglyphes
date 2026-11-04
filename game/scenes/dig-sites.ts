@@ -11,7 +11,9 @@ import { SM } from "./scenes.mat";
  * espèces. Les espèces y sont rangées d'après leur milieu et leurs biomes (`sitesOf`), sauf exception.
  */
 
-export type DigSiteId = "hellcreek" | "princecreek" | "djadochta" | "niobrara";
+const DIG_SITE_IDS = ["hellcreek", "princecreek", "djadochta", "niobrara"] as const;
+export type DigSiteId = (typeof DIG_SITE_IDS)[number];
+export const isDigSiteId = (v: unknown): v is DigSiteId => (DIG_SITE_IDS as readonly unknown[]).includes(v);
 
 /** Une couche de roche possible du site (sa position est tirée au sort à chaque falaise). */
 export interface StratumDef {

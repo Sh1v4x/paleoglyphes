@@ -1,5 +1,6 @@
 import { M } from "../render/materials";
 import type { Prim } from "../render/raster";
+import { c, e } from "../species/kit";
 import { F } from "../world/flora.mat";
 
 /**
@@ -10,10 +11,6 @@ import { F } from "../world/flora.mat";
 
 type Rng = () => number;
 const TAU = Math.PI * 2;
-const e = (x: number, y: number, rx: number, ry: number, m: number, z: number, h: number): Prim =>
-  ({ k: "e", x, y, rx, ry, m, z, h });
-const c = (ax: number, ay: number, bx: number, by: number, ra: number, rb: number, m: number, z: number, h: number, stroke = false): Prim =>
-  ({ k: "c", ax, ay, bx, by, ra, rb, m, z, h, stroke });
 /** Trait fin d'une cellule : le glyphe suit la direction. */
 const s = (ax: number, ay: number, bx: number, by: number, m: number, z: number): Prim => c(ax, ay, bx, by, 1, 1, m, z, 1, true);
 

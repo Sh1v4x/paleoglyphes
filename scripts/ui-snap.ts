@@ -17,6 +17,7 @@ import { metrics } from "../game/render/metrics";
 import { composeGame, setMode, updateGame } from "../game/scenes";
 import { HEADER_ROWS } from "../game/scenes/types";
 import { settings, uiScaleFor, type UiScale } from "../game/settings";
+import { factKey } from "../game/progress";
 import { SPECIES_LIST } from "../game/species";
 import { createState, type GameState } from "../game/state";
 import { album } from "../game/features/photo-store";
@@ -50,7 +51,7 @@ for (const spec of SPECIES_LIST) {
   s.progress.bones[spec.id] = spec.bones.map((b) => b.id);
   if (!s.progress.assembled.includes(spec.id)) s.progress.assembled.push(spec.id);
   s.progress.population[spec.id] = 2;
-  for (const f of spec.facts.slice(0, 3)) s.progress.facts.push(`${spec.id}:${f.id}`);
+  for (const f of spec.facts.slice(0, 3)) s.progress.facts.push(factKey(spec.id, f.id));
 }
 s.progress.extras = ["fauna:dragonfly"];
 s.progress.hints = 2;

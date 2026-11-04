@@ -3,8 +3,8 @@ import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { MR } from "./marine.mat";
 import { NY } from "./nyctosaurus.mat";
-import { pteroModel, pteroSkeleton, rp, type Pt, type PteroKit } from "./pteranodon";
-import { c, e, rot } from "./raptor";
+import { c, e, rot, rp, type Pt } from "./kit";
+import { pteroModel, pteroSkeleton, type PteroKit } from "./pteranodon";
 import type { Pose, Species } from "./types";
 
 /**
@@ -71,6 +71,7 @@ const N_KIT: PteroKit = {
   chord: 0.7,
   flyBody: [[-22, 2], [12, -4]],
   flyNeck: [32, -16],
+  diveAttack: true,
 };
 
 const EYE: Pt = rp(N_KIT.neck1[0] + 6, N_KIT.neck1[1] - 3 + N_KIT.crouch, N_KIT.neck1[0], N_KIT.neck1[1] + N_KIT.crouch, N_KIT.headA);

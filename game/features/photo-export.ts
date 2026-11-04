@@ -85,7 +85,7 @@ export function drawCells(g: CanvasRenderingContext2D, p: Photo, x0: number, y0:
 }
 
 /** Rend la photo dans un canvas 2D : les cellules, puis un bandeau de légende. */
-export function photoCanvas(p: Photo, caption: string): HTMLCanvasElement {
+function photoCanvas(p: Photo, caption: string): HTMLCanvasElement {
   const scale = exportScale();
   const chh = CELL_H * scale;
   const strip = Math.round(UI_FONT_SIZE * scale * 2.2);

@@ -1,5 +1,6 @@
 import { liveBirth } from "../species/life";
 import { CELL_H, CELL_W } from "../config";
+import { mixRgb } from "../math";
 import type { RGB, Theme } from "../palette";
 import type { Progress } from "../progress";
 import { rasterize, type Raster } from "../render/raster";
@@ -93,7 +94,7 @@ const NAMES = ["Hell Creek, Montana", "Formation de Lance, Wyoming", "Badlands, 
 
 /** Nom du lieu à partir de celui de l'espèce : « Formation de Hell Creek, Montana (États-Unis) » -> « Hell Creek, Montana ». */
 function placeName(sp: SpeciesId | null, rng: () => number): string {
-  const raw = sp ? SPECIES[sp]?.place : undefined;
+  const raw = sp ? SPECIES[sp].place : undefined;
   if (!raw) return NAMES[Math.floor(rng() * NAMES.length)];
   return raw.replace(/\s*\(.*\)\s*$/, "").replace(/^Formation de\s+/i, "");
 }
@@ -126,7 +127,7 @@ function pickBones(p: Progress, where: DigSiteId, rng: () => number): { picks: P
   const here = siteSpecies(p, where);
   // (garde-fou : un site sans espèce débloquée fouille celles des autres sites)
   const unlocked = here.length ? here : unlockedSpecies(p);
-  const missingOf = (sp: SpeciesId) => (SPECIES[sp]?.bones ?? []).filter((b) => !(p.bones[sp] ?? []).includes(b.id)).map((b) => b.id);
+  const missingOf = (sp: SpeciesId) => SPECIES[sp].bones.filter((b) => !(p.bones[sp] ?? []).includes(b.id)).map((b) => b.id);
   const withMissing = unlocked.filter((sp) => missingOf(sp).length > 0);
   // L'espèce du site est tirée au hasard parmi celles débloquées qui ont encore des os à trouver.
   const primary: SpeciesId | null = withMissing[Math.floor(rng() * withMissing.length)] ?? null;
@@ -137,7 +138,7 @@ function pickBones(p: Progress, where: DigSiteId, rng: () => number): { picks: P
   const others = shuffle(withMissing.filter((sp) => sp !== primary).flatMap((sp) => missingOf(sp).map((id) => ({ sp, id, dup: false }))), rng);
   while (picks.length < n && others.length) picks.push(others.pop()!);
   // Doublons : rares, ou seuls quand toute la collection est complète.
-  const found = shuffle(unlocked.flatMap((sp) => (p.bones[sp] ?? []).filter((id) => SPECIES[sp]?.bones.some((b) => b.id === id)).map((id) => ({ sp, id, dup: true }))), rng);
+  const found = shuffle(unlocked.flatMap((sp) => (p.bones[sp] ?? []).filter((id) => SPECIES[sp].bones.some((b) => b.id === id)).map((id) => ({ sp, id, dup: true }))), rng);
   // (jamais au détriment d'un os manquant : un doublon ne remplace rien)
   if (found.length && (picks.length === 0 || (picks.length < 6 && rng() < 0.18))) picks.push(found.pop()!);
   while (picks.length < 3 && found.length) picks.push(found.pop()!);
@@ -180,8 +181,8 @@ function addFossil(s: Site, f: Omit<Fossil, "x" | "y" | "cells" | "exposed" | "i
   return true;
 }
 
-/** Génère une falaise de W x H cellules monde sur le gisement `where`. */
-export function generateSite(p: Progress, where: DigSiteId, W: number, H: number, seed: number): Site {
+/** Génère une falaise de W x H cellules monde sur le gisement `where` ; `missed` : os tirés mais sans place dans la roche. */
+export function generateSite(p: Progress, where: DigSiteId, W: number, H: number, seed: number): { site: Site; missed: number } {
   const rng = mulberry32(seed);
   const gTop = 5;
   const def0 = DIG_SITE[where];
@@ -212,9 +213,9 @@ export function generateSite(p: Progress, where: DigSiteId, W: number, H: number
 
   // Os et fossiles bonus.
   const { picks, primary } = pickBones(p, where, rng);
+  let missed = 0;
   for (const pk of picks) {
     const spec = SPECIES[pk.sp];
-    if (!spec) continue;
     const raw = bonePrims(spec, pk.id);
     const name = spec.bones.find((b) => b.id === pk.id)?.name ?? pk.id;
     const label = `${name} ${ofName(p, pk.sp)}`;
@@ -229,6 +230,7 @@ export function generateSite(p: Progress, where: DigSiteId, W: number, H: number
       const r = rasterize(scaleAll(ps, sc), 0, 0, rng() < 0.5);
       placed = addFossil(s, { kind: "bone", sp: pk.sp, id: pk.id, label, dup: pk.dup, r }, rng);
     }
+    if (!placed) missed++;
   }
   const nx = rng() < 0.55 ? (rng() < 0.3 ? 2 : 1) : 0;
   const local = EXTRAS.filter((x) => def0.extras.includes(x.id));
@@ -243,7 +245,7 @@ export function generateSite(p: Progress, where: DigSiteId, W: number, H: number
   }
 
   // Œuf fossile, parfois, d'une espèce du site déjà assemblée qui pond (pas les vivipares comme le mosasaure).
-  const ovip = p.assembled.filter((sp) => SPECIES[sp] && !liveBirth(SPECIES[sp]) && sitesOf(sp).includes(where));
+  const ovip = p.assembled.filter((sp) => !liveBirth(SPECIES[sp]) && sitesOf(sp).includes(where));
   if (ovip.length && rng() < def0.eggs) {
     const sp = ovip[Math.floor(rng() * ovip.length)];
     const ps = eggModel(sp, 0);
@@ -277,7 +279,7 @@ export function generateSite(p: Progress, where: DigSiteId, W: number, H: number
   for (let k = 0; k < n; k++) if (s.deco[k] === 1) { s.cover[k] += 0.4; s.cover0[k] += 0.4; }
 
   s.name = `Site ${s.n} - ${def0.byPlace ? placeName(primary, rng) : `${def0.name}, ${def0.place}`}`;
-  return s;
+  return { site: s, missed };
 }
 
 /** Dureté d'une cellule (galets durs, racines tendres, gangue un peu plus ferme). */
@@ -299,8 +301,6 @@ export interface Backdrop {
   fg: Uint8ClampedArray;
   bg: Uint8ClampedArray;
 }
-
-const lerp = (a: RGB, b: RGB, t: number): [number, number, number] => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
 /** Ligne du sol (rangée monde) pour un site posé en `oy`. */
 export const groundRow = (s: Site, oy: number) => oy - s.gTop;
@@ -326,24 +326,24 @@ export function buildBackdrop(s: Site, th: Theme, cols: number, rows: number, ox
       if (y < g) {
         // Ciel et buttes au loin.
         const t = g > 1 ? y / (g - 1) : 1;
-        const sky = lerp(skyTop, skyLow, t * t);
+        const sky = mixRgb(skyTop, skyLow, t * t);
         const bt = g - 1 - Math.floor((g * site.hills) * (0.45 + 0.3 * Math.sin(x * 0.021 + s.seed) + 0.2 * Math.sin(x * 0.057 + 2) + 0.15 * Math.sign(Math.sin(x * 0.011 + s.seed * 0.3))));
         if (y >= bt) {
           const band = 0.78 + 0.22 * ((y % 3) / 2);
-          const c = lerp(butte, sky, cart ? 0.15 : 0.35).map((v) => v * band);
+          const c = mixRgb(butte, sky, cart ? 0.15 : 0.35).map((v) => v * band);
           set(k, (y + x) % 7 === 0 ? 61 : 45, c.map((v) => v * (cart ? 0.85 : 1.25)), c);
           continue;
         }
         const dx = (x - sunX) / 2, dy = y - sunY;
         const dd = Math.hypot(dx, dy);
-        if (dd < 2.2) { set(k, cart ? 64 : 79, cart ? [255, 230, 90] : [216, 212, 192], cart ? [255, 214, 74] : lerp(sky, [120, 120, 130], 0.4)); continue; }
+        if (dd < 2.2) { set(k, cart ? 64 : 79, cart ? [255, 230, 90] : [216, 212, 192], cart ? [255, 214, 74] : mixRgb(sky, [120, 120, 130], 0.4)); continue; }
         if (cart) {
           const cl = Math.sin(x * 0.05 + y * 0.4 + s.seed) + Math.sin(x * 0.013 - s.seed);
-          if (cl > 1.35 && y < g - 3) { set(k, 32, [255, 255, 255], lerp(sky, [255, 255, 255], 0.85)); continue; }
+          if (cl > 1.35 && y < g - 3) { set(k, 32, [255, 255, 255], mixRgb(sky, [255, 255, 255], 0.85)); continue; }
           set(k, dd < 4 ? 46 : 32, [255, 240, 160], sky);
         } else {
           const h = hash2(x, y, 41);
-          set(k, h < 0.004 ? 42 : h < 0.02 ? 46 : 32, [150 + 80 * h * 40, 150, 180], dd < 5 ? lerp(sky, [60, 60, 80], (5 - dd) / 8) : sky);
+          set(k, h < 0.004 ? 42 : h < 0.02 ? 46 : 32, [150 + 80 * h * 40, 150, 180], dd < 5 ? mixRgb(sky, [60, 60, 80], (5 - dd) / 8) : sky);
         }
         continue;
       }

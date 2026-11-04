@@ -9,6 +9,7 @@
  */
 
 import { UI_CELL_H, UI_CELL_W } from "./config";
+import { STORAGE_KEYS } from "./storage-keys";
 
 export const UI_SCALES = [1, 1.25, 1.5] as const;
 export type UiScale = (typeof UI_SCALES)[number];
@@ -25,7 +26,9 @@ export interface Settings {
   mute: boolean;
 }
 
-const KEY = "paleoglyphes:settings";
+export const isUiScale = (v: unknown): v is UiScale => (UI_SCALES as readonly unknown[]).includes(v);
+const isVolume = (v: unknown): v is number => (VOLUMES as readonly unknown[]).includes(v);
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 
 function defaults(): Settings {
   let reduce = false;
@@ -40,14 +43,15 @@ function defaults(): Settings {
 function load(): Settings {
   const d = defaults();
   try {
-    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(KEY) : null;
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEYS.settings) : null;
     if (!raw) return d;
-    const v = JSON.parse(raw) as Partial<Settings>;
+    const v: unknown = JSON.parse(raw);
+    if (!isRecord(v)) return d;
     return {
-      uiScale: v.uiScale === "auto" || UI_SCALES.includes(v.uiScale as UiScale) ? (v.uiScale as UiScale | "auto") : d.uiScale,
+      uiScale: v.uiScale === "auto" || isUiScale(v.uiScale) ? v.uiScale : d.uiScale,
       reduceMotion: typeof v.reduceMotion === "boolean" ? v.reduceMotion : d.reduceMotion,
       showFps: typeof v.showFps === "boolean" ? v.showFps : d.showFps,
-      volume: (VOLUMES as readonly number[]).includes(v.volume as number) ? (v.volume as number) : d.volume,
+      volume: isVolume(v.volume) ? v.volume : d.volume,
       mute: typeof v.mute === "boolean" ? v.mute : d.mute,
     };
   } catch {
@@ -60,7 +64,7 @@ export const settings: Settings = load();
 
 export function saveSettings() {
   try {
-    localStorage.setItem(KEY, JSON.stringify(settings));
+    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
   } catch {
     // Sans stockage : le réglage vaut pour la session.
   }

@@ -1,6 +1,7 @@
 import { createNoise2D } from "simplex-noise";
 import { CELL_H, CELL_W, DEV } from "../config";
 import { DAY_SECONDS, daylight, isNight, golden, periodName } from "../daycycle";
+import { clamp01, lerp, mixRgb, smoothstep } from "../math";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
@@ -166,8 +167,6 @@ export function createWeatherState(): WeatherState {
 // Saisons
 // ---------------------------------------------------------------------------
 
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-const smooth = (a: number, b: number, x: number) => { const u = clamp01((x - a) / (b - a)); return u * u * (3 - 2 * u); };
 const rnd = (st: WeatherState) => hash2(st.seed++, 7919, 31);
 
 /** Position dans l'année 0..1. */
@@ -218,7 +217,7 @@ const SEASON_TOAST: Record<number, [string, string, string][]> = {
 /** Jaunissement de la végétation 0..1 (saison sèche + chaleur), effacé par la neige. */
 function dryness(s: GameState): number {
   const st = s.weather;
-  return clamp01(smooth(0.5, 0.12, seasonWet(s)) * 0.7 + st.view.heat * 0.35) * (1 - st.viewSnow);
+  return clamp01(smoothstep(0.5, 0.12, seasonWet(s)) * 0.7 + st.view.heat * 0.35) * (1 - st.viewSnow);
 }
 
 /**
@@ -229,17 +228,17 @@ function polarSun(s: GameState): number {
   return Math.cos(2 * Math.PI * (yearFrac(s) - 0.25));
 }
 /** Hiver polaire 0..1 (neige épaisse, lacs gelés) et dégel 0..1 (mousses, eau de fonte). */
-const polarWinter = (sun: number) => smooth(0.25, -0.6, sun);
-const polarMelt = (sun: number) => smooth(0.1, 0.7, sun);
+const polarWinter = (sun: number) => smoothstep(0.25, -0.6, sun);
+const polarMelt = (sun: number) => smoothstep(0.1, 0.7, sun);
 /** Saison sèche pure 0..1 (sans la chaleur du moment). */
-const seasonDry = (s: GameState) => smooth(0.5, 0.12, seasonWet(s));
+const seasonDry = (s: GameState) => smoothstep(0.5, 0.12, seasonWet(s));
 
 /**
  * Hauteur du soleil vers 80° de latitude (Prince Creek), -1..1 : en été il tourne au-dessus de l'horizon
  * sans se coucher, en hiver il reste dessous (un crépuscule à midi). Lumière et heure dorée en découlent.
  */
 const polarElev = (hour: number, sun: number) => 0.55 * sun + 0.45 * Math.cos((2 * Math.PI * (hour - 12)) / 24);
-const polarLight = (e: number) => smooth(-0.3, 0.25, e);
+const polarLight = (e: number) => smoothstep(-0.3, 0.25, e);
 const polarGolden = (e: number) => clamp01(1 - Math.abs(e - 0.02) / 0.22);
 
 /**
@@ -273,7 +272,7 @@ export function seenPeriod(s: GameState): string {
 function floodLevel(st: WeatherState): number {
   const t = st.floodT;
   if (t < 0) return 0;
-  return t < 40 ? smooth(0, 40, t) : t < 160 ? 1 : 1 - smooth(160, 300, t);
+  return t < 40 ? smoothstep(0, 40, t) : t < 160 ? 1 : 1 - smoothstep(160, 300, t);
 }
 
 // ---------------------------------------------------------------------------
@@ -561,7 +560,6 @@ export function forceWeather(s: GameState, name: (typeof FORCE)[number]) {
 // Thème
 // ---------------------------------------------------------------------------
 
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /** Teinte le thème éclairé selon la météo (ciel couvert, orage...). */
 export function weatherTheme(s: GameState, th: Theme): Theme {
@@ -678,7 +676,7 @@ function groundPass(s: GameState, th: Theme, w: World, fl: { low: Uint8Array; di
   const dry = dryness(s), snowC = st.viewSnow, fog = lv.fog, veg = s.park.eco?.veg;
   const floodCells = floodLevel(st) * FLOOD_MAX;
   const noFlood = st.floodT < 0 ? 1 : 0;
-  const lush = smooth(0.55, 0.9, seasonWet(s)) * (1 - snowC);
+  const lush = smoothstep(0.55, 0.9, seasonWet(s)) * (1 - snowC);
   const sun = polarSun(s), freeze = polarWinter(sun) * 0.55, melt = polarMelt(sun), bloom = st.bloom;
   // Hell Creek : les fougères jaunissent, les mares baissent un peu. Marais : l'eau recule loin et, au cœur
   // des pluies, déborde sur la vase. Gobi : les oasis rétrécissent (leur végétation, nourrie par la nappe,
@@ -686,12 +684,12 @@ function groundPass(s: GameState, th: Theme, w: World, fl: { low: Uint8Array; di
   DRY_B[BIOME.HellCreek] = dry; DRY_B[BIOME.Swamp] = dry * 0.8; DRY_B[BIOME.Desert] = dry * 0.5;
   LUSH_B[BIOME.HellCreek] = lush; LUSH_B[BIOME.Swamp] = lush; LUSH_B[BIOME.Desert] = lush * 0.4; LUSH_B[BIOME.Tundra] = melt * (1 - snowC) * 0.8;
   LOW_B[BIOME.HellCreek] = dry * 0.3 * noFlood; LOW_B[BIOME.Swamp] = dry * 0.55 * noFlood; LOW_B[BIOME.Desert] = (0.06 + dry * 0.6) * noFlood;
-  const overflow = smooth(0.7, 0.97, seasonWet(s)) * 3 * noFlood;
+  const overflow = smoothstep(0.7, 0.97, seasonWet(s)) * 3 * noFlood;
   const puddle = st.wet > 0.05 ? 255 - st.wet * 55 : 999;
   const cloud = clamp01((lv.cloud - 0.15) / 0.85) + lv.storm * 0.2;
   const { cols, rows } = f;
   const mist = P.mistFg, mud = P.dirt[1], mudBg = P.dirt[0];
-  const fw: RGB = [lerp(P.waterMid[0], P.dirt[2][0], 0.3), lerp(P.waterMid[1], P.dirt[2][1], 0.3), lerp(P.waterMid[2], P.dirt[2][2], 0.3)];
+  const fw = mixRgb(P.waterMid, P.dirt[2], 0.3);
   const cox = Math.floor(t * 3), coy = Math.floor(t * 1.2);
   for (let y = 0; y < rows; y++) {
     const wy = camY + y;
@@ -821,7 +819,7 @@ function groundPass(s: GameState, th: Theme, w: World, fl: { low: Uint8Array; di
       // Ombres des nuages : grandes taches qui glissent (champ des creux, agrandi et décalé).
       if (cloud > 0.02) {
         const cx = ((wx + cox) >> 1) % w.cols, cy = ((wy + coy) >> 1) % w.rows;
-        const m = 1 - smooth(120, 175, fl.low[cy * w.cols + cx]) * cloud * 0.32;
+        const m = 1 - smoothstep(120, 175, fl.low[cy * w.cols + cx]) * cloud * 0.32;
         if (m < 0.999) {
           f.fg[k] *= m; f.fg[k + 1] *= m; f.fg[k + 2] *= m;
           f.bg[k] *= m; f.bg[k + 1] *= m; f.bg[k + 2] *= m;
@@ -1089,13 +1087,13 @@ function meteorPass(s: GameState, f: Frame) {
 const AURORA: RGB = [90, 255, 160], AURORA_TOP: RGB = [170, 100, 255];
 function auroraPass(s: GameState, f: Frame) {
   const st = s.weather;
-  const I = st.viewPolar * smooth(0.3, 0.05, seenDaylight(s)) * (1 - seen(s).cloud * 0.9) * (hash2(s.clock < 12 ? st.day - 1 : st.day, 5, 197) < 0.55 ? 1 : 0); // tirage par nuit, pas par jour
+  const I = st.viewPolar * smoothstep(0.3, 0.05, seenDaylight(s)) * (1 - seen(s).cloud * 0.9) * (hash2(s.clock < 12 ? st.day - 1 : st.day, 5, 197) < 0.55 ? 1 : 0); // tirage par nuit, pas par jour
   if (I < 0.03) return;
   const t = calm() ? s.time * 0.3 : s.time, { cols, rows } = f;
   const n = cols * rows * 4, glow = I * 0.05;
   for (let k = 0; k < n; k += 4) { f.bg[k + 1] += AURORA[1] * glow; f.bg[k + 2] += AURORA[2] * glow * 0.6; f.fg[k + 1] += AURORA[1] * glow; }
   for (let x = 0; x < cols; x++) {
-    const band = smooth(0.15, 1, Math.sin(x * 0.035 + t * 0.2 + 1.8 * Math.sin(x * 0.009 - t * 0.07))) * (0.65 + 0.35 * Math.sin(x * 0.17 + t * 0.8));
+    const band = smoothstep(0.15, 1, Math.sin(x * 0.035 + t * 0.2 + 1.8 * Math.sin(x * 0.009 - t * 0.07))) * (0.65 + 0.35 * Math.sin(x * 0.17 + t * 0.8));
     if (band < 0.03) continue;
     const bottom = Math.max(4, Math.floor(rows * (0.34 + 0.1 * Math.sin(x * 0.02 + t * 0.15))));
     for (let y = 0; y < bottom; y++) {

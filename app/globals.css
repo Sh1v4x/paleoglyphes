@@ -23,6 +23,12 @@ main {
   overflow: hidden;
 }
 
+/* Canvas du jeu (components/Game.tsx) : les gestes vont au jeu, pas au navigateur. */
+canvas {
+  display: block;
+  touch-action: none;
+}
+
 /* Écran de chargement (components/Loading.tsx), aux couleurs du jeu. */
 .loading {
   position: fixed;

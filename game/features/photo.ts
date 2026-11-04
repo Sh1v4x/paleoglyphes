@@ -39,21 +39,10 @@ export interface PhotoState {
   last: Photo | null;
   lastT: number;
   lastFrom: { x: number; y: number; w: number; h: number };
-  /** Jour de la réserve (compté aux passages de minuit) et heure vue à la dernière image. */
-  day: number;
-  lastClock: number;
 }
 
-const DAY_KEY = "paleoglyphes-photo-day";
-
 export function createPhotoState(): PhotoState {
-  let day = 1;
-  try {
-    day = Math.max(1, Number(localStorage.getItem(DAY_KEY)) || 1);
-  } catch {
-    // Stockage indisponible : on compte depuis le jour 1.
-  }
-  return { aiming: false, zoom: 0.6, shoot: false, cool: 0, last: null, lastT: -99, lastFrom: { x: 0, y: 0, w: 1, h: 1 }, day, lastClock: -1 };
+  return { aiming: false, zoom: 0.6, shoot: false, cool: 0, last: null, lastT: -99, lastFrom: { x: 0, y: 0, w: 1, h: 1 } };
 }
 
 /** Cadre du viseur en cellules monde (relatives à l'écran), 16:10, centré sur la souris et borné. */
@@ -77,12 +66,6 @@ type Rect = ReturnType<typeof viewRect>;
 export function updatePhoto(s: GameState, input: Input, dt: number): boolean {
   const st = s.photo;
   loadAlbum();
-  // Jour de la réserve : l'horloge repasse par minuit.
-  if (st.lastClock >= 0 && s.clock < st.lastClock - 1) {
-    st.day++;
-    try { localStorage.setItem(DAY_KEY, String(st.day)); } catch { /* sans stockage : tant pis */ }
-  }
-  st.lastClock = s.clock;
   st.cool = Math.max(0, st.cool - dt);
   if (st.last && input.ui.includes("photo:share")) void sharePhoto(s, st.last);
   if (input.pressed.includes("KeyP") || input.ui.includes("photo:toggle")) {
@@ -135,7 +118,6 @@ export function subjectsIn(s: GameState, r: Rect): (Subject & { animal?: Animal 
   };
   for (const a of p.animals) {
     const spec = SPECIES[a.sp];
-    if (!spec) continue;
     const ra = animalRaster(a, s.time);
     if (ra.cx > x1 || ra.cy > y1 || ra.cx + ra.w < x0 || ra.cy + ra.h < y0) continue;
     const c = count(ra.cx, ra.cy, ra.w, ra.h, ra.mat);
@@ -148,7 +130,6 @@ export function subjectsIn(s: GameState, r: Rect): (Subject & { animal?: Animal 
   }
   for (const n of p.nests) {
     const spec = SPECIES[n.sp];
-    if (!spec) continue;
     const rn = nestRaster(n);
     if (rn.cx > x1 || rn.cy > y1 || rn.cx + rn.w < x0 || rn.cy + rn.h < y0) continue;
     const c = count(rn.cx, rn.cy, rn.w, rn.h, rn.mat);
@@ -173,6 +154,10 @@ function takePhoto(s: GameState, world: Frame, r: Rect) {
   const st = s.photo;
   st.shoot = false;
   st.cool = 0.6;
+  if (!album.loaded) {
+    toast(s, "Album en cours de chargement", "Reessaie dans un instant.");
+    return;
+  }
   if (album.photos.length >= MAX_PHOTOS) {
     toast(s, "Album plein !", `${MAX_PHOTOS} photos au maximum : supprime-en dans l'onglet Photos.`);
     return;
@@ -184,11 +169,14 @@ function takePhoto(s: GameState, world: Frame, r: Rect) {
   const gx = Math.floor(s.park.cam.x / CELL_W) + r.x + (r.w >> 1), gy = Math.floor(s.park.cam.y / CELL_H) + r.y + (r.h >> 1);
   const biome = gx >= 0 && gy >= 0 && gx < w.cols && gy < w.rows ? (w.biome[gy * w.cols + gx] as BiomeId) : undefined;
   const photo: Photo = {
-    id: newPhotoId(), day: st.day, clock: s.clock, real: Date.now(),
+    id: newPhotoId(), day: s.day, clock: s.clock, real: Date.now(),
     title: sc.title, stars: sc.stars, species: sc.species, notes: sc.notes, biome, act: subjects[sc.main]?.act,
     ...captureCells(world, r.x, r.y, r.w, r.h),
   };
-  addPhoto(photo);
+  const left = MAX_PHOTOS - album.photos.length - 1;
+  void addPhoto(photo).then((outcome) => {
+    toast(s, "Photo enregistrée ! (onglet Photos)", `${sc.title}  [${starsText(sc.stars)}]${left <= 5 ? `  -  plus que ${left} place${left > 1 ? "s" : ""} dans l'album` : ""}${outcome === "memory" ? "  (stockage indisponible : photo perdue au rechargement)" : ""}`);
+  });
   // Le carnet : chaque animal bien cadré (au moins la moitié de sa silhouette) compte comme une observation.
   for (const sub of subjects) {
     const a = sub.animal, spec = a && SPECIES[a.sp];
@@ -197,8 +185,6 @@ function takePhoto(s: GameState, world: Frame, r: Rect) {
   }
   st.last = photo;
   st.lastT = s.time;
-  const left = MAX_PHOTOS - album.photos.length;
-  toast(s, "Photo enregistrée ! (onglet Photos)", `${sc.title}  [${starsText(sc.stars)}]${left <= 5 ? `  -  plus que ${left} place${left > 1 ? "s" : ""} dans l'album` : ""}${album.persistent ? "" : "  (stockage indisponible : photo perdue au rechargement)"}`);
 }
 
 /** Écrit un glyphe semi-transparent (lignes des tiers). */

@@ -34,7 +34,7 @@ assert.equal(spatial(300, 100, 100, 100, 50, 50).gain, 0, "loin : silence");
 assert.ok(spatial(60, 100, 100, 100, 50, 50).pan < 0, "à gauche");
 
 // Voix des espèces.
-const sp = (id: SpeciesId) => SPECIES[id]!;
+const sp = (id: SpeciesId) => SPECIES[id];
 const voices: [SpeciesId, string][] = [["edmonto", "trumpet"], ["trex", "growl"], ["velociraptor", "chirp"], ["trike", "honk"], ["alamosaurus", "rumble"], ["pteranodon", "cry"], ["mosa", "splash"]];
 for (const [id, v] of voices) assert.equal(voiceOf(sp(id)), v, id);
 assert.ok(pitchOf(sp("trex")) < pitchOf(sp("velociraptor")), "le T. rex est plus grave");

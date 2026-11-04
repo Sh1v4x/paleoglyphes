@@ -1,6 +1,10 @@
 import { PX_PER_M } from "../config";
+import { fmtKg, fmtM } from "../format";
+import { de } from "../fr";
 import type { Input } from "../input";
+import { mixRgb } from "../math";
 import { THEMES, type RGB, type Theme } from "../palette";
+import { hasFact } from "../progress";
 import type { Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
 import type { Prim, Raster } from "../render/raster";
@@ -10,11 +14,11 @@ import { shownName, SPECIES, SPECIES_LIST } from "../species";
 import { eggSize } from "../species/eggs";
 import type { SpeciesId } from "../species/types";
 import type { GameState } from "../state";
-import { actions, bar, button, buttonW, clip, hitAt, panel, region, SP, text, wrap, type Action, type Hint } from "../ui/kit";
+import { actions, bar, button, buttonW, clip, hitAt, panel, put, region, SP, text, wrap, type Action, type Hint } from "../ui/kit";
 import { EGG_FACT, EXTRA_BY_ID, EXTRAS, outlineRaster, scaleAll } from "./dig-fossils";
 import { labScene } from "./lab";
 import {
-  cachedRaster, entryFrames, medal, eggFound, hallFor, lifeRaster, lighten, lookOf, mix, put, ROOMS, visible,
+  cachedRaster, entryFrames, medal, eggFound, hallFor, lifeRaster, lighten, lookOf, ROOMS, visible,
   type Exhibit, type Hall,
 } from "./museum-hall";
 import { parkScene } from "./park";
@@ -208,7 +212,7 @@ function drawLive(s: GameState, th: Theme, f: Frame, h: Hall, cam: number, hover
       const x = Math.round(e.px + (r1 - 0.5) * 2 * hw + Math.sin(t * 0.7 + k) * 1.5) - cam;
       const y = Math.round(yy);
       if (x < 0 || x >= f.cols || f.ch[y * f.cols + x] !== 32) continue;
-      put(f, x, y, r1 < 0.5 ? "." : "'", mix(L.light, L.glassHi, 0.5));
+      put(f, x, y, r1 < 0.5 ? "." : "'", mixRgb(L.light, L.glassHi, 0.5));
     }
   }
 
@@ -223,7 +227,7 @@ function drawLive(s: GameState, th: Theme, f: Frame, h: Hall, cam: number, hover
       if (x < 0 || x >= f.cols || y < 0 || y >= f.rows) continue;
       const c = f.ch[y * f.cols + x];
       if (c !== 32 && c !== 126) continue;
-      put(f, x, y, r2 < 0.3 ? "o" : ".", mix(L.glassHi, L.walls[ROOMS.sea], 0.3));
+      put(f, x, y, r2 < 0.3 ? "o" : ".", mixRgb(L.glassHi, L.walls[ROOMS.sea], 0.3));
     }
   }
 
@@ -231,7 +235,6 @@ function drawLive(s: GameState, th: Theme, f: Frame, h: Hall, cam: number, hover
   for (const e of vis) {
     if (e.kind !== "life" || !e.owned || !e.sp) continue;
     const spec = SPECIES[e.sp];
-    if (!spec) continue;
     const tq = Math.floor(t * 5 + hash2(e.x0, 1, 1) * 6) % 6;
     const r = lifeRaster(spec, e.k ?? 1, tq);
     const ref = lifeRaster(spec, e.k ?? 1, 0);
@@ -296,12 +299,10 @@ const toUiY = (y: number) => Math.floor((y * metrics.cellH) / metrics.uiH);
 function exName(s: GameState, e: Exhibit): string {
   const p = s.progress;
   if (e.kind === "extra") return e.owned ? (EXTRA_BY_ID[e.extra ?? ""]?.name ?? "?") : "???";
-  if (e.kind === "egg" && e.sp) return e.owned ? `Oeuf ${deOf(shownName(p, e.sp))}` : "Oeuf ???";
+  if (e.kind === "egg" && e.sp) return e.owned ? `Oeuf ${de(shownName(p, e.sp))}` : "Oeuf ???";
   if (!e.sp) return "???";
-  return e.owned ? (SPECIES[e.sp]?.name ?? e.sp) : (p.bones[e.sp]?.length ? shownName(p, e.sp) : "???");
+  return e.owned ? SPECIES[e.sp].name : (p.bones[e.sp]?.length ? shownName(p, e.sp) : "???");
 }
-const deOf = (n: string) => (/^[aeiouyhAEIOUYH]/.test(n) ? `d'${n}` : `de ${n}`);
-const fmtNum = (v: number) => String(v).replace(".", ",");
 
 function drawUi(s: GameState, th: Theme, ui: Frame, h: Hall, cam: number, hover: Exhibit | undefined) {
   const u = th.ui, L = lookOf(th);
@@ -454,11 +455,11 @@ function drawCartel(s: GameState, th: Theme, ui: Frame, e: Exhibit) {
     if (e.owned) {
       add(spec.latin, u.dim);
       add(spec.period);
-      add(`Longueur : ${fmtNum(spec.lengthM)} m   Poids : ${spec.massKg >= 1000 ? `${fmtNum(Math.round(spec.massKg / 100) / 10)} t` : `${spec.massKg} kg`}`);
+      add(`Longueur : ${fmtM(spec.lengthM)}   Poids : ${fmtKg(spec.massKg)}`);
       add(`Regime : ${spec.behavior.diet}`);
       add(`Fossiles trouves : ${spec.place}`, u.dim);
       lines.push(["", u.text]);
-      const got = spec.facts.filter((f) => p.facts.includes(`${spec.id}:${f.id}`));
+      const got = spec.facts.filter((f) => hasFact(p, spec.id, f.id));
       const f = got[Math.floor(s.time / 8) % Math.max(1, got.length)] ?? spec.facts[0];
       if (f) { add(f.title, u.hi); add(f.text); }
       lines.push(["", u.text]);

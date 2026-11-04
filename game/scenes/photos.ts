@@ -83,7 +83,7 @@ export const photosScene: Scene = {
     if (ps.view >= 0) {
       const p = album.photos[ps.view];
       for (const k of input.pressed) {
-        if (k === "ArrowLeft" || k === "KeyA" || k === "KeyQ") open(s, ps.view - 1);
+        if (k === "ArrowLeft" || k === "KeyA") open(s, ps.view - 1);
         if (k === "ArrowRight" || k === "KeyD") open(s, ps.view + 1);
         if (k === "KeyP" && p && !ps.confirm) void sharePhoto(s, p);
       }
@@ -94,8 +94,11 @@ export const photosScene: Scene = {
         if (id === "photos:del") ps.confirm = true;
         if (id === "photos:del:no") ps.confirm = false;
         if (id === "photos:del:yes" && p) {
-          removePhoto(p.id);
           ps.confirm = false;
+          if (!removePhoto(p.id)) {
+            toast(s, "Album pas encore prêt", "Réessaie dans un instant.");
+            continue;
+          }
           toast(s, "Photo supprimée", p.title);
           if (!album.photos.length) ps.view = -1;
           else ps.view = Math.min(ps.view, album.photos.length - 1);
@@ -116,7 +119,7 @@ export const photosScene: Scene = {
     if (Math.abs(ps.wheel) >= 60) { ps.scroll += Math.sign(ps.wheel); ps.wheel = 0; }
     for (const k of input.pressed) {
       if (k === "ArrowDown" || k === "KeyS") ps.scroll++;
-      if (k === "ArrowUp" || k === "KeyW" || k === "KeyZ") ps.scroll--;
+      if (k === "ArrowUp" || k === "KeyW") ps.scroll--;
     }
     ps.scroll = Math.max(0, ps.scroll);
     for (const id of input.ui) {

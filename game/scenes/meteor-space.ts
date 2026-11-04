@@ -1,4 +1,5 @@
 import { createNoise2D, createNoise3D } from "simplex-noise";
+import { clamp01, smoothstep } from "../math";
 import type { Frame } from "../render/frame";
 import { hash2, mulberry32 } from "../rng";
 import { calm } from "../settings";
@@ -33,11 +34,6 @@ function norm3(x: number, y: number, z: number): [number, number, number] {
   const l = Math.hypot(x, y, z);
   return [x / l, y / l, z / l];
 }
-const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
-const smooth = (a: number, b: number, v: number) => {
-  const k = clamp01((v - a) / (b - a));
-  return k * k * (3 - 2 * k);
-};
 const code = (s: string, v: number) => s.charCodeAt(Math.min(s.length - 1, Math.max(0, Math.floor(v * s.length))));
 
 // Coordonnées « corps » (lat/lon) du point d'impact : la texture est centrée dessus (lon 0).
@@ -215,9 +211,9 @@ function spark(f: Frame, xc: number, yc: number, ch: number, r: number, g: numbe
 let FR = 0, FG = 0, FB = 0;
 function fire(h: number) {
   h = clamp01(h);
-  FR = 90 + 165 * smooth(0, 0.35, h);
-  FG = 20 + 120 * smooth(0.2, 0.65, h) + 95 * smooth(0.65, 1, h);
-  FB = 10 + 40 * smooth(0.6, 0.8, h) + 180 * smooth(0.85, 1, h);
+  FR = 90 + 165 * smoothstep(0, 0.35, h);
+  FG = 20 + 120 * smoothstep(0.2, 0.65, h) + 95 * smoothstep(0.65, 1, h);
+  FB = 10 + 40 * smoothstep(0.6, 0.8, h) + 180 * smoothstep(0.85, 1, h);
 }
 
 const OCEAN_R = ".-~~=*";
@@ -276,16 +272,16 @@ export function drawSpace(f: Frame, t: number): void {
     const row = g.ty[i] * TW;
     const h = land[row + tx], c = cloud[row + tc];
     const lam = g.lam[i], dl = g.dotL[i];
-    const ca = smooth(0.14, 0.55, c) * 0.9;
+    const ca = smoothstep(0.14, 0.55, c) * 0.9;
     let r: number, gg: number, b: number, ramp: string, ocean = 0;
     if (h < 0) {
-      const dp = smooth(0, 0.3, -h);
+      const dp = smoothstep(0, 0.3, -h);
       r = 30 - 22 * dp; gg = 150 - 112 * dp; b = 170 - 62 * dp;
       ramp = OCEAN_R; ocean = 1;
     } else {
       const lat = Math.abs(g.sLat[i]);
-      const arid = smooth(0.15, 0.6, 1 - Math.abs(lat - 0.42) * 3.2 + (c + 0.2) * 0.6) * 0.8;
-      const hi = smooth(0.25, 0.6, h);
+      const arid = smoothstep(0.15, 0.6, 1 - Math.abs(lat - 0.42) * 3.2 + (c + 0.2) * 0.6) * 0.8;
+      const hi = smoothstep(0.25, 0.6, h);
       r = 46 + 130 * arid + 60 * hi; gg = 112 + 30 * arid - 10 * hi; b = 42 + 30 * arid + 30 * hi;
       if (h < 0.04) { r += 40; gg += 30; b += 20; } // plages, deltas
       ramp = LAND_R;
@@ -317,7 +313,7 @@ export function drawSpace(f: Frame, t: number): void {
           // Intérieur : sol calciné, plaques de feu plus vives près du front.
           const q = ang / ringA;
           r = r * 0.3 + 40; gg = gg * 0.25 + 8; b = b * 0.25 + 4;
-          const m = smooth(0, 0.3, pn + 0.3 * q - 0.12);
+          const m = smoothstep(0, 0.3, pn + 0.3 * q - 0.12);
           const heat = (0.12 + 0.45 * q * q + 0.2 * hz) * m;
           fire(heat);
           const k = m * 0.9;
@@ -436,7 +432,7 @@ export function drawSpace(f: Frame, t: number): void {
   }
 
   // 5. Légende pédagogique.
-  const ca = smooth(1, 1.5, t) * (1 - smooth(4.4, 4.8, t));
+  const ca = smoothstep(1, 1.5, t) * (1 - smoothstep(4.4, 4.8, t));
   if (ca > 0) {
     const text = CAPTION.length > cols - 4 ? CAPTION.slice(0, cols - 4) : CAPTION;
     const y = rows - Math.max(3, Math.round(rows * 0.06));
@@ -463,8 +459,8 @@ export function drawSpace(f: Frame, t: number): void {
   // Animations réduites : pas d'éclair blanc à l'impact (une lueur douce), et un fondu au blanc plus lent.
   const still = calm();
   let wk = 0;
-  if (post) wk = still ? 0.25 * smooth(0, 0.5, dt) * Math.exp(-dt * 0.8) : dt < 0.06 ? dt / 0.06 : Math.exp(-(dt - 0.06) * 4.5) * 0.97;
-  wk = Math.max(wk, smooth(still ? SPACE_DURATION - 1.8 : SPACE_WHITE, SPACE_DURATION - 0.05, t));
+  if (post) wk = still ? 0.25 * smoothstep(0, 0.5, dt) * Math.exp(-dt * 0.8) : dt < 0.06 ? dt / 0.06 : Math.exp(-(dt - 0.06) * 4.5) * 0.97;
+  wk = Math.max(wk, smoothstep(still ? SPACE_DURATION - 1.8 : SPACE_WHITE, SPACE_DURATION - 0.05, t));
   if (wk > 0.003) {
     const n = cols * rows, blank = wk > 0.9;
     for (let i = 0; i < n; i++) {

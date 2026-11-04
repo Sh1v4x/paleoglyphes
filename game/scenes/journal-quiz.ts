@@ -1,13 +1,15 @@
 import type { Input } from "../input";
 import type { Theme } from "../palette";
 import type { Frame } from "../render/frame";
-import { saveProgress } from "../progress";
+import { fmtKg, fmtM } from "../format";
+import { du, le } from "../fr";
+import { hasFact, saveProgress } from "../progress";
 import { SPECIES } from "../species";
 import type { Fact, Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
 import { ascii, button, clip, text, wrap } from "../ui/kit";
 import { toast } from "../ui/toast";
-import { box, DEFENSE, du, fitSprite, fmtKg, fmtM, GROUP, hasF, isDino, knownList, le } from "./journal-common";
+import { box, DEFENSE, fitSprite, GROUP, isDino, knownList } from "./journal-common";
 import { UI_TOP } from "./types";
 
 /**
@@ -175,11 +177,11 @@ const GENS: [Gen, number][] = [
 
 function pools(s: GameState): Pools {
   const K = knownList(s);
-  const F = K.flatMap((sp) => sp.facts.filter((f) => hasF(s, sp.id, f.id)).map((f) => ({ sp, f })));
+  const F = K.flatMap((sp) => sp.facts.filter((f) => hasFact(s.progress, sp.id, f.id)).map((f) => ({ sp, f })));
   return { K, F };
 }
 
-export const quizReady = (s: GameState) => pools(s).F.length >= MIN_FACTS;
+const quizReady = (s: GameState) => pools(s).F.length >= MIN_FACTS;
 
 function nextQuestion(s: GameState) {
   const qz = s.journal.quiz;
@@ -286,7 +288,6 @@ export function quizPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
   const ih = Math.max(4, Math.min(12, Math.floor((H - 4) / Math.max(1, show.length)) - 1));
   show.forEach((id, i) => {
     const sp = SPECIES[id];
-    if (!sp) return;
     const ix = x + W - ill - 3, iy = top + 5 + i * (ih + 1);
     fitSprite(world, th, `quiz:${id}`, sp.model, ix, iy, ill, ih - 1, s.time, 1.2, undefined, 0.05);
     // Pas de nom sous l'image si la question porte justement sur le nom.

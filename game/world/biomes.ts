@@ -17,6 +17,7 @@ export const BIOME = {
   Sea: 4,
 } as const;
 export type BiomeId = (typeof BIOME)[keyof typeof BIOME];
+export const isBiomeId = (v: unknown): v is BiomeId => (Object.values(BIOME) as readonly unknown[]).includes(v);
 
 export interface BiomeInfo {
   name: string;

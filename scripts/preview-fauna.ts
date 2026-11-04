@@ -6,13 +6,13 @@
  */
 import { DARK } from "../game/palette";
 import { rasterize, scalePrim, type Prim } from "../game/render/raster";
-import { SPECIES } from "../game/species";
+import { isSpeciesId, SPECIES } from "../game/species";
 import { FAUNA, type FaunaId } from "../game/species/fauna";
-import type { Action, Pose, SpeciesId } from "../game/species/types";
+import type { Action, Pose } from "../game/species/types";
 
 const [id = "didelphodon", act = "idle", at = "0", walk = "0", zoom = "1", ...rest] = process.argv.slice(2);
 const fauna = FAUNA[id as FaunaId];
-const spec = SPECIES[id as SpeciesId];
+const spec = isSpeciesId(id) ? SPECIES[id] : undefined;
 if (!fauna && !spec) {
   console.error(`Inconnu : ${id}. Faune : ${Object.keys(FAUNA).join(", ")} ; espèces : ${Object.keys(SPECIES).join(", ")}`);
   process.exit(1);

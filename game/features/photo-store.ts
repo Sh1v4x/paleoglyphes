@@ -1,5 +1,7 @@
 import type { Frame } from "../render/frame";
+import { isSpeciesId } from "../species";
 import type { SpeciesId } from "../species/types";
+import { STORAGE_KEYS } from "../storage-keys";
 import type { BiomeId } from "../world/biomes";
 import type { Act } from "./photo-score";
 
@@ -62,27 +64,36 @@ export function photoText(p: Pick<Photo, "cols" | "rows" | "ch">): string {
   return lines.join("\n");
 }
 
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+
 /** Vérifie qu'un enregistrement relu de la base a la bonne forme (base corrompue, ancienne version...). */
 export function validPhoto(v: unknown): v is Photo {
-  const p = v as Photo;
-  if (!p || typeof p.id !== "string" || typeof p.cols !== "number" || typeof p.rows !== "number") return false;
-  const n = p.cols * p.rows;
-  return p.ch instanceof Uint8Array && p.fg instanceof Uint8Array && p.bg instanceof Uint8Array
-    && p.ch.length === n && p.fg.length === n * 3 && p.bg.length === n * 3;
+  if (!isRecord(v)) return false;
+  const { id, cols, rows, ch, fg, bg, title, stars, notes, day, clock, real, species } = v;
+  if (typeof id !== "string" || !isNum(cols) || !isNum(rows)) return false;
+  const n = cols * rows;
+  return ch instanceof Uint8Array && fg instanceof Uint8Array && bg instanceof Uint8Array
+    && ch.length === n && fg.length === n * 3 && bg.length === n * 3
+    && typeof title === "string" && isNum(stars) && isStrings(notes) && isNum(day) && isNum(clock) && isNum(real)
+    && Array.isArray(species) && species.every(isSpeciesId);
 }
 
 export const newPhotoId = () => `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36).padStart(2, "0")}`;
 
-/** L'album en mémoire (photos les plus récentes d'abord) et l'état du stockage. */
-export const album = {
-  photos: [] as Photo[],
-  loaded: false,
-  loading: false,
-  /** false : IndexedDB indisponible, les photos seront perdues au rechargement. */
-  persistent: true,
-};
+interface Album {
+  /** Photos les plus récentes d'abord. */
+  photos: Photo[];
+  loaded: boolean;
+  loading: boolean;
+  /** false : IndexedDB indisponible ou écriture refusée, les photos seront perdues au rechargement. */
+  persistent: boolean;
+}
 
-const DB = "paleoglyphes", STORE = "photos";
+export const album: Album = { photos: [], loaded: false, loading: false, persistent: true };
+
+const DB = STORAGE_KEYS.photoDb, STORE = "photos";
 let dbp: Promise<IDBDatabase | null> | null = null;
 
 /** Ouvre la base ; crée le magasin « photos » s'il manque (montée de version si besoin). */
@@ -128,19 +139,21 @@ function openDb(): Promise<IDBDatabase | null> {
   return dbp;
 }
 
+/** Bumped by clearAlbum so that a read started before the reset doesn't bring the old photos back. */
+let loadGeneration = 0;
+
 /** Charge l'album (une seule fois). */
 export function loadAlbum(): void {
   if (album.loaded || album.loading) return;
   album.loading = true;
+  const generation = loadGeneration;
   void openDb().then((db) => {
     if (!db) { album.persistent = false; album.loaded = true; album.loading = false; return; }
     try {
       const req = db.transaction(STORE, "readonly").objectStore(STORE).getAll();
       req.onsuccess = () => {
-        const got = (req.result as unknown[]).filter(validPhoto);
-        // Les photos prises pendant le chargement restent en tête.
-        const ids = new Set(album.photos.map((p) => p.id));
-        album.photos = [...album.photos, ...got.filter((p) => !ids.has(p.id))].sort((a, b) => b.real - a.real);
+        // Prise de vue et suppression attendent la fin du chargement : rien à fusionner.
+        if (generation === loadGeneration) album.photos = req.result.filter(validPhoto).sort((a, b) => b.real - a.real);
         album.loaded = true; album.loading = false;
       };
       req.onerror = () => { album.persistent = false; album.loaded = true; album.loading = false; };
@@ -150,28 +163,42 @@ export function loadAlbum(): void {
   });
 }
 
-function write(fn: (st: IDBObjectStore) => void) {
-  void openDb().then((db) => {
-    if (!db) { album.persistent = false; return; }
+/** Resolves true once the transaction is committed; an abort (quota exceeded...) comes without `error`. */
+async function write(fn: (st: IDBObjectStore) => void): Promise<boolean> {
+  const db = await openDb();
+  const ok = await new Promise<boolean>((resolve) => {
+    if (!db) { resolve(false); return; }
     try {
       const tx = db.transaction(STORE, "readwrite");
       fn(tx.objectStore(STORE));
-      tx.onerror = () => { album.persistent = false; };
+      tx.oncomplete = () => resolve(true);
+      tx.onabort = () => resolve(false);
     } catch {
-      album.persistent = false;
+      resolve(false);
     }
   });
+  if (!ok) album.persistent = false;
+  return ok;
 }
 
-/** Ajoute une photo (mémoire tout de suite, base en arrière-plan). Renvoie false si l'album est plein. */
-export function addPhoto(p: Photo): boolean {
-  if (album.photos.length >= MAX_PHOTOS) return false;
+export type AddOutcome = "saved" | "memory";
+
+/** The caller checks beforehand that the album is loaded and not full. */
+export async function addPhoto(p: Photo): Promise<AddOutcome> {
   album.photos.unshift(p);
-  write((st) => st.put(p));
+  return (await write((st) => st.put(p))) ? "saved" : "memory";
+}
+
+export function removePhoto(id: string): boolean {
+  if (!album.loaded) return false;
+  album.photos = album.photos.filter((p) => p.id !== id);
+  void write((st) => st.delete(id));
   return true;
 }
 
-export function removePhoto(id: string): void {
-  album.photos = album.photos.filter((p) => p.id !== id);
-  write((st) => st.delete(id));
+/** « Tout recommencer » : l'album est vidé, en mémoire et dans la base. */
+export function clearAlbum(): Promise<boolean> {
+  loadGeneration++;
+  album.photos = [];
+  return write((st) => st.clear());
 }

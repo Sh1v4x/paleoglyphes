@@ -4,7 +4,8 @@ import { PX_PER_M } from "../config";
 import { BIOME } from "../world/biomes";
 import { CM } from "./carnivores.mat";
 import { THM } from "./therizino.mat";
-import { REST_RIG, c, e, knee, lerp, rot, win, type TheroRig } from "./raptor";
+import { lerp } from "../math";
+import { c, e, REST_RIG, rot, theroLegs, win, type TheroLegSpec, type TheroRig } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -97,6 +98,13 @@ function therizinoRig({ action, actionT: t, time, walk, moving }: Pose): ThRig {
 
 /** Bassin (pivot du corps), épaule, base du cou, nuque et œil, px bruts. */
 const HIP = { x: 0, y: -80 };
+const LEGS: TheroLegSpec = {
+  hip: HIP, farHip: 4, lift: 8, reach: 4, swing: 12, footY: -3,
+  mx: 4, my: 12, metaLift: 0.2, splay: { add: 10, k: 0.6 },
+  sit: { dx: 24, far: 6, y: -3, mx: 16, my: 3 },
+  lie: { dx: 58, far: -8, y: -5, nearDy: 4, mx: 14, my: 3 },
+  kneeDy: 4, thigh: 37, shin: 36,
+};
 const SHOULDER = { x: 34, y: -110 };
 const NECK = { x: 38, y: -122 };
 const NAPE = { x: 70, y: -160 };
@@ -126,19 +134,10 @@ export function therizinoModel(pose: Pose): Prim[] {
   const P: Prim[] = [];
 
   // --- Pattes trapues (cinématique inverse), larges pieds à quatre doigts ---
-  for (const L of [{ phase: 0, far: true }, { phase: Math.PI, far: false }]) {
-    const ph = walk + L.phase;
-    const sw = Math.sin(ph) * moving * r.stride;
-    const lift = Math.max(0, Math.cos(ph)) * moving * 8 * r.stride;
+  for (const L of theroLegs(pose, r, bx, by, LEGS)) {
     const m = L.far ? THM.Far : THM.Skin;
     const z = L.far ? -40 : 24;
-    const hx = HIP.x + (L.far ? 4 : 0) + bx, hy = HIP.y + by;
-    let fx = hx + 4 + sw * 12 + (L.far ? -10 - r.stance : 10 + r.stance) * 0.6, fy = -3 - lift;
-    let mx = 4, my = 12 - lift * 0.2;
-    if (r.legs === "sit") { fx = hx + 24 + (L.far ? 6 : 0); fy = -3; mx = 16; my = 3; }
-    else if (r.legs === "lie") { fx = hx + 58 + (L.far ? -8 : 0); fy = -5 - (L.far ? 0 : 4); mx = 14; my = 3; }
-    const ax = fx - mx, ay = fy - my;
-    const [kx, ky] = knee(hx, hy + 4, ax, ay, 37, 36);
+    const { hx, hy, fx, fy, ax, ay, kx, ky } = L;
     // Grosse cuisse emplumée, jambe épaisse, métatarse court, pied large.
     P.push(e(hx, hy, 18, 22, m, z - 4, 14));
     P.push(c(hx, hy + 4, kx, ky, 13, 9, m, z, 10));

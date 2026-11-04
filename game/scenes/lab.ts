@@ -1,5 +1,7 @@
 import { CELL_H, CELL_W, DEV, PX_PER_M, WORLD_H, WORLD_W } from "../config";
+import { de } from "../fr";
 import type { Input } from "../input";
+import { mixRgb, scaleRgb, smooth01 } from "../math";
 import type { RGB, Theme } from "../palette";
 import { saveProgress } from "../progress";
 import { setBg, setFg, type Frame } from "../render/frame";
@@ -7,16 +9,16 @@ import { metrics, uiCellAt } from "../render/metrics";
 import { rasterize, type Prim, type Raster } from "../render/raster";
 import { drawRaster } from "../render/sprite";
 import { hash2 } from "../rng";
-import { discovered, shownName, SPECIES } from "../species";
+import { discovered, isSpeciesId, shownName, SPECIES } from "../species";
 import { eggModel } from "../species/eggs";
 import { liveBirth, MAX_PER_SPECIES } from "../species/life";
 import type { Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
 import { calm } from "../settings";
-import { actions, button, buttonW, clip, hitAt, overlay, panel, put as uiPut, SP, text, toolbar, wrap, type Hint, type ToolItem } from "../ui/kit";
+import { actions, button, buttonW, clip, hitAt, overlay, panel, put, SP, text, toolbar, wrap, type Hint, type ToolItem } from "../ui/kit";
 import { toast } from "../ui/toast";
 import { unlockTrigger } from "../unlock";
-import { bonePrims, clipCols, deName, IDLE_POSE, outlineRaster, primBounds, rasterMid, scaleAll, skeletonPrims } from "./dig-fossils";
+import { bonePrims, clipCols, IDLE_POSE, outlineRaster, primBounds, rasterMid, scaleAll, skeletonPrims } from "./dig-fossils";
 import { atHome, canStand, centerOn, observeNest, parkScene, syncPopulation } from "./park";
 import { DIG_SITE, noteNewSites, sitesOf } from "./dig-sites";
 import { SM } from "./scenes.mat";
@@ -301,7 +303,7 @@ function incubate(s: GameState, spec: Species) {
   const id = park.nextNest++;
   park.nests.push({ id, sp: spec.id, x: pos.x, y: pos.y, eggs: 1, t: 0, guard: 0, fossil: true });
   s.lab.nest = { sp: spec.id, id, t: s.time };
-  toast(s, "Oeuf mis a incuber !", `Un nid ${deName(spec.name)} t'attend dans la reserve. Va le voir eclore !`);
+  toast(s, "Oeuf mis a incuber !", `Un nid ${de(spec.name)} t'attend dans la reserve. Va le voir eclore !`);
 }
 
 /** Espèce ouverte par défaut : une espèce commencée mais pas encore assemblée, sinon la première découverte. */
@@ -330,7 +332,7 @@ export const labScene: Scene = {
     for (const k of input.pressed) {
       const list = discovered(s.progress);
       const i = list.findIndex((x) => x.id === l.species);
-      if (k === "ArrowUp" || k === "KeyW" || k === "KeyZ") select(list[(i + list.length - 1) % list.length].id);
+      if (k === "ArrowUp" || k === "KeyW") select(list[(i + list.length - 1) % list.length].id);
       if (k === "ArrowDown" || k === "KeyS") select(list[(i + 1) % list.length].id);
       if ((k === "Enter" || k === "Space") && !l.synth) autoPlace(s, spec);
     }
@@ -342,7 +344,10 @@ export const labScene: Scene = {
     }
     for (const id of input.ui) {
       if (id === "lab:dismiss") l.done = null;
-      if (id.startsWith("lab:sp:")) select(id.slice(7) as SpeciesId);
+      if (id.startsWith("lab:sp:")) {
+        const sp = id.slice(7);
+        if (isSpeciesId(sp)) select(sp);
+      }
       if (id === "lab:prev" || id === "lab:next") {
         const list = discovered(s.progress), i = list.findIndex((x) => x.id === l.species);
         if (list.length) select(list[(i + (id === "lab:next" ? 1 : list.length - 1)) % list.length].id);
@@ -489,14 +494,6 @@ function drawBackdrop(th: Theme, f: Frame, L: Layout) {
 
 const code = (s: string, h: number) => s.charCodeAt(Math.min(s.length - 1, Math.max(0, Math.floor(h * s.length))));
 
-function put(f: Frame, x: number, y: number, ch: number, fg: readonly number[], bg?: readonly number[]) {
-  if (x < 0 || y < 0 || x >= f.cols || y >= f.rows) return;
-  const i = y * f.cols + x;
-  f.ch[i] = ch;
-  setFg(f, i, fg[0], fg[1], fg[2]);
-  if (bg) setBg(f, i, bg[0], bg[1], bg[2]);
-}
-
 function drawStage(s: GameState, th: Theme, f: Frame, spec: Species, L: Layout) {
   const l = s.lab;
   const ink: RGB = th.outline ? th.pal.ink : th.pal.void;
@@ -505,8 +502,8 @@ function drawStage(s: GameState, th: Theme, f: Frame, spec: Species, L: Layout) 
 
   // Socle et tiges du montage de musée.
   for (let x = L.bx0 - 3; x <= L.bx1 + 3; x++) {
-    put(f, x, L.ground + 1, x === L.bx0 - 3 || x === L.bx1 + 3 ? 43 : 61, edge.map((v) => v * 1.3), edge.map((v) => v * 0.6));
-    put(f, x, L.ground + 2, 95, edge.map((v) => v * 0.8), edge.map((v) => v * 0.4));
+    put(f, x, L.ground + 1, x === L.bx0 - 3 || x === L.bx1 + 3 ? 43 : 61, scaleRgb(edge, 1.3), scaleRgb(edge, 0.6));
+    put(f, x, L.ground + 2, 95, scaleRgb(edge, 0.8), scaleRgb(edge, 0.4));
   }
   const cy = L.ground + Math.round((spec.center.y * L.s) / CELL_H);
   for (const fx of [-0.45, 0.4]) {
@@ -525,7 +522,7 @@ function drawStage(s: GameState, th: Theme, f: Frame, spec: Species, L: Layout) 
   if (synth || showModel) {
     // Synthèse : la ligne de balayage change le squelette en chair.
     const t = synth ? Math.min(1, (s.time - synth.t0) / SYNTH_T) : 1;
-    const e = t * t * (3 - 2 * t);
+    const e = smooth01(t);
     const scan = Math.round(L.bx0 - 2 + (L.bx1 - L.bx0 + 4) * e) - L.ox;
     const model = modelRaster(spec, L.s);
     const mClip = clipCols(model, -9999, scan);
@@ -538,8 +535,8 @@ function drawStage(s: GameState, th: Theme, f: Frame, spec: Species, L: Layout) 
       const sc = th.mats[SM.Scan].color, sp = th.mats[SM.Spark].color;
       const x = L.ox + scan;
       for (let y = L.by0 - 3; y <= L.ground; y++) {
-        put(f, x, y, 124, sc, sc.map((v) => v * 0.35));
-        put(f, x - 1, y, 58, sc.map((v) => v * 0.6));
+        put(f, x, y, 124, sc, scaleRgb(sc, 0.35));
+        put(f, x - 1, y, 58, scaleRgb(sc, 0.6));
       }
       for (let k = 0; k < 26; k++) {
         const h1 = hash2(k, Math.floor(s.time * 20), 1), h2 = hash2(k, Math.floor(s.time * 20), 2);
@@ -580,7 +577,7 @@ function drawStage(s: GameState, th: Theme, f: Frame, spec: Species, L: Layout) 
     const er = cached(`${spec.id}|egg`, () => scaleAll(eggModel(spec.id, 0), 3));
     const glow = 0.35 + 0.2 * Math.sin(s.time * 2.2);
     const bench = th.mats[SM.Bench].color;
-    const halo = bench.map((v, i) => v + (hi[i] - v) * glow) as unknown as RGB;
+    const halo = mixRgb(bench, hi, glow);
     for (let k = 0; k < Math.min(3, eggs); k++) {
       const x0 = eggX(L) + k * (er.w + 3), y0 = L.trayY + L.trayH - 3;
       outlineRaster(f, er, x0, y0, halo);
@@ -593,8 +590,8 @@ function drawStage(s: GameState, th: Theme, f: Frame, spec: Species, L: Layout) 
   for (const b of trayBoxes(s, spec, L)) {
     const sel = l.held === b.bone, dragging = l.drag?.bone === b.bone;
     const shake = l.shake && l.shake.bone === b.bone && s.time - l.shake.t < 0.45 ? Math.round(Math.sin((s.time - l.shake.t) * 50) * 2) : 0;
-    const col = sel ? hi : edge.map((v) => v * 1.4);
-    const felt = th.style === "cartoon" ? th.mats[SM.Bench].color.map((v) => v * 0.8) : th.mats[SM.Bench].color.map((v) => v * 0.35);
+    const col = sel ? hi : scaleRgb(edge, 1.4);
+    const felt = scaleRgb(th.mats[SM.Bench].color, th.style === "cartoon" ? 0.8 : 0.35);
     for (let j = 0; j < b.h; j++)
       for (let i = 0; i < b.w; i++) {
         const border = i === 0 || j === 0 || i === b.w - 1 || j === b.h - 1;
@@ -614,7 +611,7 @@ function drawStage(s: GameState, th: Theme, f: Frame, spec: Species, L: Layout) 
     const r = bigBone(spec, l.drag.bone, L.s);
     const m = rasterMid(r);
     const x0 = Math.round(mouse.x - m.x), y0 = Math.round(mouse.y - m.y);
-    outlineRaster(f, r, x0, y0, th.outline ? ink : hi.map((v) => v * 0.4) as unknown as RGB);
+    outlineRaster(f, r, x0, y0, th.outline ? ink : scaleRgb(hi, 0.4));
     drawRaster(f, th, r, x0, y0, { light: 1.2 });
   }
 }
@@ -671,7 +668,7 @@ function drawSpeciesList(s: GameState, th: Theme, ui: Frame) {
   if (maxScroll > 0) {
     // Ascenseur.
     const pos = Math.round((off / maxScroll) * (view - 1));
-    for (let i = 0; i < view; i++) uiPut(ui, lx + LEFT_W - 1, ly + 1 + i, i === pos ? 35 : 58, i === pos ? u.hi : u.dim, u.panel, u.alpha);
+    for (let i = 0; i < view; i++) put(ui, lx + LEFT_W - 1, ly + 1 + i, i === pos ? 35 : 58, i === pos ? u.hi : u.dim, u.panel, u.alpha);
   }
   if (anyAsm) T(lx + 2, ly + lh - 2, "* = deja assemble", u.dim);
 }

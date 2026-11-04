@@ -1,6 +1,7 @@
 import { createNoise2D } from "simplex-noise";
 import { CELL_H, CELL_W } from "../config";
 import { sample, type Field } from "../features/lenia";
+import { smoothstep } from "../math";
 import type { Palette, RGB, Theme } from "../palette";
 import { hash2, mulberry32 } from "../rng";
 import type { World } from "../world/generate";
@@ -20,13 +21,7 @@ const FERN_MID = "(*)";
 const HORSETAIL = "\\|/";
 const MOSS = ".:oO";
 const PLANKTON = ".:;o*";
-/** Lueur du plancton (bleu-vert froid), visible surtout la nuit. */
-const GLOW: RGB = [110, 250, 215];
 
-const smooth = (a: number, b: number, x: number) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
 /** Les champs 0..1 du monde sont stockés sur un octet (voir World). */
 const INV255 = 1 / 255;
 const code = (s: string, i: number) => s.charCodeAt(Math.min(s.length - 1, Math.max(0, i)));
@@ -401,7 +396,7 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
         } else {
           const wind = noise(wx * 0.02 - t * 0.18, wy * 0.035 + t * 0.05);
           const band = Math.sin(wx * 0.045 + wy * 0.02 - t * 0.8);
-          gust = smooth(0.55, 1, band) * (0.6 + 0.4 * noise(wx * 0.008 + t * 0.03, wy * 0.01));
+          gust = smoothstep(0.55, 1, band) * (0.6 + 0.4 * noise(wx * 0.008 + t * 0.03, wy * 0.01));
           const lean = (hash2(wx, wy, 5) - 0.5) * 0.6 + wind * 0.5 + gust * 1.1;
           const li = lean < -0.35 ? 0 : lean < 0.4 ? 1 : 2;
           if (tr > 0.25) c = kind < 0.5 ? 95 : kind < 0.8 ? 44 : 126; // frondes couchées : _ , ~
@@ -454,9 +449,6 @@ export function composeWorld(th: Theme, f: Frame, v: WorldView): void {
 }
 
 const SNOW = " .'`:";
-/** Lichens (Xanthoria orangé, lichens gris-vert) : mêmes teintes dans les deux styles, la lumière fait le reste. */
-const LICHEN: RGB = [214, 140, 52];
-const LICHEN_GREY: RGB = [150, 168, 128];
 /** Teinte de la croûte du désert (recalculée par cellule, sans allocation). */
 const CRUST: [number, number, number] = [0, 0, 0];
 const SAND = " .-~";
@@ -481,7 +473,7 @@ function biomeGround(f: Frame, i: number, P: Palette, th: Theme, w: World, wi: n
     col = P.snow[ti];
     k = (0.85 + 0.25 * grain) * sh * (trampled ? 0.75 : 1);
     // Lichens : petites croûtes orangées ou vert-de-gris qui percent la neige.
-    if (alive && !trampled && hash2(wx, wy, 29) < 0.7) { const orange = hash2(wx, wy, 24) < 0.35; c = orange ? 37 : 38; col = orange ? LICHEN : LICHEN_GREY; k = (0.55 + 0.25 * vd) * sh; } // % &
+    if (alive && !trampled && hash2(wx, wy, 29) < 0.7) { const orange = hash2(wx, wy, 24) < 0.35; c = orange ? 37 : 38; col = orange ? P.lichen : P.lichenGrey; k = (0.55 + 0.25 * vd) * sh; } // % &
   } else if (terr === T.Sand) {
     // Rides : bandes obliques déformées par le bruit, crête claire, creux sombre.
     const r = Math.sin(wx * 0.22 + wy * 0.5 + noise(wx * 0.01, wy * 0.02) * 6);
@@ -544,6 +536,9 @@ export interface MapView {
   marks: MapMark[];
 }
 
+/** Couleur de travail de la vue carte (plancton) : réutilisée pour ne rien allouer par cellule. */
+const mapTint: [number, number, number] = [0, 0, 0];
+
 /**
  * Vue carte : un glyphe par bloc, d'après la cellule centrale (sol, décor, eau), avec la végétation
  * vivante et le plancton (Lenia) qui bougent, et les animaux en lettres. Pas de rastérisation : on voit
@@ -569,7 +564,7 @@ export function composeMap(th: Theme, f: Frame, v: MapView): void {
         c = Math.sin(wx * 0.05 + wy * 0.09 + v.time) > 0.6 ? 126 : 32; // vaguelettes ~
         g = th.cel ? 1.3 : 2.2;
         const pd = v.plankton && terr === T.Deep ? sample(v.plankton, wx + 0.5, wy + 0.5) : 0;
-        if (pd > 0.1) { c = pd > 0.5 ? 42 : 58; mix(col, GLOW, Math.min(1, pd * (0.5 + 0.8 * (1 - v.light)))); col = [R, G, B]; g = 1.2; } // * :
+        if (pd > 0.1) { c = pd > 0.5 ? 42 : 58; mix(col, P.plankton, Math.min(1, pd * (0.5 + 0.8 * (1 - v.light)))); mapTint[0] = R; mapTint[1] = G; mapTint[2] = B; col = mapTint; g = 1.2; } // * :
         else if (terr === T.Shallow && w.biome[wi] === BIOME.Swamp && vd > 0.3) { c = 111; col = P.grass[2]; } // o lentilles d'eau
       } else if (terr === T.Rock) {
         const h = w.depth[wi] * INV255, cap = w.biome[wi] === BIOME.Tundra && h > 0.7;
@@ -577,7 +572,7 @@ export function composeMap(th: Theme, f: Frame, v: MapView): void {
       } else if (w.decorMat[wi] && th.mats[w.decorMat[wi]]) {
         // Arbres et rochers : leur couleur, un glyphe d'arbre.
         col = th.mats[w.decorMat[wi]].color; c = w.biome[wi] === BIOME.Tundra ? 65 : 84; g = 1.1; // A (conifère) T
-      } else if (terr === T.Snow) { c = vd > 0.35 ? 37 : 46; col = vd > 0.35 ? LICHEN : P.snow[ti]; } // % .
+      } else if (terr === T.Snow) { c = vd > 0.35 ? 37 : 46; col = vd > 0.35 ? P.lichen : P.snow[ti]; } // % .
       else if (terr === T.Sand) { c = vd > 0.35 ? 59 : 126; col = vd > 0.35 ? P.grass[0] : P.sand[ti]; } // ; ~
       else if (terr === T.Mud) { c = vd > 0.3 ? 34 : 44; col = vd > 0.3 ? P.grass[1] : P.mud[ti]; } // " ,
       else if (terr === T.Grass) { c = vd > 0.5 ? 34 : vd > 0.25 ? 44 : 46; col = vd > 0.25 ? P.grass[ti] : P.dirt[ti]; } // " , .
@@ -747,7 +742,8 @@ function waterPass(v: WorldView, th: Theme, f: Frame) {
         if (pd > 0.08 && hash2(wx, wy, Math.floor(t * 1.5 + hash2(wx, wy, 7) * 5)) < pd * 1.4) {
           c = code(PLANKTON, Math.floor(pd * PLANKTON.length));
           const g = Math.min(1, pd * (0.45 + 1.1 * (1 - L)));
-          fr += (GLOW[0] - fr) * g; fg += (GLOW[1] - fg) * g; fb += (GLOW[2] - fb) * g;
+          const glow = P.plankton;
+          fr += (glow[0] - fr) * g; fg += (glow[1] - fg) * g; fb += (glow[2] - fb) * g;
         }
       }
 
@@ -807,12 +803,12 @@ function fogPass(v: WorldView, th: Theme, f: Frame) {
       const i = y * cols + x;
       const k = i * 4;
       if (clouds) {
-        const a = smooth(0.3, 0.55, n) * 0.28;
+        const a = smoothstep(0.3, 0.55, n) * 0.28;
         if (a < 0.01) continue;
         for (let c = 0; c < 3; c++) { f.fg[k + c] *= 1 - a; f.bg[k + c] *= 1 - a; }
         continue;
       }
-      const fog = smooth(0.25, 0.9, n) * 0.4;
+      const fog = smoothstep(0.25, 0.9, n) * 0.4;
       if (fog < 0.02) continue;
       const L = (f.lr[i] + f.lg[i] + f.lb[i]) / 3;
       const a = fog * Math.min(1, L * 1.3);
@@ -828,15 +824,5 @@ function fogPass(v: WorldView, th: Theme, f: Frame) {
         f.fg[k] = mfr * 0.9; f.fg[k + 1] = mfg * 0.9; f.fg[k + 2] = mfb * 0.9;
       }
     }
-  }
-}
-
-export function drawText(f: Frame, P: Palette, x: number, y: number, text: string, color: RGB = P.text, bg: RGB = P.void) {
-  for (let j = 0; j < text.length; j++) {
-    if (x + j < 0 || x + j >= f.cols || y < 0 || y >= f.rows) continue;
-    const i = y * f.cols + x + j;
-    f.ch[i] = text.charCodeAt(j);
-    setFg(f, i, color[0], color[1], color[2]);
-    setBg(f, i, bg[0], bg[1], bg[2]);
   }
 }

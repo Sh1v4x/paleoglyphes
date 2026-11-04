@@ -1,7 +1,9 @@
 import { CELL_H, CELL_W } from "../config";
 import { clockLabel, isNight } from "../daycycle";
+import { de, du, le, plural } from "../fr";
 import type { Input } from "../input";
 import type { RGB, Theme } from "../palette";
+import { hasFact } from "../progress";
 import type { Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
 import type { Animal, Nest } from "../scenes/park";
@@ -128,19 +130,15 @@ const RED: RGB = [235, 70, 60];
 
 // --- Noms et petites phrases --------------------------------------------------------------------
 
-const vowel = (n: string) => /^[aeiouyhàâéèêîïôûAEIOUYHÉÈ]/.test(n);
 const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
-const N = (sp: SpeciesId | undefined) => (sp && SPECIES[sp]?.name) || "dinosaure";
+const N = (sp: SpeciesId | undefined) => (sp && SPECIES[sp].name) || "dinosaure";
 const un = (n: string) => `un ${n}`;
-const le = (n: string) => (vowel(n) ? `l'${n}` : `le ${n}`);
-const du = (n: string) => (vowel(n) ? `de l'${n}` : `du ${n}`);
-const pl = (n: string) => (/[sx]$/.test(n) ? n : `${n}s`);
-const dePl = (n: string) => (vowel(n) ? `d'${pl(n)}` : `de ${pl(n)}`);
+const dePl = (n: string) => de(plural(n));
 const pick = <T,>(v: T[]): T => v[Math.floor(Math.random() * v.length) % v.length];
 
 /** Où se passe la scène, en quelques mots. */
 function place(s: GameState, x: number, y: number, sp: SpeciesId): string {
-  if (SPECIES[sp]?.habitat === "sea") return pick(["Au large", "Sous les vagues", "En pleine mer"]);
+  if (SPECIES[sp].habitat === "sea") return pick(["Au large", "Sous les vagues", "En pleine mer"]);
   if (isNight(s.clock) && Math.random() < 0.5) return pick(["Dans la nuit", "Sous la lune", "A la faveur de la nuit"]);
   const w = worldFor(s);
   const px = (x - w.pond.x) / w.pond.rx, py = (y - w.pond.y) / w.pond.ry;
@@ -187,16 +185,16 @@ const LINES: Record<Kind, (c: Ctx) => string[]> = {
     `Moment rare : ${un(A)} prépare son nid. Il va le garder jour et nuit.`,
   ],
   court: ({ A, P }) => [
-    `${P}, deux ${pl(A)} se font la cour. Une parade pleine d'élégance !`,
-    `C'est la saison des amours : les ${pl(A)} paradent l'un devant l'autre.`,
+    `${P}, deux ${plural(A)} se font la cour. Une parade pleine d'élégance !`,
+    `C'est la saison des amours : les ${plural(A)} paradent l'un devant l'autre.`,
   ],
   theft: ({ A, B }) => [
     `Coup de théâtre ! ${cap(un(A))} chaparde un œuf dans le nid ${du(B)}.`,
     `Profitant d'un moment d'inattention, ${un(A)} gobe un œuf ${du(B)}...`,
   ],
   hatch: ({ A }) => [
-    `Les coquilles se fendillent... Des bébés ${pl(A)} sortent de leurs œufs !`,
-    `Naissance au nid ! Les petits ${pl(A)} découvrent le monde pour la première fois.`,
+    `Les coquilles se fendillent... Des bébés ${plural(A)} sortent de leurs œufs !`,
+    `Naissance au nid ! Les petits ${plural(A)} découvrent le monde pour la première fois.`,
   ],
   birth: ({ A, P }) => [
     `${P}, un bébé ${A} vient de naître. Il nage aussitôt près de sa mère.`,
@@ -228,10 +226,10 @@ const LINES: Record<Kind, (c: Ctx) => string[]> = {
   ],
   crossing: ({ A, P }) => [
     `${P}, un troupeau ${dePl(A)} traverse l'eau. Les plus grands ouvrent la marche.`,
-    `Splash ! Les ${pl(A)} passent le gué tous ensemble, pour plus de sécurité.`,
+    `Splash ! Les ${plural(A)} passent le gué tous ensemble, pour plus de sécurité.`,
   ],
   drinking: ({ A, P }) => [
-    `${P}, les ${pl(A)} se retrouvent pour boire. Un moment de calme... restons attentifs.`,
+    `${P}, les ${plural(A)} se retrouvent pour boire. Un moment de calme... restons attentifs.`,
     `L'heure de boire : tout le groupe ${dePl(A)} s'abreuve côte à côte.`,
   ],
   call: ({ A }) => [
@@ -240,7 +238,7 @@ const LINES: Record<Kind, (c: Ctx) => string[]> = {
   ],
   answer: ({ A }) => [
     `Au loin, un autre ${A} lui répond : ils se parlent !`,
-    `Réponse ! Les ${pl(A)} communiquent par de grands cris.`,
+    `Réponse ! Les ${plural(A)} communiquent par de grands cris.`,
   ],
   oldage: ({ A, P }) => [
     `${P}, un vieux ${A} s'est éteint paisiblement, au terme d'une longue vie.`,
@@ -309,7 +307,6 @@ function scan(s: GameState) {
 
   for (const a of p.animals) {
     const spec = SPECIES[a.sp];
-    if (!spec) continue;
     let o = d.snaps.get(a.id);
     if (!o) {
       o = { task: a.task, action: a.action, mood: a.mood, inWater: a.inWater, gen };
@@ -436,10 +433,10 @@ function tourShot(s: GameState): Shot | null {
   const herds = pool.filter((a) => a.herd > 1);
   const a = pick(herds.length && Math.random() < 0.7 ? herds : pool);
   d.lastTour = a.sp;
-  const spec = SPECIES[a.sp]!;
+  const spec = SPECIES[a.sp];
   const name = spec.name;
   const intro = a.herd > 2 ? `Voici un groupe ${dePl(name)}. L'un d'eux ${activity(a)}.` : `${cap(le(name))} ${activity(a)}.`;
-  const known = spec.facts.filter((f) => s.progress.facts.includes(`${a.sp}:${f.id}`));
+  const known = spec.facts.filter((f) => hasFact(s.progress, a.sp, f.id));
   const fact = pick(known.length ? known : spec.facts.filter((f) => f.unlock === "discover"));
   return makeShot(s, null, a, fact ? `${intro} ${fact.text}` : intro, 0);
 }

@@ -4,13 +4,17 @@ import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { scalePrim } from "../render/raster";
 import { drawRaster } from "../render/sprite";
-import { FAUNA, type FaunaDef } from "../species/fauna";
-import { SPECIES, SPECIES_LIST } from "../species";
+import { FAUNA_LIST, type FaunaDef } from "../species/fauna";
+import { isSpeciesId, SPECIES, SPECIES_LIST } from "../species";
 import { eggModel } from "../species/eggs";
 import type { FactUnlock, Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
+import { STORAGE_KEYS } from "../storage-keys";
 import { actions, button, buttonW, clip, over, panel, region, SP, text, toolbar, wrap, type Hint, type ToolItem } from "../ui/kit";
-import { box, cached, DEFENSE, drawLines, factKey, fitSprite, fmtKg, fmtM, groundLine, hasF, human, idle, known, knownList, lerp, paper, RH, RW, type Line } from "./journal-common";
+import { fmtKg, fmtM } from "../format";
+import { mixRgb } from "../math";
+import { factKey, hasFact } from "../progress";
+import { box, cached, DEFENSE, drawLines, fitSprite, groundLine, human, idle, known, knownList, paper, RH, RW, type Line } from "./journal-common";
 import { createQuizState, quizPage, quizUpdate, type QuizState } from "./journal-quiz";
 import { createSizesState, sizesPage, sizesUpdate, type SizesState } from "./journal-sizes";
 import { createTimelineState, timelinePage, timelineUpdate, type TimelineState } from "./journal-timeline";
@@ -33,6 +37,7 @@ const SUBTABS: { id: JournalTab; label: string; short: string; icon: string; tip
   { id: "sizes", label: "Tailles", short: "Tailles", icon: "Tail", tip: "Comparer leur taille a la notre" },
   { id: "travel", label: "Voyage", short: "Voyage", icon: "Voy", tip: "Carnet de voyage : les biomes et leurs vrais sites" },
 ];
+const isJournalTab = (v: string): v is JournalTab => SUBTABS.some((t) => t.id === v);
 /** Fenêtre étroite (téléphone) : le bouton Extras rejoint les sous-onglets, la fiche passe sous le studio. */
 const narrow = (ui: Frame) => ui.cols < 70;
 
@@ -86,14 +91,19 @@ export const UNLOCK_HINT: Record<FactUnlock, string> = {
 // ---------------------------------------------------------------------------
 // « Déjà lu » : mémorisé dans le navigateur, séparé de la progression.
 // ---------------------------------------------------------------------------
-const SEEN_KEY = "ascii-dino-journal-seen-v1";
 let seen: Set<string> | null = null;
+
+function parseSeenKeys(raw: string): string[] {
+  const v: unknown = JSON.parse(raw);
+  return Array.isArray(v) ? v.filter((k) => typeof k === "string") : [];
+}
+
 function seenSet(): Set<string> {
   if (seen) return seen;
   seen = new Set();
   try {
-    const raw = localStorage.getItem(SEEN_KEY);
-    if (raw) for (const k of JSON.parse(raw) as string[]) seen.add(k);
+    const raw = localStorage.getItem(STORAGE_KEYS.journalSeen);
+    if (raw) for (const k of parseSeenKeys(raw)) seen.add(k);
   } catch {
     // Pas de stockage : tout reste « nouveau » pendant la session, ce n'est pas grave.
   }
@@ -104,15 +114,19 @@ function markSeen(keys: string[]) {
   let changed = false;
   for (const k of keys) if (!set.has(k)) { set.add(k); changed = true; }
   if (!changed) return;
-  try { localStorage.setItem(SEEN_KEY, JSON.stringify([...set])); } catch { /* sans stockage */ }
+  try { localStorage.setItem(STORAGE_KEYS.journalSeen, JSON.stringify([...set])); } catch { /* sans stockage */ }
 }
 
-export { known } from "./journal-common";
-const faunaList = () => Object.values(FAUNA) as FaunaDef[];
+/** « Tout recommencer » : plus rien n'est lu, en mémoire comme dans le stockage. */
+export function resetSeen() {
+  seen = new Set();
+  try { localStorage.removeItem(STORAGE_KEYS.journalSeen); } catch { /* sans stockage */ }
+}
+
 
 function newCount(s: GameState, sp: Species): number {
   const set = seenSet();
-  return sp.facts.filter((f) => hasF(s, sp.id, f.id) && !set.has(factKey(sp.id, f.id))).length;
+  return sp.facts.filter((f) => hasFact(s.progress, sp.id, f.id) && !set.has(factKey(sp.id, f.id))).length;
 }
 
 /** Ouvre une page : ce qui n'a jamais été lu devient « Nouveau ! » pour cette visite, puis « lu ». */
@@ -123,7 +137,7 @@ function openPage(s: GameState) {
   const set = seenSet();
   let keys: string[] = [];
   const spec = j.species ? SPECIES[j.species] : undefined;
-  if (spec) keys = spec.facts.filter((f) => hasF(s, spec.id, f.id)).map((f) => factKey(spec.id, f.id));
+  if (spec) keys = spec.facts.filter((f) => hasFact(s.progress, spec.id, f.id)).map((f) => factKey(spec.id, f.id));
   else if (j.extras) keys = s.progress.extras.map((e) => `x:${e}`);
   j.fresh = keys.filter((k) => !set.has(k));
   markSeen(keys);
@@ -171,7 +185,7 @@ function summary(s: GameState, th: Theme, world: Frame, ui: Frame) {
   const u = th.ui, j = s.journal;
   const p = s.progress;
   const total = SPECIES_LIST.reduce((n, sp) => n + sp.facts.length, 0);
-  const got = SPECIES_LIST.reduce((n, sp) => n + sp.facts.filter((f) => hasF(s, sp.id, f.id)).length, 0);
+  const got = SPECIES_LIST.reduce((n, sp) => n + sp.facts.filter((f) => hasFact(s.progress, sp.id, f.id)).length, 0);
   const xl = `Extras (${p.extras.length})`;
   const bx = ui.cols - buttonW(xl) - SP.pad;
   if (!narrow(ui)) button(ui, th, "journal:extras", bx, UI_TOP - 1, xl, { tip: "Fossiles bonus et petite faune" });
@@ -206,7 +220,7 @@ function summary(s: GameState, th: Theme, world: Frame, ui: Frame) {
       wrap("Espèce inconnue : trouve un de ses os en fouille.", cw - 4).slice(0, 2).forEach((l, i) => text(ui, x + 2, ty + 1 + i, l, u.dim, u.panel, u.alpha));
       return;
     }
-    const facts = sp.facts.filter((f) => hasF(s, sp.id, f.id)).length;
+    const facts = sp.facts.filter((f) => hasFact(s.progress, sp.id, f.id)).length;
     const nw = newCount(s, sp);
     const name = clip(sp.name, cw - 4 - (nw ? 16 : 0));
     const nl = text(ui, x + 2, ty, name, hot ? u.hi : u.text, u.panel, u.alpha);
@@ -305,7 +319,7 @@ function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Spe
   add(`Taille : ${fmtM(spec.lengthM)} de long, ${fmtKg(spec.massKg)}`, u.text);
   add(`  ${compare(spec)}`, u.dim);
   const diet = B.diet === "herbivore" ? `herbivore${B.browse ? B.browse === "low" ? ", plantes basses" : B.browse === "high" ? ", feuilles hautes" : ", plantes basses et hautes" : ""}`
-    : B.diet === "carnivore" ? `carnivore${B.prey.length ? `, chasse ${B.prey.map((q) => SPECIES[q]?.name ?? q).join(", ")}` : ""}` : "omnivore";
+    : B.diet === "carnivore" ? `carnivore${B.prey.length ? `, chasse ${B.prey.map((q) => SPECIES[q].name).join(", ")}` : ""}` : "omnivore";
   add(`Régime : ${diet}${B.scavenger ? " (mange aussi les carcasses)" : ""}`, u.text);
   add(`Défense : ${DEFENSE[B.defense]}`, u.text);
   add(`Vie sociale : ${B.herd[1] <= 1 ? "solitaire" : `groupes de ${B.herd[0]} à ${B.herd[1]}`}`, u.text);
@@ -315,13 +329,13 @@ function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Spe
   const bones = p.bones[spec.id]?.length ?? 0;
   add(`Atelier : ${p.assembled.includes(spec.id) ? "squelette assemblé" : `${bones}/${spec.bones.length} os trouvés`}`, u.text);
   lines.push({ t: "", c: u.text });
-  const got = spec.facts.filter((f) => hasF(s, spec.id, f.id)).length;
+  const got = spec.facts.filter((f) => hasFact(s.progress, spec.id, f.id)).length;
   add(`Faits (${got}/${spec.facts.length})`, u.hi);
   lines.push({ t: "-".repeat(Math.min(tw, 30)), c: u.border });
   for (const f of spec.facts) {
-    if (hasF(s, spec.id, f.id)) {
+    if (hasFact(s.progress, spec.id, f.id)) {
       add(`[*] ${f.title}`, u.text, j.fresh.includes(factKey(spec.id, f.id)) ? " Nouveau ! " : undefined);
-      wrap(f.text, tw - 4).forEach((l) => lines.push({ t: `    ${l}`, c: u.dim === u.text ? u.text : lerp(u.text, u.dim, 0.35) }));
+      wrap(f.text, tw - 4).forEach((l) => lines.push({ t: `    ${l}`, c: u.dim === u.text ? u.text : mixRgb(u.text, u.dim, 0.35) }));
     } else {
       add("[ ] ???", u.dim);
       wrap(`Indice : ${UNLOCK_HINT[f.unlock]}`, tw - 4).forEach((l) => lines.push({ t: `    ${l}`, c: u.dim }));
@@ -364,7 +378,7 @@ function extrasPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
   interface Entry { key: string; title: string; sub: string; body: string; def?: FaunaDef; locked: boolean }
   const entries: Entry[] = [];
   const ex = s.progress.extras;
-  for (const d of faunaList()) {
+  for (const d of FAUNA_LIST) {
     const k = `fauna:${d.id}`;
     entries.push(ex.includes(k) ? { key: k, title: d.name, sub: d.latin, body: d.text, def: d, locked: false }
       : { key: k, title: "???", sub: "Petite bête de la réserve", body: "Clique sur cette petite bête dans la réserve pour l'ajouter au carnet.", locked: true });
@@ -432,9 +446,15 @@ export const journalScene: Scene = {
     // Une fiche ouverte depuis ailleurs (la réserve) ramène à l'onglet « Espèces ».
     if (page !== j.opened) { openPage(s); if (j.species) j.tab = "species"; }
     for (const id of input.ui) {
-      if (id.startsWith("journal:tab:")) { j.tab = id.slice(12) as JournalTab; j.scroll = 0; }
+      if (id.startsWith("journal:tab:")) {
+        const tab = id.slice(12);
+        if (isJournalTab(tab)) { j.tab = tab; j.scroll = 0; }
+      }
       // Une vignette de la frise (ou d'ailleurs) ouvre la fiche de l'espèce.
-      else if (id.startsWith("journal:sp:")) { go(s, id.slice(11) as SpeciesId); j.skeleton = false; j.tab = "species"; }
+      else if (id.startsWith("journal:sp:")) {
+        const sp = id.slice(11);
+        if (isSpeciesId(sp)) { go(s, sp); j.skeleton = false; j.tab = "species"; }
+      }
     }
     if (j.tab === "timeline") return timelineUpdate(s, input);
     if (j.tab === "quiz") return quizUpdate(s, input);

@@ -5,11 +5,12 @@ import type { Frame } from "../render/frame";
 import { M } from "../render/materials";
 import { scalePrim, type Prim, type Raster } from "../render/raster";
 import { drawRaster } from "../render/sprite";
-import { discovered, SPECIES } from "../species";
+import { discovered, isSpeciesId, SPECIES } from "../species";
 import type { Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
 import { ascii, button, emptyState, panel, put, text, toolbar, wrap } from "../ui/kit";
-import { cached, fmtKg, fmtM, fmtNum, groundLine, human, idle, known, knownList, RH, RW } from "./journal-common";
+import { fmtKg, fmtM, fmtNum } from "../format";
+import { cached, groundLine, human, idle, known, knownList, RH, RW } from "./journal-common";
 import { UI_TOP } from "./types";
 
 /**
@@ -105,6 +106,7 @@ const REFS: Record<Exclude<RefId, "none">, Ref> = {
   whale: { label: "Baleine bleue", un: "une baleine bleue", plur: "baleines bleues", lengthM: 25, heightM: 3.7, massKg: 150000, note: "le plus gros animal de tous les temps", model: whale },
 };
 const REF_ORDER: RefId[] = ["cat", "elephant", "giraffe", "bus", "whale", "none"];
+const isRefId = (v: string): v is RefId => Object.hasOwn(REFS, v) || v === "none";
 
 function autoRef(sp: Species): RefId {
   return sp.lengthM < 2 ? "cat" : sp.lengthM < 8 ? "elephant" : sp.lengthM < 18 ? "bus" : "whale";
@@ -113,8 +115,14 @@ function autoRef(sp: Species): RefId {
 export function sizesUpdate(s: GameState, input: Input) {
   const z = s.journal.sizes;
   for (const id of input.ui) {
-    if (id.startsWith("journal:sz:sp:")) { z.sp = id.slice(14) as SpeciesId; z.ref = undefined; }
-    else if (id.startsWith("journal:sz:ref:")) z.ref = id.slice(15) as RefId;
+    if (id.startsWith("journal:sz:sp:")) {
+      const sp = id.slice(14);
+      if (isSpeciesId(sp)) { z.sp = sp; z.ref = undefined; }
+    }
+    else if (id.startsWith("journal:sz:ref:")) {
+      const ref = id.slice(15);
+      if (isRefId(ref)) z.ref = ref;
+    }
   }
   const list = knownList(s);
   for (const k of input.pressed) {
@@ -184,7 +192,7 @@ export function sizesPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
     return;
   }
   if (!z.sp || !list.some((sp) => sp.id === z.sp)) z.sp = list[0].id;
-  const sp = SPECIES[z.sp]!;
+  const sp = SPECIES[z.sp];
   const refId = z.ref ?? autoRef(sp);
   const ref = refId === "none" ? undefined : REFS[refId];
 

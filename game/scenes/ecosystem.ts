@@ -596,7 +596,6 @@ function decide(s: GameState, eco: EcoState, a: Animal, spec: Species) {
 /** Une étape de vie d'un animal. */
 function live(s: GameState, eco: EcoState, a: Animal, dt: number) {
   const spec = spOf(a);
-  if (!spec) return;
   moved = false;
   const done = tick(a, dt);
   if (a.task === "dead") { a.moving = 0; a.alt = Math.max(0, a.alt - dt * 200); return; }
@@ -925,7 +924,6 @@ function separate(s: GameState, list: Animal[], dt: number) {
 /** Arbres sous l'emprise d'un animal massif : ils tombent, poussés dans son sens de marche. */
 function smash(w: World, a: Animal) {
   const spec = spOf(a);
-  if (!spec) return;
   const half = spec.halfLen * 0.72;
   const row = Math.floor(a.y / CELL_H);
   for (let r = row - 1; r <= row; r++) {

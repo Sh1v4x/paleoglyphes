@@ -4,7 +4,8 @@ import { PX_PER_M } from "../config";
 import { BIOME } from "../world/biomes";
 import { CM } from "./carnivores.mat";
 import { OMM } from "./ornithomimus.mat";
-import { REST_RIG, c, e, knee, lerp, rot, win, type TheroRig } from "./raptor";
+import { lerp } from "../math";
+import { c, e, REST_RIG, rot, theroLegs, win, type TheroLegSpec, type TheroRig } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -81,6 +82,13 @@ function ornithomimusRig({ action, actionT: t, time }: Pose): MimusRig {
 
 /** Bassin (pivot du corps), base du cou, nuque et œil, px bruts. */
 const HIP = { x: 0, y: -82 };
+const LEGS: TheroLegSpec = {
+  hip: HIP, farHip: 4, lift: 12, reach: 6, swing: 30, footY: -3,
+  mx: 8, my: 30, metaLift: 0.4,
+  sit: { dx: 24, far: 6, y: -3, mx: 30, my: 3 },
+  lie: { dx: 70, far: -8, y: -5, nearDy: 4, mx: 26, my: 3 },
+  kneeDy: 4, thigh: 28, shin: 34,
+};
 const NECK = { x: 26, y: -94 };
 const NAPE = { x: 52, y: -140 };
 const EYE = { x: 59, y: -146 };
@@ -94,25 +102,16 @@ export function ornithomimusModel(pose: Pose): Prim[] {
   const P: Prim[] = [];
 
   // --- Très longues pattes de coureur (cinématique inverse), sans griffe en faucille ---
-  for (const L of [{ phase: 0, far: true }, { phase: Math.PI, far: false }]) {
-    const ph = walk + L.phase;
-    const sw = Math.sin(ph) * moving * r.stride;
-    const lift = Math.max(0, Math.cos(ph)) * moving * 12 * r.stride;
+  for (const L of theroLegs(pose, r, bx, by, LEGS, (f, far, hx, hy) => {
+      if (far || r.kick <= 0) return;
+      // Coup de patte : le pied proche monte et se détend vers l'avant.
+      f.fx = lerp(f.fx, hx + 52, r.kick); f.fy = lerp(f.fy, hy + 34, r.kick);
+      f.mx = lerp(f.mx, 22, r.kick); f.my = lerp(f.my, 10, r.kick);
+    })) {
     const m = L.far ? OMM.Far : OMM.Skin;
     const leg = L.far ? OMM.Far : OMM.Leg;
     const z = L.far ? -40 : 22;
-    const hx = HIP.x + (L.far ? 4 : 0) + bx, hy = HIP.y + by;
-    let fx = hx + 6 + sw * 30 + (L.far ? -r.stance : r.stance), fy = -3 - lift;
-    let mx = 8, my = 30 - lift * 0.4;
-    if (r.legs === "sit") { fx = hx + 24 + (L.far ? 6 : 0); fy = -3; mx = 30; my = 3; }
-    else if (r.legs === "lie") { fx = hx + 70 + (L.far ? -8 : 0); fy = -5 - (L.far ? 0 : 4); mx = 26; my = 3; }
-    else if (!L.far && r.kick > 0) {
-      // Coup de patte : le pied proche monte et se détend vers l'avant.
-      fx = lerp(fx, hx + 52, r.kick); fy = lerp(fy, hy + 34, r.kick);
-      mx = lerp(mx, 22, r.kick); my = lerp(my, 10, r.kick);
-    }
-    const ax = fx - mx, ay = fy - my;
-    const [kx, ky] = knee(hx, hy + 4, ax, ay, 28, 34);
+    const { hx, hy, fx, fy, ax, ay, kx, ky } = L;
     // Cuisse emplumée et musclée, jambe et métatarse nus, longs et fins, trois orteils courts.
     P.push(e(hx, hy, 13, 16, m, z - 4, 12));
     P.push(c(hx, hy + 4, kx, ky, 9, 5, m, z, 9));

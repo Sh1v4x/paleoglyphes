@@ -41,7 +41,7 @@ export function cardRows(p: Photo, w: number): CardRow[] {
   const head = "PALEOGLYPHES", tag = "photo-safari au Cretace";
   const rows: CardRow[] = [sep, { kind: "text", t: `${head}${tag.padStart(w - head.length)}`, tone: "title" }, sep, { kind: "photo" }, sep];
   for (const l of wrap(p.title, w)) rows.push({ kind: "text", t: l, tone: "gold" });
-  const names = p.species.map((id) => SPECIES[id]?.name).filter(Boolean);
+  const names = p.species.map((id) => SPECIES[id].name);
   if (names.length) rows.push(...field(names.length > 1 ? "Especes" : "Espece", names.join(", "), w));
   if (p.act) rows.push(...field("Activite", ACT_LABEL[p.act], w));
   const b = p.biome !== undefined ? BIOME_INFO[p.biome] : undefined;

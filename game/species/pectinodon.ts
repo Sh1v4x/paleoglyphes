@@ -3,7 +3,8 @@ import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { CM } from "./carnivores.mat";
 import { PM } from "./pectinodon.mat";
-import { REST_RIG, c, e, knee, lerp, rot, win, type TheroRig } from "./raptor";
+import { lerp } from "../math";
+import { c, e, REST_RIG, rot, theroLegs, win, type TheroLegSpec, type TheroRig } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -83,6 +84,15 @@ function pectinodonRig({ action, actionT: t, time }: Pose): TroodRig {
 
 /** Bassin (pivot du corps), base du cou, nuque et œil, px bruts. */
 const HIP = { x: 0, y: -72 };
+const LEGS: TheroLegSpec = {
+  hip: HIP, farHip: 4, lift: 13, reach: 6, swing: 30, footY: -3,
+  // Métatarse en marche très long (signe d'un bon coureur) : vecteur de la cheville vers les orteils.
+  mx: 12, my: 27, metaLift: 0.3,
+  sit: { dx: 18, far: 6, y: -3, mx: 28, my: 3 },
+  lie: { dx: 66, far: -8, y: -5, nearDy: 4, mx: 22, my: 3 },
+  air: { dx: 36, far: -6, near: 4, y: 50, mx: 18, my: 14 },
+  kneeDy: 4, thigh: 26, shin: 34,
+};
 const NECK = { x: 28, y: -86 };
 const NAPE = { x: 46, y: -110 };
 const EYE = { x: 62, y: -118 };
@@ -96,21 +106,10 @@ export function pectinodonModel(pose: Pose): Prim[] {
   const P: Prim[] = [];
 
   // --- Longues pattes d'oiseau coureur (cinématique inverse) ---
-  for (const L of [{ phase: 0, far: true }, { phase: Math.PI, far: false }]) {
-    const ph = walk + L.phase;
-    const sw = Math.sin(ph) * moving * r.stride;
-    const lift = Math.max(0, Math.cos(ph)) * moving * 13 * r.stride;
+  for (const L of theroLegs(pose, r, bx, by, LEGS)) {
     const m = L.far ? PM.Far : PM.Skin;
     const z = L.far ? -40 : 22;
-    const hx = HIP.x + (L.far ? 4 : 0) + bx, hy = HIP.y + by;
-    let fx = hx + 6 + sw * 30 + (L.far ? -r.stance : r.stance), fy = -3 - lift;
-    // Métatarse très long (signe d'un bon coureur) : vecteur de la cheville vers les orteils.
-    let mx = 12, my = 27 - lift * 0.3;
-    if (r.legs === "sit") { fx = hx + 18 + (L.far ? 6 : 0); fy = -3; mx = 28; my = 3; }
-    else if (r.legs === "air") { fx = hx + 36 + (L.far ? -6 : 4); fy = hy + 50; mx = 18; my = 14; }
-    else if (r.legs === "lie") { fx = hx + 66 + (L.far ? -8 : 0); fy = -5 - (L.far ? 0 : 4); mx = 22; my = 3; }
-    const ax = fx - mx, ay = fy - my;
-    const [kx, ky] = knee(hx, hy + 4, ax, ay, 26, 34);
+    const { hx, hy, fx, fy, ax, ay, kx, ky } = L;
     // Cuisse emplumée, jambe fine, métatarse écailleux.
     P.push(e(hx, hy, 15, 18, m, z - 4, 12));
     P.push(c(hx, hy + 4, kx, ky, 10, 5.5, m, z, 9));

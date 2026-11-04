@@ -1,6 +1,9 @@
+import { de } from "../fr";
 import { pointer } from "../input";
+import { clamp01 } from "../math";
 import { isFish } from "./eco-special";
 import type { RGB, Theme } from "../palette";
+import { hasFact } from "../progress";
 import type { Frame } from "../render/frame";
 import { uiCellAt } from "../render/metrics";
 import { SPECIES, SPECIES_LIST } from "../species";
@@ -9,7 +12,6 @@ import type { Species } from "../species/types";
 import type { GameState } from "../state";
 import { actions, bar, button, clip, over, panel, put, region, SP, text, wrap, type Action } from "../ui/kit";
 import { drawCensus } from "../features/census";
-import { deName } from "./dig-fossils";
 import { activity } from "./ecosystem";
 import { UNLOCK_HINT } from "./journal";
 import type { Animal, Nest } from "./park";
@@ -63,7 +65,6 @@ export function nestCrack(n: Nest): number {
  */
 export function drawAnimalCard(s: GameState, th: Theme, ui: Frame, a: Animal): number {
   const spec = SPECIES[a.sp];
-  if (!spec) return ui.rows - 1;
   const u = th.ui, p = s.park;
   const dead = a.task === "dead";
   const confirm = !dead && p.confirmRetire === a.id;
@@ -110,7 +111,7 @@ export function drawAnimalCard(s: GameState, th: Theme, ui: Frame, a: Animal): n
   }
   // Ce qui reste à découvrir : on pointe le prochain fait verrouillé.
   const facts = spec.facts;
-  const got = facts.filter((f) => s.progress.facts.includes(`${a.sp}:${f.id}`)).length;
+  const got = facts.filter((f) => hasFact(s.progress, a.sp, f.id)).length;
   text(ui, x + 2, r + 1, `Carnet : ${got}/${facts.length} faits`, u.text, u.panel, u.alpha);
   if (confirm) {
     wrap("! Retirer ce dinosaure de la réserve ? Il disparaîtra.", W - 4).slice(0, 2)
@@ -121,7 +122,7 @@ export function drawAnimalCard(s: GameState, th: Theme, ui: Frame, a: Animal): n
     ]);
     return y;
   }
-  const locked = facts.filter((f) => !s.progress.facts.includes(`${a.sp}:${f.id}`) && f.unlock !== "assemble");
+  const locked = facts.filter((f) => !hasFact(s.progress, a.sp, f.id) && f.unlock !== "assemble");
   const now = locked.find((f) => f.unlock === a.action || f.unlock === a.mood || (f.unlock === "nest" && a.nestId) || (f.unlock === "baby" && a.growth < 1));
   let teaser: string, hot = false;
   if (now) { teaser = "Clique-le maintenant pour en apprendre plus !"; hot = true; }
@@ -143,13 +144,12 @@ export function drawAnimalCard(s: GameState, th: Theme, ui: Frame, a: Animal): n
 /** Fiche d'un nid (bas gauche). Renvoie sa ligne du haut. */
 export function drawNestCard(s: GameState, th: Theme, ui: Frame, n: Nest): number {
   const spec = SPECIES[n.sp];
-  if (!spec) return ui.rows - 1;
   const u = th.ui, p = s.park;
   const W = Math.min(52, ui.cols - 2 * SP.margin - 2), x = SP.margin + 1;
   const guard = n.guard ? p.animals.find((a) => a.id === n.guard && a.task !== "dead") : undefined;
   const info = wrap("Comme les oiseaux d'aujourd'hui, beaucoup de dinosaures pondaient dans un nid creusé au sol, et un parent le gardait jusqu'à l'éclosion.", W - 4).slice(0, 3);
   const H = 11 + info.length, y = Math.max(UI_TOP, ui.rows - H - 2);
-  panel(ui, th, x, y, W, H, `Nid ${deName(spec.name)}`, { close: "park:close" });
+  panel(ui, th, x, y, W, H, `Nid ${de(spec.name)}`, { close: "park:close" });
   let r = y + 1;
   const T = (t: string, c: RGB = u.text) => text(ui, x + 2, r++, t, c, u.panel, u.alpha);
   if (n.hatched !== undefined) T("Éclos ! Il ne reste que des coquilles vides.", u.ok);
@@ -271,6 +271,6 @@ export function drawRoster(s: GameState, th: Theme, ui: Frame, top: number, bott
 
 /** Petite barre sans crochets (recensement). */
 function miniBar(ui: Frame, th: Theme, x: number, y: number, w: number, v: number, col: RGB, bg: RGB) {
-  const n = Math.round(Math.max(0, Math.min(1, v)) * w);
+  const n = Math.round(clamp01(v) * w);
   for (let i = 0; i < w; i++) put(ui, x + i, y, i < n ? 35 : 46, i < n ? col : th.ui.dim, bg, th.ui.alpha);
 }

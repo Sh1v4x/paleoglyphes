@@ -18,7 +18,7 @@ import type { World } from "../world/generate";
 import { isWater, T } from "../world/tiles";
 import { faunaActors, faunaAt, faunaDef, noteFauna, type Bug } from "./eco-fauna";
 import { activity, migrating, stepEcosystem, type EcoState } from "./ecosystem";
-import { deName } from "./dig-fossils";
+import { de } from "../fr";
 import { activeTrees, treeRaster, updateTrees } from "../world/trees";
 import { drawDocuLog, drawDocumentary, missedCount, stopDocumentary, updateDocumentary } from "../features/documentary";
 import { drawPhoto, updatePhoto } from "../features/photo";
@@ -257,7 +257,7 @@ const TAU = Math.PI * 2;
 
 /** Raster d'un animal à sa pose actuelle, quantifiée pour réutiliser le cache. */
 export function animalRaster(a: Animal, time: number): Raster {
-  const spec = SPECIES[a.sp]!;
+  const spec = SPECIES[a.sp];
   const moving = a.moving > 0.5 ? 1 : 0;
   const wq = Math.floor(((a.walk % TAU) + TAU) % TAU / (TAU / 12));
   const tq = moving ? 0 : Math.floor(((time + a.phase) % 4.8) * 6);
@@ -383,7 +383,6 @@ export function migrationArrived(s: GameState, sp: SpeciesId, x: number, y: numb
 /** Prochaine étape (px monde, ~1 300 px plus loin) sur l'itinéraire vers le cœur de la zone de saison, ou null. */
 export function migrationStep(s: GameState, sp: SpeciesId, x: number, y: number): { x: number; y: number } | null {
   const spec = SPECIES[sp];
-  if (!spec) return null;
   const w = worldFor(s), R = routeMap(w), d = zoneMaps(w, homeBiomes(s, spec)).dist;
   // Depuis la case de l'animal (ou la plus proche reliée), on descend la carte des distances.
   let c = Math.floor(y / CELL_H / MG.ch) * R.gw + Math.floor(x / CELL_W / MG.cw);
@@ -416,7 +415,6 @@ export function migrationStep(s: GameState, sp: SpeciesId, x: number, y: number)
 /** Point praticable le plus proche (px monde) dans la zone où l'espèce vit en ce moment. */
 export function nearestHome(s: GameState, sp: SpeciesId, x: number, y: number): { x: number; y: number } | null {
   const spec = SPECIES[sp];
-  if (!spec) return null;
   const w = worldFor(s);
   let pts = landmarks.get(w);
   if (!pts) {
@@ -453,7 +451,7 @@ function spawn(s: GameState, sp: SpeciesId, near?: { x: number; y: number }) {
       gx: x, gy: y, best: Infinity, stall: 0, vx: 0, vy: 0, vt: 0,
       path: null, pi: 0, pgx: x, pgy: y, repath: 0, prog: Infinity, progT: 0, stuckT: 0, alt: 0,
       // Arrivée en jeune adulte (âge tiré au hasard dans la vie adulte).
-      life: (SPECIES[sp] ? lifespan(SPECIES[sp]!) : 1800) * (STAGE_AT.adult + 0.05 + rng() * 0.4), growth: 1, parentId: 0, nestId: 0, breedCool: 120 + rng() * 300,
+      life: lifespan(SPECIES[sp]) * (STAGE_AT.adult + 0.05 + rng() * 0.4), growth: 1, parentId: 0, nestId: 0, breedCool: 120 + rng() * 300,
     };
     p.animals.push(a);
     return a;
@@ -670,7 +668,6 @@ export const parkScene: Scene = {
       for (const a of p.animals) {
         if (a.moving < 0.3) continue;
         const spec = SPECIES[a.sp];
-        if (!spec) continue;
         for (const fx of spec.feet) {
           const i = Math.floor(a.y / CELL_H) * w.cols + Math.floor((a.x + fx * a.facing) / CELL_W);
           if (i > 0 && i < tr.length - 1) { tr[i] = now; tr[i + 1] = now; tr[i - 1] = now; }
@@ -727,7 +724,7 @@ export const parkScene: Scene = {
         const cur = p.animals.find((a) => a.id === p.selected);
         const m = addTestCouple(s, cx, cy, cur?.sp);
         if (m) {
-          const name = SPECIES[m.sp]?.name ?? m.sp;
+          const name = SPECIES[m.sp].name;
           toast(s, "Couple ajoute (test)", `Deux ${name}s prets a nicher : regarde-les construire un nid !`);
           p.selected = m.id; p.follow = true; p.nestSel = undefined;
         } else toast(s, "Pas de place", "Toutes les especes assemblees sont deja au complet dans la reserve.");
@@ -744,7 +741,7 @@ export const parkScene: Scene = {
       if (id === "park:retire" && sel && sel.task !== "dead") p.confirmRetire = sel.id;
       if (id === "park:retire:no") p.confirmRetire = undefined;
       if (id === "park:retire:yes" && sel && p.confirmRetire === sel.id) {
-        const name = SPECIES[sel.sp]?.name ?? "dinosaure";
+        const name = SPECIES[sel.sp].name;
         retireAnimal(s, sel);
         toast(s, `${theName(name)} a quitté la réserve.`);
         p.selected = undefined; p.confirmRetire = undefined; p.follow = false;
@@ -788,7 +785,6 @@ export const parkScene: Scene = {
     for (const a of p.animals) {
       if (a.x < vx0 || a.x > vx1 || a.y < vy0 || a.y > vy1) continue;
       const spec = SPECIES[a.sp];
-      if (!spec) continue;
       const sea = spec.habitat === "sea";
       actors.push({
         id: a.id, r: animalRaster(a, s.time), x: a.x, y: a.y, inWater: a.inWater && !sea && a.alt < 2, submerged: (sea && a.task !== "dead" && a.action !== "land" && a.action !== "takeoff") || (a.mood === "ambush" && a.inWater && a.action === "idle"), // tortue sur la plage : dessinée hors de l'eau ; crocodile à l'affût : à demi immergé
@@ -833,7 +829,6 @@ export const parkScene: Scene = {
         const a = p.animals.find((b) => b.id === id);
         if (!a) continue;
         const spec = SPECIES[a.sp];
-        if (!spec) continue;
         const r = animalRaster(a, s.time);
         const at = toUi(r.cx + r.w / 2, r.cy);
         const isSel = id === p.selected;
@@ -865,7 +860,7 @@ export const parkScene: Scene = {
         if (!n) continue;
         const r = nestRaster(n);
         const at = toUi(r.cx + r.w / 2, r.cy);
-        const label = ` Nid ${deName(SPECIES[n.sp]?.name ?? "dinosaure")} `;
+        const label = ` Nid ${de(SPECIES[n.sp].name)} `;
         const isSel = id === p.nestSel;
         tag(Math.round(at.x - label.length / 2), Math.round(at.y - 1.2), label, isSel ? u.panel : u.text, isSel ? u.hi : u.panel, 0.9);
       }
@@ -1072,9 +1067,9 @@ function drawMini(s: GameState, th: Theme, ui: Frame, x0: number, y0: number) {
     const i = Math.floor(a.x / cw), j = Math.floor(a.y / ch);
     if (i < 0 || j < 0 || i >= iw || j >= ih) continue;
     const dead = a.task === "dead";
-    const glyph = MINI_GLYPH[a.sp] ?? SPECIES[a.sp]?.name[0] ?? "?";
+    const glyph = MINI_GLYPH[a.sp] ?? SPECIES[a.sp].name[0];
     const g = a.id === p.selected ? "@" : dead ? "%" : a.growth < 1 ? glyph.toLowerCase() : glyph;
-    const col = a.id === p.selected ? u.hi : dead ? u.dim : SPECIES[a.sp]?.behavior.diet === "carnivore" ? u.bad : u.text;
+    const col = a.id === p.selected ? u.hi : dead ? u.dim : SPECIES[a.sp].behavior.diet === "carnivore" ? u.bad : u.text;
     text(ui, x0 + 1 + i, y0 + 1 + j, g, col, null);
   }
 }

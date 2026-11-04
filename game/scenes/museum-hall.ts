@@ -1,4 +1,5 @@
 import { CELL_H, CELL_W } from "../config";
+import { mixRgb, scaleRgb } from "../math";
 import { hex, type RGB, type Theme } from "../palette";
 import type { Progress } from "../progress";
 import type { Frame } from "../render/frame";
@@ -6,6 +7,7 @@ import { metrics } from "../render/metrics";
 import { rasterize, type Prim, type Raster } from "../render/raster";
 import { drawRaster } from "../render/sprite";
 import { hash2 } from "../rng";
+import { put } from "../ui/kit";
 import { SPECIES_LIST } from "../species";
 import { eggModel, eggSize } from "../species/eggs";
 import type { Pose, Species, SpeciesId } from "../species/types";
@@ -152,7 +154,7 @@ function objRaster(key: string, ps: () => Prim[], wPx: number, hPx: number, max:
 }
 
 /** Empreinte de la progression : le décor est recuit quand elle change. */
-export function progressSig(p: Progress): string {
+function progressSig(p: Progress): string {
   return `${[...p.assembled].sort().join(",")}|${[...p.extras].sort().join(",")}|${Object.keys(p.eggs).sort().join(",")}`;
 }
 
@@ -304,20 +306,6 @@ function makeStrip(cols: number, rows: number): Frame {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Petits outils de dessin sur la bande.
-// ---------------------------------------------------------------------------
-export const mix = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-export const mul = (a: RGB, k: number): RGB => [a[0] * k, a[1] * k, a[2] * k];
-
-export function put(f: Frame, x: number, y: number, ch: number | string, fg: RGB, bg?: RGB) {
-  if (x < 0 || y < 0 || x >= f.cols || y >= f.rows) return;
-  const i = y * f.cols + x, k = i * 4;
-  f.ch[i] = typeof ch === "string" ? ch.charCodeAt(0) : ch;
-  f.fg[k] = fg[0]; f.fg[k + 1] = fg[1]; f.fg[k + 2] = fg[2]; f.fg[k + 3] = 255;
-  if (bg) { f.bg[k] = bg[0]; f.bg[k + 1] = bg[1]; f.bg[k + 2] = bg[2]; f.bg[k + 3] = 255; }
-}
-
 /** Éclaircit une cellule vers une couleur de lumière (fond plein, glyphe un peu moins). */
 export function lighten(f: Frame, x: number, y: number, col: RGB, a: number) {
   if (x < 0 || y < 0 || x >= f.cols || y >= f.rows || a <= 0) return;
@@ -366,7 +354,7 @@ function bake(h: Hall, th: Theme) {
 
 function drawRoomShell(f: Frame, g: Geo, L: Look, r: Room, ri: number) {
   const wall = L.walls[ri] ?? L.walls[1];
-  const dark = mul(wall, 0.86);
+  const dark = scaleRgb(wall, 0.86);
   const cart = L.spot < 0.25;
   for (let x = r.x0; x < r.x0 + r.w; x++) {
     const lx = x - r.x0;
@@ -374,29 +362,29 @@ function drawRoomShell(f: Frame, g: Geo, L: Look, r: Room, ri: number) {
       if (y < g.ceil - 3) {
         // Plafond à caissons.
         const line = y % 4 === 3 || lx % 16 === 0;
-        put(f, x, y, line ? (y % 4 === 3 ? "_" : "|") : 32, L.ceilLine, mul(L.ceiling, 0.92 + 0.08 * (y / g.ceil)));
+        put(f, x, y, line ? (y % 4 === 3 ? "_" : "|") : 32, L.ceilLine, scaleRgb(L.ceiling, 0.92 + 0.08 * (y / g.ceil)));
       } else if (y < g.ceil) {
         // Corniche : moulure claire, denticules, ombre.
         const row = y - (g.ceil - 3);
         const ch = row === 0 ? "=" : row === 1 ? (lx % 3 === 0 ? "|" : "_") : "-";
-        put(f, x, y, ch, row === 0 ? L.corniceHi : mul(L.cornice, 0.7), row === 2 ? mul(L.cornice, 0.8) : L.cornice);
+        put(f, x, y, ch, row === 0 ? L.corniceHi : scaleRgb(L.cornice, 0.7), row === 2 ? scaleRgb(L.cornice, 0.8) : L.cornice);
       } else if (y < g.floor - 8) {
         // Mur : léger dégradé, plus sombre sous la corniche.
         const v = 0.9 + 0.1 * Math.min(1, (y - g.ceil) / 6);
         const tex = ri === ROOMS.sea ? (Math.sin(lx * 0.21 + y * 0.9) + Math.sin(lx * 0.07 - y * 0.4) > 1.3 ? "~" : 32) : hash2(x, y, 3) < 0.02 ? "." : 32;
-        put(f, x, y, tex, mul(wall, cart ? 0.82 : 1.5), mul(wall, v));
+        put(f, x, y, tex, scaleRgb(wall, cart ? 0.82 : 1.5), scaleRgb(wall, v));
       } else if (y < g.floor) {
         // Lambris de bois.
         const row = y - (g.floor - 8);
         const ch = row === 0 ? "=" : row === 7 ? "_" : lx % 14 === 0 ? "|" : row === 2 || row === 6 ? "-" : 32;
-        put(f, x, y, ch, L.woodDark, mul(L.wood, row === 0 ? 1.1 : 0.95));
+        put(f, x, y, ch, L.woodDark, scaleRgb(L.wood, row === 0 ? 1.1 : 0.95));
       } else {
         // Parquet : lames décalées, veinure, plus clair vers le spectateur.
         const row = y - g.floor;
         const v = 0.85 + 0.15 * (row / Math.max(1, g.rows - g.floor));
         const joint = (lx + (row >> 1) * 11) % 26 === 0;
         const ch = row === 0 ? "_" : row % 2 === 1 ? "_" : joint ? "|" : hash2(x, y, 5) < 0.06 ? "-" : 32;
-        put(f, x, y, ch, L.floorDark, mul(row % 4 < 2 ? L.floor : mix(L.floor, L.floorDark, 0.25), v));
+        put(f, x, y, ch, L.floorDark, scaleRgb(row % 4 < 2 ? L.floor : mixRgb(L.floor, L.floorDark, 0.25), v));
       }
     }
   }
@@ -428,7 +416,7 @@ function drawPanel(f: Frame, g: Geo, L: Look, x0: number, x1: number, ri: number
         const dx = (x - cx) / ww, dy = (y - wy0) / Math.max(1, ww * 0.55);
         if (y - wy0 < ww * 0.55 && dx * dx + (1 - dy) * (1 - dy) > 1) continue;
         const t = (y - wy0) / (wy1 - wy0);
-        const sky = mix(L.skyHi, L.sky, t);
+        const sky = mixRgb(L.skyHi, L.sky, t);
         const mull = x === cx || (y - wy0) % 6 === 5;
         const cloud = !mull && hash2(x >> 2, y, 17) < 0.12;
         const star = L.spot > 0.25 && hash2(x, y, 23) < 0.05;
@@ -450,7 +438,7 @@ function drawPilaster(f: Frame, g: Geo, L: Look, x: number) {
       const edge = Math.abs(dx) === w;
       const ch = cap ? (y === g.ceil ? "=" : "-") : foot ? (y === g.floor - 3 ? "=" : y === g.floor - 1 ? "_" : 32) : dx === 0 || Math.abs(dx) === 1 ? (y % 2 ? ":" : "|") : 32;
       const bg = edge || dx > 0 ? L.columnShade : L.column;
-      put(f, x + dx, y, ch, mul(L.columnShade, 0.8), bg);
+      put(f, x + dx, y, ch, scaleRgb(L.columnShade, 0.8), bg);
     }
     // Ombre portée à droite.
     shade(f, x + w + 1, y, 0.86);
@@ -468,14 +456,14 @@ function drawArch(f: Frame, g: Geo, L: Look, x: number) {
       if (inside && y >= archY + 2) { shade(f, x + dx, y, 0.72); continue; }
       const edge = inside && y >= archY;
       const ch = edge ? (dx < -1 ? "/" : dx > 1 ? "\\" : "_") : ax === half - 4 || ax === half ? "|" : y % 3 === 0 ? "-" : 32;
-      put(f, x + dx, y, ch, mul(L.columnShade, 0.75), dx === 0 && y < archY + 1 ? L.corniceHi : ax >= half - 1 ? L.columnShade : L.column);
+      put(f, x + dx, y, ch, scaleRgb(L.columnShade, 0.75), dx === 0 && y < archY + 1 ? L.corniceHi : ax >= half - 1 ? L.columnShade : L.column);
     }
   // Clé de voûte.
   put(f, x, top - 1, "V", L.brass, L.corniceHi);
   // Fougères en pot de part et d'autre.
   for (const side of [-1, 1]) {
     const px = x + side * (half + 4);
-    for (let y = g.floor - 1; y <= g.floor + 1; y++) for (let dx = -2; dx <= 2; dx++) put(f, px + dx, y, y === g.floor - 1 ? "=" : "#", mul(L.wood, 0.7), L.wood);
+    for (let y = g.floor - 1; y <= g.floor + 1; y++) for (let dx = -2; dx <= 2; dx++) put(f, px + dx, y, y === g.floor - 1 ? "=" : "#", scaleRgb(L.wood, 0.7), L.wood);
     const fr = ["\\", "|", "/"];
     for (let k = 0; k < 9; k++) {
       const a = -1 + (k / 8) * 2, len = 3 + ((k * 7) % 3);
@@ -516,7 +504,7 @@ function drawEntry(f: Frame, th: Theme, g: Geo, L: Look, r: Room, frames: [numbe
         const tip = y >= g.ceil + h - 3 && Math.abs(dx - 4.5) > (g.ceil + h - y) * 1.6;
         if (tip) continue;
         const gold = dx === 0 || dx === 9 || y === g.ceil;
-        put(f, bx + dx, y, gold ? "|" : (y - g.ceil) % 6 === 3 && dx > 2 && dx < 7 ? "@" : 32, gold ? L.bannerHi : mul(L.bannerHi, 0.9), gold ? mul(L.banner, 0.8) : L.banner);
+        put(f, bx + dx, y, gold ? "|" : (y - g.ceil) % 6 === 3 && dx > 2 && dx < 7 ? "@" : 32, gold ? L.bannerHi : scaleRgb(L.bannerHi, 0.9), gold ? scaleRgb(L.banner, 0.8) : L.banner);
       }
   }
   // Médaillon sculpté : une grande ammonite dans un cercle de laiton.
@@ -525,7 +513,7 @@ function drawEntry(f: Frame, th: Theme, g: Geo, L: Look, r: Room, frames: [numbe
     for (let x = mid - 2 * R; x <= mid + 2 * R; x++) {
       const d = Math.hypot((x - mid) / 2, y - cy) / R;
       if (d > 1) continue;
-      put(f, x, y, d > 0.9 ? (d > 0.96 ? "o" : "=") : 32, mul(L.brass, 0.7), d > 0.9 ? L.brass : mix(L.column, L.columnShade, d * 0.8));
+      put(f, x, y, d > 0.9 ? (d > 0.96 ? "o" : "=") : 32, scaleRgb(L.brass, 0.7), d > 0.9 ? L.brass : mixRgb(L.column, L.columnShade, d * 0.8));
     }
   const amm = EXTRAS[0];
   const ar = cachedRaster(`medal|${R}`, () => {
@@ -538,14 +526,14 @@ function drawEntry(f: Frame, th: Theme, g: Geo, L: Look, r: Room, frames: [numbe
     for (let y = y0; y <= y1; y++)
       for (let x = x0; x <= x1; x++) {
         const e = y === y0 || y === y1 || x === x0 || x === x1;
-        if (e) put(f, x, y, (x === x0 || x === x1) && (y === y0 || y === y1) ? "#" : y === y0 || y === y1 ? "=" : "#", mul(L.brass, 0.7), L.brass);
+        if (e) put(f, x, y, (x === x0 || x === x1) && (y === y0 || y === y1) ? "#" : y === y0 || y === y1 ? "=" : "#", scaleRgb(L.brass, 0.7), L.brass);
       }
   }
   // Tapis d'entrée sur le parquet.
   for (let y = g.floor + 1; y < g.rows; y++)
     for (let x = mid - 30; x <= mid + 30; x++) {
       const e = x === mid - 30 || x === mid + 30;
-      put(f, x, y, e ? "|" : (x + y) % 4 === 0 ? "." : 32, L.bannerHi, mul(L.banner, 0.95));
+      put(f, x, y, e ? "|" : (x + y) % 4 === 0 ? "." : 32, L.bannerHi, scaleRgb(L.banner, 0.95));
     }
 }
 
@@ -557,8 +545,8 @@ function drawPlinth(f: Frame, L: Look, mid: number, base: number, w: number, h: 
       const top = y === base - h + 1, bot = y === base;
       const side = x === x0 || x === x1;
       const ch = top ? "=" : bot ? "_" : side ? "|" : 32;
-      const bg = top ? L.plinthTop : mul(L.plinth, x > mid + w * 0.3 ? 0.85 : 1);
-      put(f, x, y, ch, top ? mix(L.plinthTop, L.glassHi, 0.4) : mul(L.plinthTop, 0.9), bg);
+      const bg = top ? L.plinthTop : scaleRgb(L.plinth, x > mid + w * 0.3 ? 0.85 : 1);
+      put(f, x, y, ch, top ? mixRgb(L.plinthTop, L.glassHi, 0.4) : scaleRgb(L.plinthTop, 0.9), bg);
     }
   // Ombre au sol, à droite.
   for (let y = base - h + 2; y <= base + 1; y++) for (let x = x1 + 1; x <= x1 + 2; x++) shade(f, x, y, 0.8);
@@ -634,20 +622,20 @@ function lamp(f: Frame, L: Look, x: number, y: number) {
 function drawCase(f: Frame, th: Theme, L: Look, e: Exhibit, ink: RGB) {
   const gh = e.k ?? 12;
   const x0 = e.x0, x1 = e.x1, y0 = e.y0, gb = e.y0 + gh;
-  const wall = mul(L.walls[ROOMS.fossils], 1);
+  const wall = L.walls[ROOMS.fossils];
   // Meuble : tiroirs et pieds.
   for (let y = gb; y <= e.y1; y++)
     for (let x = x0 + 1; x <= x1 - 1; x++) {
       const top = y === gb, foot = y === e.y1;
       const ch = top ? "=" : foot ? (x === x0 + 2 || x === x1 - 2 ? "|" : 32) : x === x0 + 1 || x === x1 - 1 ? "|" : (y - gb) % 4 === 0 ? "-" : (y - gb) % 4 === 2 && x === (x0 + x1) >> 1 ? "o" : 32;
-      put(f, x, y, ch, foot ? L.woodDark : mul(L.woodDark, 0.9), foot ? mul(wall, 0.8) : mul(L.wood, top ? 1.15 : 1));
+      put(f, x, y, ch, foot ? L.woodDark : scaleRgb(L.woodDark, 0.9), foot ? scaleRgb(wall, 0.8) : scaleRgb(L.wood, top ? 1.15 : 1));
     }
   // Cage de verre.
-  const glass = mix(mul(wall, 0.9), L.glass, 0.45);
+  const glass = mixRgb(scaleRgb(wall, 0.9), L.glass, 0.45);
   for (let y = y0; y < gb; y++)
     for (let x = x0; x <= x1; x++) {
       const frame = x === x0 || x === x1 || y === y0;
-      put(f, x, y, frame ? (y === y0 ? (x === x0 || x === x1 ? "+" : "-") : "|") : 32, L.brass, frame ? mul(L.brass, 0.6) : glass);
+      put(f, x, y, frame ? (y === y0 ? (x === x0 || x === x1 ? "+" : "-") : "|") : 32, L.brass, frame ? scaleRgb(L.brass, 0.6) : glass);
     }
   if (e.r) {
     if (e.owned) {
@@ -679,22 +667,22 @@ function drawDiorama(f: Frame, th: Theme, L: Look, e: Exhibit) {
   for (let y = e.y0; y <= e.y1; y++)
     for (let x = e.x0; x <= e.x1; x++) {
       const fr = x === e.x0 || x === e.x1 || y === e.y0 || y === e.y1;
-      if (fr) { put(f, x, y, (x === e.x0 || x === e.x1) && (y === e.y0 || y === e.y1) ? "+" : y === e.y0 || y === e.y1 ? "=" : "#", mul(L.woodDark, 0.8), L.wood); continue; }
+      if (fr) { put(f, x, y, (x === e.x0 || x === e.x1) && (y === e.y0 || y === e.y1) ? "+" : y === e.y0 || y === e.y1 ? "=" : "#", scaleRgb(L.woodDark, 0.8), L.wood); continue; }
       if (!e.owned) {
-        put(f, x, y, hash2(x, y, 9) < 0.03 ? "." : 32, L.ghost, mul(L.walls[ROOMS.life], 0.45));
+        put(f, x, y, hash2(x, y, 9) < 0.03 ? "." : 32, L.ghost, scaleRgb(L.walls[ROOMS.life], 0.45));
         continue;
       }
       const t = (y - e.y0) / h, lx = (x - e.x0) / w;
       let bg: RGB, ch: number | string = 32, fg: RGB = L.skyHi;
       if (hab === "sea") {
-        bg = mix(L.seaTop, L.seaDeep, t);
-        if (Math.sin(lx * 40 + y * 1.3) > 0.93) { ch = "~"; fg = mix(L.seaTop, L.skyHi, 0.5); }
-        if (y > e.y1 - 3) { bg = L.ground; ch = hash2(x, y, 2) < 0.3 ? "." : 32; fg = mul(L.ground, 0.7); }
+        bg = mixRgb(L.seaTop, L.seaDeep, t);
+        if (Math.sin(lx * 40 + y * 1.3) > 0.93) { ch = "~"; fg = mixRgb(L.seaTop, L.skyHi, 0.5); }
+        if (y > e.y1 - 3) { bg = L.ground; ch = hash2(x, y, 2) < 0.3 ? "." : 32; fg = scaleRgb(L.ground, 0.7); }
       } else {
-        bg = mix(L.skyHi, L.sky, Math.min(1, t * 1.5));
+        bg = mixRgb(L.skyHi, L.sky, Math.min(1, t * 1.5));
         const hill = horizon - Math.round(3 + 2.5 * Math.sin(lx * 9 + (spec?.id.length ?? 0)) + 1.5 * Math.sin(lx * 23));
-        if (y >= hill) { bg = mix(L.hills, mul(L.hills, 0.8), (y - hill) / 6); ch = hash2(x, y, 4) < 0.1 ? "^" : 32; fg = mul(L.hills, 0.75); }
-        if (y >= horizon) { bg = mix(L.ground, mul(L.ground, 0.8), (y - horizon) / Math.max(1, e.y1 - horizon)); ch = hash2(x, y, 6) < 0.12 ? "," : 32; fg = mul(L.hills, 0.8); }
+        if (y >= hill) { bg = mixRgb(L.hills, scaleRgb(L.hills, 0.8), (y - hill) / 6); ch = hash2(x, y, 4) < 0.1 ? "^" : 32; fg = scaleRgb(L.hills, 0.75); }
+        if (y >= horizon) { bg = mixRgb(L.ground, scaleRgb(L.ground, 0.8), (y - horizon) / Math.max(1, e.y1 - horizon)); ch = hash2(x, y, 6) < 0.12 ? "," : 32; fg = scaleRgb(L.hills, 0.8); }
         if (y < hill && hash2(x >> 3, y, 31) < 0.08) { ch = "~"; fg = L.skyHi; }
       }
       put(f, x, y, ch, fg, bg);

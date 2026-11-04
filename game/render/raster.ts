@@ -149,18 +149,25 @@ export function placed(r: Raster, cellX: number, cellY: number): Raster {
 /**
  * Cache de rasters : les poses sont quantifiées (quelques images par cycle), donc des dizaines
  * d'animaux à l'écran réutilisent les mêmes rasters. Rastérisées à l'origine 0,0 : il suffit de
- * les décaler d'un nombre entier de cellules (voir `placed`).
+ * les décaler d'un nombre entier de cellules (voir `placed`). Plein, il oublie le moins récemment lu (LRU :
+ * une `Map` garde l'ordre d'insertion, chaque lecture réinsère l'entrée en fin de liste).
  */
 export class RasterCache {
   private map = new Map<string, Raster>();
   constructor(private max = 4000) {}
   get(key: string, build: () => Prim[], flip: boolean): Raster {
-    let r = this.map.get(key);
-    if (!r) {
-      r = rasterize(build(), 0, 0, flip);
-      if (this.map.size >= this.max) this.map.delete(this.map.keys().next().value as string);
-      this.map.set(key, r);
+    const hit = this.map.get(key);
+    if (hit) {
+      this.map.delete(key);
+      this.map.set(key, hit);
+      return hit;
     }
+    const r = rasterize(build(), 0, 0, flip);
+    if (this.map.size >= this.max) {
+      const oldest = this.map.keys().next();
+      if (!oldest.done) this.map.delete(oldest.value);
+    }
+    this.map.set(key, r);
     return r;
   }
 }

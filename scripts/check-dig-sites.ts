@@ -22,14 +22,15 @@ const s = createState();
 s.progress.assembled = SPECIES_LIST.map((sp) => sp.id).slice(0, 8);
 for (const def of DIG_SITES) {
   for (let seed = 1; seed < 30; seed++) {
-    const site = generateSite(s.progress, def.id, 200, 80, seed);
+    const { site, missed } = generateSite(s.progress, def.id, 200, 80, seed);
+    if (missed) console.log(`${def.id} graine ${seed} : ${missed} os sans place`);
     for (const f of site.fossils) {
       if (f.sp) assert(sitesOf(f.sp).includes(def.id), `${f.sp} hors de ${def.id}`);
       if (f.kind === "extra") assert(def.extras.includes(f.id), `${f.id} hors de ${def.id}`);
     }
     assert(site.fossils.some((f) => f.kind === "bone"), `pas d'os a ${def.id}`);
   }
-  const site = generateSite(s.progress, def.id, 200, 80, 7);
+  const { site } = generateSite(s.progress, def.id, 200, 80, 7);
   console.log(site.name, "|", site.strata.map((st) => st.name).join(" / "), "|", site.fossils.map((f) => f.label).join(", "));
 }
 

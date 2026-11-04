@@ -154,7 +154,6 @@ function living(s: GameState, sp: SpeciesId): number {
 /** Éclosion : les œufs restants deviennent des bébés (dans la limite du plafond de l'espèce). */
 function hatch(s: GameState, nest: Nest) {
   const spec = SPECIES[nest.sp];
-  if (!spec) { nest.hatched = 60; return; }
   const guard = nest.guard ? s.park.animals.find((o) => o.id === nest.guard && o.task !== "dead") : undefined;
   if (guard) guard.nestId = 0;
   nest.guard = 0;
@@ -511,7 +510,7 @@ function youngStep(k: NestKit, s: GameState, a: Animal, spec: Species, hab: stri
   if (hab === "air") { a.alt = 0; if (a.task !== "wander") k.setTask(a, "wander", "young"); }
   // Parent en vol : le bébé l'attend sur place.
   if (par.alt > 0 || par.mood === "fly") { k.act(a, a.energy < 0.5 ? "rest" : "idle"); a.energy = Math.min(1, a.energy + dt / 40); return true; }
-  const ps = SPECIES[par.sp] ?? spec;
+  const ps = SPECIES[par.sp];
   const d = Math.hypot(par.x - a.x, par.y - a.y);
   // Le parent mange, boit ou dort tout près : le petit fait pareil.
   if (d < ps.halfLen * 1.6 + 40 && (par.action === "eat" || par.action === "drink" || par.action === "rest") && par.moving < 0.3) {
@@ -616,7 +615,6 @@ function breedScan(s: GameState, k: NestKit) {
     if (seen.has(a0.sp)) continue;
     seen.add(a0.sp);
     const spec = SPECIES[a0.sp];
-    if (!spec) continue;
     elig.length = 0;
     for (const o of s.park.animals) if (o.sp === a0.sp && canBreed(spec, o) && fedEnough(s, spec, o)) elig.push(o);
     if (elig.length < 2 || family(s, a0.sp) >= capOf(spec)) continue;
@@ -729,7 +727,6 @@ export function stepLife(s: GameState, dt: number, k: NestKit): void {
   for (const a of p.animals) {
     if (a.task === "dead") continue;
     const spec = SPECIES[a.sp];
-    if (!spec) continue;
     const L = lifespan(spec);
     a.life += dt;
     a.growth = growthOf(spec, a.life);

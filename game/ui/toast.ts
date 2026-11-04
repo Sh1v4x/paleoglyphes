@@ -23,8 +23,13 @@ export function toast(s: GameState, title: string, body = "") {
   if (s.toasts.length > 4) s.toasts.shift();
 }
 
+/** Retire les notifications expirées (logique, pas au dessin). */
+export function updateToasts(s: GameState) {
+  // Toasts are appended in t0 order with a constant LIFE, so the oldest is always first.
+  while (s.toasts.length && s.time - s.toasts[0].t0 >= LIFE) s.toasts.shift();
+}
+
 export function drawToasts(s: GameState, th: Theme, ui: Frame) {
-  s.toasts = s.toasts.filter((t) => s.time - t.t0 < LIFE);
   let y = UI_TOP + 2;
   for (const t of s.toasts) {
     // Assez large pour le titre (« * » + marges), dans la limite de l'écran.

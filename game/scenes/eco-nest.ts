@@ -479,10 +479,28 @@ function turtleLay(k: NestKit, s: GameState, a: Animal, spec: Species, pl: Plan,
  * boire, dormir). Bébé ptérosaure : il reste au sol ; juvénile ptérosaure : il vole seul.
  * Petit mosasaure : il nage contre sa mère.
  */
+/** Espèces dont les jeunes vivent en crèche, entre eux. */
+const CRECHE: ReadonlySet<SpeciesId> = new Set<SpeciesId>(["pinacosaurus"]);
+
+/** Tête de la crèche d'un jeune : le plus âgé des jeunes de son espèce à moins de 900 px (peut-être lui). Seul : aucune. */
+function crecheLead(s: GameState, a: Animal): Animal | undefined {
+  let lead: Animal | undefined, n = 0;
+  for (const o of s.park.animals) {
+    if (o.sp !== a.sp || o.task === "dead" || !isYoung(o) || Math.hypot(o.x - a.x, o.y - a.y) > 900) continue;
+    n++;
+    if (!lead || o.life > lead.life) lead = o;
+  }
+  return n >= 2 ? lead : undefined;
+}
+
 function youngStep(k: NestKit, s: GameState, a: Animal, spec: Species, hab: string, dt: number): boolean {
   if (hab === "air" && !isBaby(spec, a)) return false;
   if (hab === "land" && a.task !== "wander") return false;
-  const par = a.parentId ? k.get(a.parentId) : undefined;
+  // Crèche : les jeunes Pinacosaures se regroupent entre eux, sans les adultes (des gisements du Gobi
+  // conservent des groupes de jeunes morts ensemble). Le plus âgé mène, les autres le suivent.
+  const lead = hab === "land" && CRECHE.has(spec.id) && !isBaby(spec, a) ? crecheLead(s, a) : undefined;
+  if (lead === a) return false;
+  const par = lead ?? (a.parentId ? k.get(a.parentId) : undefined);
   if (!par || par.task === "dead") {
     if (hab !== "air") return false;
     // Bébé ptérosaure orphelin : il attend au sol, sans s'envoler.

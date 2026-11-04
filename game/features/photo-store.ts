@@ -1,5 +1,7 @@
 import type { Frame } from "../render/frame";
 import type { SpeciesId } from "../species/types";
+import type { BiomeId } from "../world/biomes";
+import type { Act } from "./photo-score";
 
 /**
  * Album photo : capture des cellules du calque monde et stockage durable (IndexedDB).
@@ -17,6 +19,9 @@ export interface Photo {
   species: SpeciesId[];
   /** Bonus et remarques de la notation. */
   notes: string[];
+  /** Biome au centre du cadre et action du sujet principal (absents des photos plus anciennes). */
+  biome?: BiomeId;
+  act?: Act;
   cols: number;
   rows: number;
   /** Glyphe par cellule ; couleurs RGB tassées (3 octets par cellule). */

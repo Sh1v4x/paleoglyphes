@@ -59,8 +59,11 @@ function bloomPoint(s: GameState, a: Animal): boolean {
   return true;
 }
 
-/** Proies des grands nageurs : poissons et tortues du large (rarement attrapés adultes). */
-const SEA_PREY: ReadonlySet<SpeciesId> = new Set<SpeciesId>(["xiphactinus", "archelon"]);
+/**
+ * Proies des grands nageurs : poissons, tortues et plésiosaures du large (rarement attrapés adultes ;
+ * on a trouvé des restes de plésiosaures dans l'estomac de mosasaures).
+ */
+const SEA_PREY: ReadonlySet<SpeciesId> = new Set<SpeciesId>(["xiphactinus", "archelon", "elasmosaurus"]);
 
 /** Le mosasaure affamé repère un Xiphactinus ou une Archelon au large, à portée de vue. */
 function seaPrey(s: GameState, a: Animal, spec: Species): Animal | undefined {

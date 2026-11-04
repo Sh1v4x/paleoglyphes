@@ -2,9 +2,11 @@
  * Aperçu terminal du carnet (sans navigateur) : compose une page et l'affiche en ASCII.
  * Le calque d'interface est posé sur le calque monde (échantillonné à la résolution de l'interface),
  * ou le calque monde seul en pleine résolution avec « world ».
- * Usage : npx tsx scripts/preview-journal.ts [summary|extras|timeline|quiz|sizes|<espece>] [dark|cartoon] [skeleton] [world] [cols rows]
+ * Usage : npx tsx scripts/preview-journal.ts [summary|extras|timeline|quiz|sizes|travel|<espece>] [dark|cartoon] [skeleton] [world] [cols rows]
  *         options : « game » (frise : mini-jeu), « answer » (quiz : répond A), « nofacts » (quiz sans faits),
- *                   « sizes:<espece> » et « ref:<cat|elephant|giraffe|bus|whale|none> » (tailles)
+ *                   « sizes:<espece> » et « ref:<cat|elephant|giraffe|bus|whale|none> » (tailles),
+ *                   « biome:<0-4> » (voyage : page ouverte ; la mer, 4, reste à visiter : aperçu fermé ;
+ *                   « open » : la mer aussi est visitée)
  * ex.   : npx tsx scripts/preview-journal.ts trike cartoon
  *         npx tsx scripts/preview-journal.ts ankylo dark skeleton world
  */
@@ -13,6 +15,7 @@ import { THEMES, type Style } from "../game/palette";
 import { createFrame } from "../game/render/frame";
 import { metrics } from "../game/render/metrics";
 import { journalScene } from "../game/scenes/journal";
+import { parkScene } from "../game/scenes/park";
 import { SPECIES, SPECIES_LIST } from "../game/species";
 import type { SpeciesId } from "../game/species/types";
 import { createState } from "../game/state";
@@ -40,10 +43,16 @@ SPECIES_LIST.forEach((sp, i) => {
 p.extras.push("fauna:pterosaur", "fauna:dragonfly", "ambre-moustique");
 if (args.includes("nofacts")) p.facts = [];
 s.journal.species = SPECIES[page as SpeciesId] ? (page as SpeciesId) : undefined;
-if (page === "timeline" || page === "quiz" || page === "sizes") s.journal.tab = page;
+if (page === "timeline" || page === "quiz" || page === "sizes" || page === "travel") s.journal.tab = page;
 const opt = (k: string) => args.find((a) => a.startsWith(`${k}:`))?.slice(k.length + 1);
 if (opt("sizes")) s.journal.sizes.sp = opt("sizes") as SpeciesId;
 if (opt("ref")) s.journal.sizes.ref = opt("ref") as typeof s.journal.sizes.ref;
+if (page === "travel") {
+  // Biomes visités (sauf la mer) et réserve peuplée : les animaux servent de repères sur la mini-carte.
+  p.biomes = args.includes("open") ? [0, 1, 2, 3, 4] : [0, 1, 2, 3];
+  s.journal.travel.biome = Number(opt("biome") ?? 0) as typeof s.journal.travel.biome;
+  parkScene.enter?.(s);
+}
 s.journal.extras = page === "extras";
 s.journal.skeleton = args.includes("skeleton");
 s.mode = "journal";

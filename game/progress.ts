@@ -1,4 +1,5 @@
 import type { SpeciesId } from "./species/types";
+import type { BiomeId } from "./world/biomes";
 
 /** Progression du joueur, sauvegardée dans le navigateur. */
 export interface Progress {
@@ -22,6 +23,8 @@ export interface Progress {
   quiz?: { correct: number; answered: number; bestStreak: number };
   /** Espèces bien placées sur la frise du temps (une étoile chacune). */
   timeline?: SpeciesId[];
+  /** Biomes déjà visités dans la réserve (pages du carnet de voyage). Ancien format : absent. */
+  biomes?: BiomeId[];
 }
 
 const KEY = "ascii-dino-progress-v1";

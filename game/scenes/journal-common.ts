@@ -154,3 +154,23 @@ export function ageRange(sp: Species): [number, number] {
   return [Math.max(a, b), Math.min(a, b)];
 }
 export const ageMid = (sp: Species) => { const [a, b] = ageRange(sp); return (a + b) / 2; };
+
+export interface Line { t: string; c: RGB; tag?: string }
+
+/** Écrit une liste de lignes avec défilement (molette, flèches haut/bas). */
+export function drawLines(ui: Frame, th: Theme, j: { scroll: number }, lines: Line[], x: number, y: number, h: number, w: number) {
+  const u = th.ui;
+  const max = Math.max(0, lines.length - h);
+  j.scroll = Math.max(0, Math.min(max, j.scroll));
+  const off = j.scroll;
+  for (let i = 0; i < h && i + off < lines.length; i++) {
+    const l = lines[i + off];
+    const n = text(ui, x, y + i, l.t, l.c, u.panel, u.alpha);
+    if (l.tag) text(ui, x + n + 1, y + i, l.tag, u.panel, u.hi, 1);
+  }
+  if (max > 0) {
+    // Ascenseur.
+    const pos = Math.round((off / max) * (h - 1));
+    for (let i = 0; i < h; i++) put(ui, x + w + 1, y + i, i === pos ? 35 : 58, i === pos ? u.hi : u.dim, u.panel, u.alpha);
+  }
+}

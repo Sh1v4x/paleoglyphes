@@ -9,26 +9,29 @@ import { SPECIES, SPECIES_LIST } from "../species";
 import { eggModel } from "../species/eggs";
 import type { FactUnlock, Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
-import { actions, button, buttonW, clip, over, panel, put, region, SP, text, wrap, type Hint } from "../ui/kit";
-import { box, cached, DEFENSE, factKey, fitSprite, fmtKg, fmtM, groundLine, hasF, human, idle, known, knownList, lerp, paper, RH, RW } from "./journal-common";
+import { actions, button, buttonW, clip, over, panel, region, SP, text, wrap, type Hint } from "../ui/kit";
+import { box, cached, DEFENSE, drawLines, factKey, fitSprite, fmtKg, fmtM, groundLine, hasF, human, idle, known, knownList, lerp, paper, RH, RW, type Line } from "./journal-common";
 import { createQuizState, quizPage, quizUpdate, type QuizState } from "./journal-quiz";
 import { createSizesState, sizesPage, sizesUpdate, type SizesState } from "./journal-sizes";
 import { createTimelineState, timelinePage, timelineUpdate, type TimelineState } from "./journal-timeline";
+import { createTravelState, travelPage, travelUpdate, type TravelState } from "./journal-travel";
 import { UI_TOP, type Scene } from "./types";
 
 /**
  * Carnet de terrain : sommaire des espèces, page détaillée (rendu de studio, échelle humaine, faits),
  * page « Extras » (fossiles bonus, notes sur la petite faune).
  * Les faits jamais lus dans le carnet portent la marque « Nouveau ! » (mémorisée dans le navigateur).
- * Sous-onglets pédagogiques : frise du temps (journal-timeline), quiz (journal-quiz), tailles (journal-sizes).
+ * Sous-onglets pédagogiques : frise du temps (journal-timeline), quiz (journal-quiz), tailles (journal-sizes),
+ * carnet de voyage par biome (journal-travel).
  */
 
-export type JournalTab = "species" | "timeline" | "quiz" | "sizes";
+export type JournalTab = "species" | "timeline" | "quiz" | "sizes" | "travel";
 const SUBTABS: { id: JournalTab; label: string; tip: string }[] = [
   { id: "species", label: "Espèces", tip: "Les fiches de toutes les especes" },
   { id: "timeline", label: "Frise du temps", tip: "Quand vivaient-ils ? Et un petit jeu" },
   { id: "quiz", label: "Quiz", tip: "Questions sur les faits decouverts" },
   { id: "sizes", label: "Tailles", tip: "Comparer leur taille a la notre" },
+  { id: "travel", label: "Voyage", tip: "Carnet de voyage : les biomes et leurs vrais sites" },
 ];
 
 export interface JournalState {
@@ -37,6 +40,7 @@ export interface JournalState {
   tl: TimelineState;
   quiz: QuizState;
   sizes: SizesState;
+  travel: TravelState;
   /** Espèce ouverte dans le carnet (sinon : sommaire). */
   species?: SpeciesId;
   /** Page des extras ouverte (si aucune espèce). */
@@ -54,7 +58,7 @@ export interface JournalState {
 }
 
 export function createJournalState(): JournalState {
-  return { tab: "species", tl: createTimelineState(), quiz: createQuizState(), sizes: createSizesState(),
+  return { tab: "species", tl: createTimelineState(), quiz: createQuizState(), sizes: createSizesState(), travel: createTravelState(),
     extras: false, skeleton: false, scroll: 0, focus: 0, opened: "", fresh: [] };
 }
 
@@ -219,8 +223,6 @@ function summary(s: GameState, th: Theme, world: Frame, ui: Frame) {
   }
 }
 
-interface Line { t: string; c: RGB; tag?: string }
-
 function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Species) {
   const u = th.ui, j = s.journal, p = s.progress;
   const L = Math.max(40, Math.floor(ui.cols * 0.55));
@@ -332,24 +334,6 @@ function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Spe
   ]);
 }
 
-/** Écrit une liste de lignes avec défilement (molette, flèches haut/bas). */
-function drawLines(ui: Frame, th: Theme, j: JournalState, lines: Line[], x: number, y: number, h: number, w: number) {
-  const u = th.ui;
-  const max = Math.max(0, lines.length - h);
-  j.scroll = Math.max(0, Math.min(max, j.scroll));
-  const off = j.scroll;
-  for (let i = 0; i < h && i + off < lines.length; i++) {
-    const l = lines[i + off];
-    const n = text(ui, x, y + i, l.t, l.c, u.panel, u.alpha);
-    if (l.tag) text(ui, x + n + 1, y + i, l.tag, u.panel, u.hi, 1);
-  }
-  if (max > 0) {
-    // Ascenseur.
-    const pos = Math.round((off / max) * (h - 1));
-    for (let i = 0; i < h; i++) put(ui, x + w + 1, y + i, i === pos ? 35 : 58, i === pos ? u.hi : u.dim, u.panel, u.alpha);
-  }
-}
-
 /** Comparaison à l'échelle humaine (longueur en adultes allongés, masse en adultes ou éléphants). */
 function compare(spec: Species): string {
   const len = spec.lengthM / 1.75;
@@ -445,6 +429,7 @@ export const journalScene: Scene = {
     if (j.tab === "timeline") return timelineUpdate(s, input);
     if (j.tab === "quiz") return quizUpdate(s, input);
     if (j.tab === "sizes") return sizesUpdate(s, input);
+    if (j.tab === "travel") return travelUpdate(s, input);
     const list = SPECIES_LIST;
     for (const id of input.ui) {
       if (id === "journal:extras") go(s, undefined, true);
@@ -484,6 +469,7 @@ export const journalScene: Scene = {
     if (j.tab === "timeline") return j.tl.game ? [["Glisser", "poser l'animal sur la frise"], ["Clic", "choisir une periode"], ["Entree", "espece suivante"]] : [["Clic", "ouvrir une fiche"], ["Echap", "retour aux especes"]];
     if (j.tab === "quiz") return [["Clic", "repondre"], ["Entree", "question suivante"], ["Echap", "retour aux especes"]];
     if (j.tab === "sizes") return [["Haut/Bas", "changer d'espece"], ["Clic", "choisir la comparaison"], ["Echap", "retour aux especes"]];
+    if (j.tab === "travel") return [["Gauche/Droite", "changer de biome"], ["Haut/Bas", "defiler"], ["Echap", "retour aux especes"]];
     if (j.species) return [["Gauche/Droite", "changer d'espece"], ["Haut/Bas", "defiler"], ["Espace", "chair / squelette"], ["Echap", "sommaire"]];
     if (j.extras) return [["Haut/Bas", "defiler"], ["Echap", "sommaire"]];
     return [["Fleches", "choisir une fiche"], ["Entree", "ouvrir"], ["Molette", "defiler"]];
@@ -491,8 +477,8 @@ export const journalScene: Scene = {
 
   help(s) {
     const h: Hint[] = [
-      ["Clic", "les sous-onglets Especes, Frise du temps, Quiz, Tailles (ou Tab pour les atteindre)"],
-      ["Fleches", "sommaire : choisir une fiche ; fiche : gauche/droite change d'espece, haut/bas defile"],
+      ["Clic", "les sous-onglets Especes, Frise du temps, Quiz, Tailles, Voyage (ou Tab pour les atteindre)"],
+      ["Fleches", "sommaire : choisir une fiche ; fiche : gauche/droite change d'espece, haut/bas defile ; voyage : gauche/droite change de biome"],
       ["Entree", "sommaire : ouvrir la fiche choisie ; quiz et frise : question / espece suivante"],
       ["Espace", "fiche : basculer chair / squelette"],
       ["Echap", "revenir au sommaire, puis aux especes, puis le menu"],
@@ -521,6 +507,7 @@ export const journalScene: Scene = {
     if (j.tab === "timeline") return timelinePage(s, th, world, ui);
     if (j.tab === "quiz") return quizPage(s, th, world, ui);
     if (j.tab === "sizes") return sizesPage(s, th, world, ui);
+    if (j.tab === "travel") return travelPage(s, th, world, ui);
     const spec = j.species ? SPECIES[j.species] : undefined;
     if (spec) speciesPage(s, th, world, ui, spec);
     else if (j.extras) extrasPage(s, th, world, ui);

@@ -61,6 +61,9 @@ const limit = createLimiter(MAX_VOICES);
 
 /** Crée (premier geste) ou relance le contexte audio. Sans Web Audio : rien. */
 export function unlockAudio() {
+  // Seul un vrai geste autorise le son (Échap, par exemple, ne compte pas pour le navigateur) :
+  // sans lui, on attend le suivant au lieu de créer un contexte bloqué.
+  if (typeof navigator !== "undefined" && navigator.userActivation && !navigator.userActivation.isActive) return;
   if (!ctx) {
     if (typeof AudioContext === "undefined") return;
     try {
@@ -139,7 +142,7 @@ export function bindSound(): () => void {
   const onVis = () => {
     if (!ctx) return;
     if (document.hidden) void ctx.suspend();
-    else void ctx.resume();
+    else if (ctx.state !== "running" && (!navigator.userActivation || navigator.userActivation.hasBeenActive)) void ctx.resume();
   };
   window.addEventListener("pointerdown", onGesture);
   window.addEventListener("keydown", onGesture);

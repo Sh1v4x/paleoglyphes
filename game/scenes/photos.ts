@@ -259,10 +259,14 @@ function drawFull(s: GameState, th: Theme, world: Frame, ui: Frame, p: Photo) {
     { id: "photos:del", label: "Supprimer", variant: "danger" },
     { id: "photos:back", label: "Retour", key: "Echap", variant: "primary", tip: "Retour a l'album" },
   ];
-  const ax = actions(ui, th, SP.margin, by, ui.cols - 2 * SP.margin, right);
+  // Fenêtre étroite : libellés courts à droite, navigation sur la rangée du dessus.
+  const SHORT: Record<string, string> = { "photos:png": "PNG", "photos:txt": "Texte", "photos:del": "Suppr." };
+  const fits = right.reduce((n, a) => n + buttonW(a.label, a) + SP.gap, 0) <= ui.cols - 2 * SP.margin;
+  const ax = actions(ui, th, SP.margin, by, ui.cols - 2 * SP.margin, fits ? right : right.map((a) => ({ ...a, label: SHORT[a.id] ?? a.label, tip: a.tip ?? a.label })));
+  const ny = nav.reduce<number>((n, b) => n + buttonW(b.label) + SP.gap, x) >= ax - 1 ? by - 2 : by;
   for (const b of nav) {
     const w = buttonW(b.label);
-    if (x + w >= ax - 1) break;
-    x += button(ui, th, b.id, x, by, b.label, b) + SP.gap;
+    if (x + w >= (ny === by ? ax - 1 : ui.cols)) break;
+    x += button(ui, th, b.id, x, ny, b.label, b) + SP.gap;
   }
 }

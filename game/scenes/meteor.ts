@@ -1,5 +1,6 @@
 import { CELL_H, CELL_W, WORLD_H, WORLD_W } from "../config";
 import { addAt } from "../features/lenia";
+import { pointer } from "../input";
 import type { RGB } from "../palette";
 import { emptyProgress, saveProgress } from "../progress";
 import { createFrame, setBg, setFg, type Frame } from "../render/frame";
@@ -79,8 +80,8 @@ export const meteorScene: Scene = {
   update(s, input, dt) {
     m.t += dt;
     const tp = m.t - SPACE_DURATION;
-    // Échap : passer la cinématique (la remise à zéro a quand même lieu).
-    if (input.pressed.includes("Escape") && !m.done) { m.t = SPACE_DURATION + T.reset - 0.01; }
+    // Échap (au doigt : toucher l'écran) : passer la cinématique (la remise à zéro a quand même lieu).
+    if ((input.pressed.includes("Escape") || (pointer.touch && input.mouse.clicks.length)) && !m.done) { m.t = SPACE_DURATION + T.reset - 0.01; }
     if (tp < 0) return;
     const p = s.park;
     if (m.ox === 0) {
@@ -126,7 +127,7 @@ export const meteorScene: Scene = {
     if (tp < 0) {
       drawSpace(world, Math.min(SPACE_DURATION, m.t));
       resetUi(ui);
-      caption(ui, [225, 220, 205], "Echap : passer");
+      caption(ui, [225, 220, 205], SKIP());
       return;
     }
     parkScene.compose(s, th, world, ui);
@@ -134,9 +135,12 @@ export const meteorScene: Scene = {
     overlay(s, world, tp);
     if (tp > T.dawn + 1 && tp < T.end) caption(ui, [255, 255, 255], "66 millions d'annees plus tard... la vie reprend ses droits.", true);
     else if (tp > T.shock && tp < T.black) caption(ui, [255, 230, 200], "L'onde de choc balaie Hell Creek. La poussiere va cacher le soleil pendant des annees.", true);
-    if (!m.done) caption(ui, [225, 220, 205], "Echap : passer");
+    if (!m.done) caption(ui, [225, 220, 205], SKIP());
   },
 };
+
+/** Comment passer la cinématique. */
+const SKIP = () => (pointer.touch ? "Toucher : passer" : "Echap : passer");
 
 /** Texte centré en bas (calque d'interface), sur un fond sombre pour rester lisible sur le blanc ; coupé en lignes si besoin. */
 function caption(ui: Frame, c: RGB, str: string, big = false) {

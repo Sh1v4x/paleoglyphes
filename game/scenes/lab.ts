@@ -13,7 +13,7 @@ import { liveBirth, MAX_PER_SPECIES } from "../species/life";
 import type { Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
 import { calm } from "../settings";
-import { actions, button, buttonW, hitAt, overlay, panel, put as uiPut, SP, text, wrap, type Hint } from "../ui/kit";
+import { actions, button, buttonW, clip, hitAt, overlay, panel, put as uiPut, SP, text, toolbar, wrap, type Hint, type ToolItem } from "../ui/kit";
 import { toast } from "../ui/toast";
 import { unlockTrigger } from "../unlock";
 import { bonePrims, clipCols, deName, IDLE_POSE, outlineRaster, primBounds, rasterMid, scaleAll, skeletonPrims } from "./dig-fossils";
@@ -45,6 +45,8 @@ export interface LabState {
   nest?: { sp: SpeciesId; id: number; t: number } | null;
   /** Défilement de la liste des espèces (lignes). */
   scroll?: number;
+  /** Petit écran : fiche de l'espèce ouverte par-dessus l'estrade (bouton « Fiche »). */
+  info?: boolean;
 }
 
 export function createLabState(): LabState {
@@ -52,6 +54,13 @@ export function createLabState(): LabState {
 }
 
 const LEFT_W = 28, RIGHT_W = 34;
+/**
+ * Petit écran (téléphone) : pas la place de la liste et de la fiche autour de l'estrade. L'espèce se choisit
+ * avec « < » et « > », les actions passent en une rangée de boutons, la fiche s'ouvre à la demande.
+ */
+const compact = () => metrics.ucols < LEFT_W + RIGHT_W + 40 || metrics.urows < 34;
+/** Lignes d'interface prises par les deux rangées du mode compact. */
+const COMPACT_ROWS = 4;
 const SYNTH_T = 2.5;
 const MAX_POP = 10;
 const HUMAN_M = 1.75;
@@ -130,12 +139,13 @@ interface Layout {
 }
 
 function layout(spec: Species | undefined): Layout {
-  const { rows, uiW, uiH, cellW, cellH, ucols } = metrics;
-  const left = Math.ceil(((LEFT_W + 2) * uiW) / cellW) + 1;
-  const right = Math.max(left + 40, Math.floor(((ucols - RIGHT_W - 2) * uiW) / cellW) - 1);
-  const top = Math.ceil((uiH * UI_TOP) / cellH) + 2;
+  const { cols, rows, uiW, uiH, cellW, cellH, ucols, urows } = metrics;
+  const small = compact();
+  const left = small ? 1 : Math.ceil(((LEFT_W + 2) * uiW) / cellW) + 1;
+  const right = small ? cols - 1 : Math.max(left + 40, Math.floor(((ucols - RIGHT_W - 2) * uiW) / cellW) - 1);
+  const top = Math.ceil((uiH * (UI_TOP + (small ? COMPACT_ROWS - 1 : 0))) / cellH) + 2;
   const bottom = Math.ceil((uiH * 1.3) / cellH);
-  const trayH = 15;
+  const trayH = small && urows < 34 ? 11 : 15;
   const trayY = rows - bottom - trayH;
   const ground = trayY - 5;
   if (!spec) return { left, right, top, trayY, trayH, ground, s: 1, ox: 0, oy: ground, bx0: 0, bx1: 0, by0: 0, hx: 0 };
@@ -333,6 +343,11 @@ export const labScene: Scene = {
     for (const id of input.ui) {
       if (id === "lab:dismiss") l.done = null;
       if (id.startsWith("lab:sp:")) select(id.slice(7) as SpeciesId);
+      if (id === "lab:prev" || id === "lab:next") {
+        const list = discovered(s.progress), i = list.findIndex((x) => x.id === l.species);
+        if (list.length) select(list[(i + (id === "lab:next" ? 1 : list.length - 1)) % list.length].id);
+      }
+      if (id === "lab:info") l.info = !l.info;
       if (id === "lab:auto") autoPlace(s, spec);
       if (id === "lab:all") for (let n = 0; n < spec.bones.length; n++) autoPlace(s, spec);
       if (id === "lab:synth") startSynth(s, spec);
@@ -422,6 +437,7 @@ export const labScene: Scene = {
     const l = s.lab;
     if (l.done) { l.done = null; return true; }
     if (l.held) { l.held = null; return true; }
+    if (l.info) { l.info = false; return true; }
     return false;
   },
 };
@@ -607,6 +623,14 @@ function drawStage(s: GameState, th: Theme, f: Frame, spec: Species, L: Layout) 
 const eggX = (L: Layout) => L.left + 10;
 
 function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L: Layout) {
+  // Espèces : liste à gauche ; petit écran : « < » nom « > » en haut.
+  if (compact()) drawSpeciesPicker(s, th, ui);
+  else drawSpeciesList(s, th, ui);
+  if (spec) drawStageUi(s, th, ui, spec, L);
+}
+
+/** Liste des espèces (panneau de gauche), défilante. */
+function drawSpeciesList(s: GameState, th: Theme, ui: Frame) {
   const l = s.lab, u = th.ui, p = s.progress;
   const T = (x: number, y: number, str: string, col: RGB = u.text) => text(ui, x, y, str, col, u.panel, u.alpha);
 
@@ -650,14 +674,31 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
     for (let i = 0; i < view; i++) uiPut(ui, lx + LEFT_W - 1, ly + 1 + i, i === pos ? 35 : 58, i === pos ? u.hi : u.dim, u.panel, u.alpha);
   }
   if (anyAsm) T(lx + 2, ly + lh - 2, "* = deja assemble", u.dim);
+}
 
-  if (!spec) return;
+/** Petit écran : espèce précédente / suivante et son nom, en haut (la liste ne tient pas). */
+function drawSpeciesPicker(s: GameState, th: Theme, ui: Frame) {
+  const l = s.lab, u = th.ui, p = s.progress, list = discovered(p);
+  listRect = { x: 0, y: 0, w: 0, h: 0, view: 1 };
+  if (!list.length) {
+    wrap("Aucun os pour l'instant. Va fouiller : chaque espece trouvee apparaitra ici.", ui.cols - 4).slice(0, 2).forEach((t, i) => text(ui, 2, UI_TOP + i, t, u.dim, u.panel, u.alpha));
+    return;
+  }
+  const sp = list.find((x) => x.id === l.species) ?? list[0];
+  const found = foundOf(s, sp).length, need = sp.bones.length;
+  let x = SP.margin + button(ui, th, "lab:prev", SP.margin, UI_TOP, "<", { tip: "Espece precedente" }) + SP.gap;
+  const cnt = ` ${found}/${need}${isAssembled(s, sp.id) ? " *" : ""} `;
+  x += text(ui, x, UI_TOP, ` ${clip(shownName(p, sp.id), Math.max(4, ui.cols - x - cnt.length - 8))} `, u.hi, u.panel, u.alpha);
+  x += text(ui, x, UI_TOP, cnt, found >= need ? u.ok : u.dim, u.panel, u.alpha) + SP.gap;
+  button(ui, th, "lab:next", x, UI_TOP, ">", { tip: "Espece suivante" });
+}
+
+/** Texte de la fiche de l'espèce (panneau de droite). */
+function ficheLines(s: GameState, th: Theme, spec: Species, rin: number): [string, RGB][] {
+  const u = th.ui, p = s.progress;
   const found = foundOf(s, spec), placed = placedOf(s, spec);
   const known = found.length > 0 || isAssembled(s, spec.id);
   const named = isAssembled(s, spec.id);
-
-  // --- Fiche (droite) ---
-  const rw = RIGHT_W, rx = ui.cols - rw - 1, ry = UI_TOP, rin = rw - 4;
   const lines: [string, RGB][] = [];
   if (known && !named) {
     // Espèce mystère : on ne sait que ce que disent les os.
@@ -697,21 +738,54 @@ function drawUi(s: GameState, th: Theme, ui: Frame, spec: Species | undefined, L
   } else {
     wrap("Espece encore inconnue. Fouille les sites (touche 2) pour trouver ses os : sa silhouette apparaitra ici.", rin).forEach((t) => lines.push([t, u.dim]));
   }
-  const rh = lines.length + 3;
-  panel(ui, th, rx, ry, rw, rh, known ? shownName(p, spec.id) : "???");
-  lines.forEach(([t, c], i) => T(rx + 2, ry + 1 + i, t, c));
+  return lines;
+}
+
+/** Petit écran : actions de l'atelier en une rangée (fiche, placer un os, incuber, voir le nid). */
+function drawCompactActions(s: GameState, th: Theme, ui: Frame, spec: Species) {
+  const l = s.lab, found = foundOf(s, spec), placed = placedOf(s, spec);
+  const items: ToolItem[] = [{ id: "lab:info", label: "Fiche", toggle: true, active: !!l.info, tip: "Fiche de l'espece et os a trouver" }];
+  if (found.some((id) => !placed.includes(id)) && !l.synth) {
+    items.push({ id: "lab:auto", label: "Placer un os", short: "Placer", key: "Entree", tip: "Place automatiquement un os trouve" });
+    if (DEV) items.push({ id: "lab:all", label: "Tout placer (test)", short: "Tout", variant: "ghost", tip: "Test : placer tous les os trouves" });
+  }
+  if (eggsOf(s, spec.id) > 0 && !l.synth) {
+    const full = parkCount(s, spec.id) >= MAX_PER_SPECIES;
+    items.push({ id: "lab:incubate", label: full ? "Reserve pleine" : "Incuber un oeuf", short: "Incuber", disabled: full, variant: "primary", tip: "L'oeuf eclora dans un nid de la reserve" });
+  }
+  if (l.nest && l.nest.sp === spec.id && !l.synth) items.push({ id: "lab:seenest", label: "Voir le nid", short: "Nid", tip: "Aller voir le nid dans la reserve" });
+  toolbar(ui, th, SP.margin, UI_TOP + 2, ui.cols - 2 * SP.margin, items);
+}
+
+/** Fiche (droite ; petit écran : à la demande, par-dessus l'estrade), actions, synthèse et étiquettes. */
+function drawStageUi(s: GameState, th: Theme, ui: Frame, spec: Species, L: Layout) {
+  const l = s.lab, u = th.ui, p = s.progress;
+  const T = (x: number, y: number, str: string, col: RGB = u.text) => text(ui, x, y, str, col, u.panel, u.alpha);
+  const small = compact();
+  const found = foundOf(s, spec), placed = placedOf(s, spec);
+  const known = found.length > 0 || isAssembled(s, spec.id);
+
+  // --- Fiche (droite) ---
+  const rw = small ? Math.min(RIGHT_W, ui.cols - 2) : RIGHT_W, rx = ui.cols - rw - 1, ry = small ? UI_TOP + COMPACT_ROWS : UI_TOP, rin = rw - 4;
+  const lines = ficheLines(s, th, spec, rin);
+  const rh = Math.min(lines.length + 3, ui.rows - 1 - ry);
+  if (small) drawCompactActions(s, th, ui, spec);
+  if (!small || l.info) {
+    panel(ui, th, rx, ry, rw, rh, known ? shownName(p, spec.id) : "???", { close: small ? "lab:info" : undefined, overlay: small });
+    lines.slice(0, rh - 3).forEach(([t, c], i) => T(rx + 2, ry + 1 + i, t, c));
+  }
   let by = ry + rh - 2 + 2;
   const unplaced = found.some((id) => !placed.includes(id));
-  if (eggsOf(s, spec.id) > 0 && !l.synth) {
+  if (!small && eggsOf(s, spec.id) > 0 && !l.synth) {
     const full = parkCount(s, spec.id) >= MAX_PER_SPECIES;
     button(ui, th, "lab:incubate", rx, by, full ? "Reserve pleine" : "Incuber un oeuf", { w: rw, disabled: full, variant: "primary", tip: "L'oeuf eclora dans un nid de la reserve" });
     by += 2;
   }
-  if (l.nest && l.nest.sp === spec.id && !l.synth) {
+  if (!small && l.nest && l.nest.sp === spec.id && !l.synth) {
     button(ui, th, "lab:seenest", rx, by, "Voir le nid", { w: rw, tip: "Aller voir le nid dans la reserve" });
     by += 2;
   }
-  if (known && unplaced && !l.synth) {
+  if (!small && known && unplaced && !l.synth) {
     button(ui, th, "lab:auto", rx, by, "Placer un os", { w: rw, key: "Entree", tip: "Place automatiquement un os trouve" });
     by += 2;
     // Raccourci de test (dev uniquement).

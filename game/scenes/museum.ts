@@ -372,8 +372,10 @@ function drawEntryPanels(s: GameState, th: Theme, ui: Frame, h: Hall, cam: numbe
   {
     const md = medal(h);
     const room = toUiX(md.R * 4 + 8);
-    const t1 = room >= 30 ? " MUSEE D'HISTOIRE NATURELLE " : " MUSEE ", t2 = room >= 30 ? " Collection de l'explorateur " : "";
     const cx = toUiX(md.x - cam);
+    // Titre long s'il tient autour du médaillon et dans l'écran (pas sur un téléphone en portrait).
+    const long = room >= 30 && cx + 15 <= ui.cols;
+    const t1 = long ? " MUSEE D'HISTOIRE NATURELLE " : " MUSEE ", t2 = long ? " Collection de l'explorateur " : "";
     text(ui, cx - (t1.length >> 1), toUiY(md.cy - md.R) - 2, t1, u.panel, u.hi, 1);
     if (t2) text(ui, cx - (t2.length >> 1), toUiY(md.cy + md.R) + 2, t2, u.text, u.panel, 0.85);
   }

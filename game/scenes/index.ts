@@ -1,9 +1,10 @@
 import { DEV } from "../config";
-import type { Input } from "../input";
+import { dragToWheel, pointer, type Input } from "../input";
 import { advanceClock } from "../daycycle";
 import { THEMES } from "../palette";
 import type { Theme } from "../palette";
 import type { Frame } from "../render/frame";
+import { metrics } from "../render/metrics";
 import { saveProgress } from "../progress";
 import { saveSettings, settings, UI_SCALES, VOLUMES, type UiScale } from "../settings";
 import { applyVolume, play } from "../features/sound";
@@ -12,7 +13,7 @@ import { SPECIES_LIST } from "../species";
 import type { GameState } from "../state";
 import {
   actions, ascii, beginUi, overlay, button, drawFocus, drawTooltip, fill, focusedId, hintLine, hitAt, keyChip, moveFocus, over,
-  panel, put, region, resetUi, setFocus, SP, text, wrap, type Hint,
+  panel, put, region, resetUi, setFocus, SP, text, touchHints, wrap, type Hint,
 } from "../ui/kit";
 import { drawMenu, drawSettings, MENU_ITEMS } from "../ui/menu";
 import { drawToasts, toast } from "../ui/toast";
@@ -43,13 +44,22 @@ const TAB_NAME: Record<Mode, string> = { park: "Reserve", dig: "Fouille", lab: "
 export const MENU_ROWS = MENU_ITEMS.length;
 
 /** Commandes valables partout (fenêtre d'aide). */
-const GLOBAL_HELP: Hint[] = [
+const KEY_HELP: Hint[] = [
   ["1 a 6", "changer d'ecran"],
   ["Tab", "bouton suivant (Maj+Tab : precedent)"],
   ["Entree", "activer le bouton choisi (ou Espace)"],
   ["Echap", "fermer / revenir, puis menu"],
   ["H", "ouvrir / fermer cette aide"],
   ["B", "couper / remettre le son"],
+];
+/** Les mêmes au doigt (boutons « < », « ? » et « Menu » de l'en-tête). */
+const TOUCH_HELP: Hint[] = [
+  ["Toucher", "activer un bouton, choisir, observer"],
+  ["Glisser", "deplacer la vue, defiler une liste"],
+  ["Pincer", "zoomer dans la reserve (ou boutons - et +)"],
+  ["Appui long", "infobulle d'un bouton"],
+  ["<", "fermer / revenir, puis menu"],
+  ["?", "ouvrir / fermer cette aide"],
 ];
 
 export function setMode(s: GameState, m: Mode) {
@@ -111,8 +121,8 @@ function activateMenu(s: GameState, byKey: boolean) {
 function settingsAction(s: GameState, id: string) {
   if (id === "set:back") { s.menu.page = "main"; setFocus(undefined); return; }
   if (id.startsWith("set:scale:")) {
-    const k = Number(id.slice(10)) as UiScale;
-    if (UI_SCALES.includes(k)) settings.uiScale = k;
+    const k = id === "set:scale:auto" ? "auto" : (Number(id.slice(10)) as UiScale);
+    if (k === "auto" || UI_SCALES.includes(k)) settings.uiScale = k;
   } else if (id.startsWith("set:vol:")) {
     const v = Number(id.slice(8));
     if ((VOLUMES as readonly number[]).includes(v)) { settings.volume = v; settings.mute = false; }
@@ -228,9 +238,13 @@ export function updateGame(s: GameState, input: Input, dt: number) {
     if (id.startsWith("tab:")) setMode(s, id.slice(4) as Mode);
     else if (id === "menu:open") { openMenu(s); return; }
     else if (id === "help:open") { s.help = true; return; }
+    // Bouton « < » (écran tactile) : comme Échap, ferme ce qui est ouvert, sinon le menu.
+    else if (id === "nav:back") { if (!scene.back?.(s)) { openMenu(s); return; } }
     else if (!id.startsWith("status:")) rest.push(id);
   }
   input.ui = rest;
+  // Au doigt, glisser fait défiler les listes et les pages (la réserve, la fouille et le musée gardent le glisser).
+  if (s.mode === "journal" || s.mode === "photos" || s.mode === "lab") dragToWheel(input, 2 * metrics.uiH);
   SCENES[s.mode].update(s, input, dt);
 }
 
@@ -239,12 +253,14 @@ export function updateGame(s: GameState, input: Input, dt: number) {
 // ---------------------------------------------------------------------------
 
 type TabStyle = "full" | "label" | "icon";
-const tabW = (t: (typeof TABS)[number], st: TabStyle) => 3 + (st === "icon" ? 3 : st === "label" ? t.label.length + 2 : t.label.length + 4);
+/** Largeur d'un onglet : pastille de touche (sauf au doigt), puis icône et/ou libellé. */
+const tabW = (t: (typeof TABS)[number], st: TabStyle) => (pointer.touch ? 0 : 3) + (st === "icon" ? 3 : st === "label" ? t.label.length + 2 : t.label.length + 4);
 
 /**
  * En-tête : une bande de 3 lignes (marge, contenu, filet) détachée du bord de la fenêtre.
  * Titre à gauche, onglets (touche, icône, libellé), état de la collection, Aide et Menu à droite.
  * Fenêtre étroite : le titre disparaît, puis l'état se résume, puis les onglets passent en icônes.
+ * Écran tactile : ni pastilles de touches, ni « Aide » / « Menu » en toutes lettres ; un bouton « < » joue Échap.
  */
 function drawHeader(s: GameState, th: Theme, ui: Frame, fps: number) {
   const u = th.ui;
@@ -259,8 +275,10 @@ function drawHeader(s: GameState, th: Theme, ui: Frame, fps: number) {
   ];
   const fpsT = DEV && settings.showFps ? `FPS ${fps.toFixed(0).padStart(3)}` : "";
   const statusW = (k: "long" | "short" | "none") => (k === "none" ? 0 : chips.reduce((n, c) => n + c[k].length + 2, 0) + 1);
-  const helpW = 11, menuW = 15; // « [ Aide  H ] », « [ Menu  Echap ] »
-  const right = helpW + SP.gap + menuW + 2 + (fpsT ? fpsT.length + 2 : 0);
+  // « [ Aide  H ] », « [ Menu  Echap ] » ; au doigt « [ ? ] », « [ < ] », « [ Menu ] ».
+  const touch = pointer.touch, kw = touch ? 0 : 3;
+  const helpW = touch ? 5 : 11, menuW = touch ? 8 : 15, backW = touch ? 5 + SP.gap : 0;
+  const right = helpW + SP.gap + backW + menuW + 2 + (fpsT ? fpsT.length + 2 : 0);
   const tabsW = (st: TabStyle) => TABS.reduce((n, t) => n + tabW(t, st), 0) + (TABS.length - 1) * SP.gap;
   const options: [boolean, TabStyle, "long" | "short" | "none"][] = [
     [true, "full", "long"], [false, "full", "long"], [false, "full", "short"], [false, "label", "short"],
@@ -277,9 +295,9 @@ function drawHeader(s: GameState, th: Theme, ui: Frame, fps: number) {
     const hov = over(x, y, w, 1);
     const bg = on ? u.hi : hov ? u.panelAlt : u.panel, fg = on ? u.panel : hov ? u.hi : u.text;
     fill(ui, x, y, w, 1, bg, u.alpha);
-    keyChip(ui, th, x, y, t.key);
+    if (!touch) keyChip(ui, th, x, y, t.key);
     const lab = tabStyle === "icon" ? t.icon : tabStyle === "label" ? t.label : `${t.icon} ${t.label}`;
-    text(ui, x + 4, y, lab, fg, bg, u.alpha);
+    text(ui, x + kw + 1, y, lab, fg, bg, u.alpha);
     // Onglet courant : souligné sur le filet (forme, pas seulement couleur).
     if (on) for (let i = 0; i < w; i++) put(ui, x + i, HEADER_ROWS - 1, 61, u.hi, u.panel, u.alpha);
     region(`tab:${t.mode}`, x, y, w, 1, { focus: true, tip: `${t.tip}  (touche ${t.key})` });
@@ -287,8 +305,9 @@ function drawHeader(s: GameState, th: Theme, ui: Frame, fps: number) {
   }
   let rx = ui.cols - 2 - menuW;
   button(ui, th, "menu:open", rx, y, "Menu", { key: "Echap", w: menuW, tip: "Pause : reglages, mode test, recommencer" });
+  if (touch) { rx -= backW; button(ui, th, "nav:back", rx, y, "<", { w: 5, tip: "Retour : fermer ce qui est ouvert (Echap)" }); }
   rx -= helpW + SP.gap;
-  button(ui, th, "help:open", rx, y, "Aide", { key: "H", w: helpW, tip: "Toutes les commandes de cet ecran" });
+  button(ui, th, "help:open", rx, y, touch ? "?" : "Aide", { key: "H", w: helpW, tip: "Toutes les commandes de cet ecran" });
   if (fpsT) { rx -= fpsT.length + 2; text(ui, rx, y, fpsT, u.dim, u.panel, u.alpha); }
   if (statusKind !== "none") {
     let sx = rx - statusW(statusKind) - 1;
@@ -310,11 +329,13 @@ function drawHeader(s: GameState, th: Theme, ui: Frame, fps: number) {
 function drawHelp(s: GameState, th: Theme, ui: Frame) {
   const u = th.ui;
   const scene = SCENES[s.mode];
-  const local = scene.help?.(s) ?? scene.hints?.(s) ?? [];
+  const keys = scene.help?.(s) ?? scene.hints?.(s) ?? [];
+  const local = pointer.touch ? scene.touchHints?.(s) ?? touchHints(keys) : keys;
+  const common = pointer.touch ? TOUCH_HELP : KEY_HELP;
   const W = Math.min(76, ui.cols - 2 * SP.margin), iw = W - 2 * SP.pad;
-  const keyW = Math.min(18, Math.max(...[...GLOBAL_HELP, ...local].map(([k]) => ascii(k).length + 2)));
+  const keyW = Math.min(18, Math.max(...[...common, ...local].map(([k]) => ascii(k).length + 2)));
   const rowsOf = (list: readonly Hint[]) => list.map(([k, l]) => ({ k, lines: wrap(l, iw - keyW - 2) }));
-  const g = rowsOf(GLOBAL_HELP), l = rowsOf(local);
+  const g = rowsOf(common), l = rowsOf(local);
   const count = (r: { lines: string[] }[]) => r.reduce((n, q) => n + q.lines.length, 0);
   const H = Math.min(ui.rows - 2, 3 + count(g) + (l.length ? 2 + count(l) : 0) + 3);
   const x = Math.floor((ui.cols - W) / 2), y = Math.max(HEADER_ROWS, Math.floor((ui.rows - H) / 2));
@@ -343,8 +364,10 @@ export function composeGame(s: GameState, world: Frame, ui: Frame, fps: number) 
 
   if (s.mode !== "meteor") {
     drawHeader(s, th, ui, fps);
-    const hints = scene.hints?.(s);
-    if (hints) hintLine(ui, th, hints, [["H", "aide"]]);
+    const keys = scene.hints?.(s);
+    // Au doigt : les gestes (ou les boutons) à la place des touches.
+    const hints = pointer.touch ? scene.touchHints?.(s) ?? (keys && touchHints(keys)) : keys;
+    if (hints) hintLine(ui, th, hints, [[pointer.touch ? "?" : "H", "aide"]]);
   }
   drawToasts(s, th, ui);
   if (s.help && s.mode !== "meteor") overlay(() => drawHelp(s, th, ui));

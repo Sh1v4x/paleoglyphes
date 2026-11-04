@@ -1,3 +1,4 @@
+import { pointer } from "../input";
 import { isFish } from "./eco-special";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
@@ -6,7 +7,7 @@ import { SPECIES, SPECIES_LIST } from "../species";
 import { INCUBATION, lifespan, MAX_PER_SPECIES, stageOf, type Stage } from "../species/life";
 import type { Species } from "../species/types";
 import type { GameState } from "../state";
-import { actions, bar, button, over, panel, put, region, SP, text, wrap, type Action } from "../ui/kit";
+import { actions, bar, button, clip, over, panel, put, region, SP, text, wrap, type Action } from "../ui/kit";
 import { drawCensus } from "../features/census";
 import { deName } from "./dig-fossils";
 import { activity } from "./ecosystem";
@@ -23,6 +24,8 @@ import { UI_TOP } from "./types";
 export const DAY_S = 480;
 /** Lignes défilées par cran de molette dans le recensement. */
 export const ROSTER_STEP = 3;
+/** Largeur minimale du recensement (cellules d'interface).*/
+export const ROSTER_MIN_W = 40;
 
 /** Nom du stade, avec ses accents (le kit les retire à l'affichage). */
 export const STAGE_LABEL: Record<Stage, string> = { baby: "bébé", juvenile: "juvénile", adult: "adulte", old: "âgé" };
@@ -192,7 +195,7 @@ type Row =
  */
 export function drawRoster(s: GameState, th: Theme, ui: Frame, top: number, bottom: number, left = 0) {
   const u = th.ui, p = s.park;
-  const W = Math.max(40, Math.min(58, ui.cols - left - 2 * SP.margin)), x = ui.cols - W - SP.margin;
+  const W = Math.max(ROSTER_MIN_W, Math.min(58, ui.cols - left - 2 * SP.margin)), x = ui.cols - W - SP.margin;
   const rows: Row[] = [];
   for (const spec of SPECIES_LIST) {
     if (!s.progress.assembled.includes(spec.id)) continue;
@@ -222,7 +225,7 @@ export function drawRoster(s: GameState, th: Theme, ui: Frame, top: number, bott
   const tx = x + 2 + button(ui, th, "park:census:list", x + 2, top + 1, "Liste", { active: !chart, tip: "Liste des animaux" }) + 1;
   button(ui, th, "park:census:chart", tx, top + 1, "Graphique", { active: chart, tip: "Populations au fil des jours" });
   if (chart) { drawCensus(s, th, ui, x, top, W, H); return; }
-  text(ui, x + 2, top + 2, "Stade : b bébé  j juvénile  A adulte  V âgé   o nid", u.dim, u.panel, u.alpha);
+  text(ui, x + 2, top + 2, clip("Stade : b bébé  j juvénile  A adulte  V âgé   o nid", W - 4), u.dim, u.panel, u.alpha);
   if (!rows.length) text(ui, x + 2, top + 3, "Aucun dinosaure dans la réserve.", u.dim, u.panel, u.alpha);
   const inner = W - 5;
   for (let i = 0; i < view && i + off < rows.length; i++) {
@@ -263,7 +266,7 @@ export function drawRoster(s: GameState, th: Theme, ui: Frame, top: number, bott
     const pos = Math.round((off / max) * (view - 1));
     for (let i = 0; i < view; i++) put(ui, x + W - 2, top + 3 + i, i === pos ? 35 : 58, i === pos ? u.hi : u.dim, u.panel, u.alpha);
   }
-  text(ui, x + 2, top + H - 2, max > 0 ? "Clic : aller le voir   Molette : défiler" : "Clic : aller le voir", u.dim, u.panel, u.alpha);
+  text(ui, x + 2, top + H - 2, pointer.touch ? (max > 0 ? "Toucher : aller le voir   Glisser : défiler" : "Toucher : aller le voir") : max > 0 ? "Clic : aller le voir   Molette : défiler" : "Clic : aller le voir", u.dim, u.panel, u.alpha);
 }
 
 /** Petite barre sans crochets (recensement). */

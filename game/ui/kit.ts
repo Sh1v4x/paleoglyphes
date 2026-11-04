@@ -1,3 +1,4 @@
+import { pointer } from "../input";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { metrics, uiCellAt } from "../render/metrics";
@@ -21,10 +22,15 @@ import { metrics, uiCellAt } from "../render/metrics";
  * - Infobulles : `tip` sur un bouton ou une zone ; elles apparaissent après un court survol
  *   (ou tout de suite sur le bouton qui a le focus clavier), près du curseur, sans sortir de l'écran.
  * - Rien ne passe l'information par la couleur seule : états marqués aussi par un glyphe ou un mot.
+ * - Écran tactile (`pointer.touch`) : pas de pastilles de touches sur les boutons ni les panneaux, un doigt
+ *   qui tombe à côté d'un bouton l'atteint quand même (`TOUCH_SLOP`), un appui long montre l'infobulle.
  */
 
 /** Espacements communs (cellules d'interface). */
 export const SP = { margin: 1, pad: 2, gap: 1 } as const;
+
+/** Tolérance autour des zones cliquables sous un doigt (px CSS) : un bouton d'une ligne y est mince. */
+const TOUCH_SLOP = 10;
 
 /** Délai avant l'apparition d'une infobulle (s). */
 const TIP_DELAY = 0.45;
@@ -109,14 +115,24 @@ function log(kind: UiRect["kind"], id: string, x: number, y: number, w: number, 
   if (uiLog.enabled) uiLog.rects.push({ kind: overlayDepth > 0 ? "overlay" : kind, id, x, y, w, h });
 }
 
-/** Zone cliquable sous un point (px CSS), la plus récemment dessinée gagne. */
+/**
+ * Zone cliquable sous un point (px CSS), la plus récemment dessinée gagne. Au doigt, à défaut : la plus
+ * proche à moins de TOUCH_SLOP px.
+ */
 export function hitAt(px: number, py: number): string | undefined {
   const c = uiCellAt(px, py);
   for (let i = prevHits.length - 1; i >= 0; i--) {
     const h = prevHits[i];
     if (c.x >= h.x && c.x < h.x + h.w && c.y >= h.y && c.y < h.y + h.h) return h.id;
   }
-  return undefined;
+  if (!pointer.touch) return undefined;
+  let best: string | undefined, bd = TOUCH_SLOP;
+  for (let i = prevHits.length - 1; i >= 0; i--) {
+    const h = prevHits[i], W = metrics.uiW, H = metrics.uiH;
+    const d = Math.hypot(Math.max(0, h.x * W - px, px - (h.x + h.w) * W), Math.max(0, h.y * H - py, py - (h.y + h.h) * H));
+    if (d < bd) { bd = d; best = h.id; }
+  }
+  return best;
 }
 
 export interface RegionOpts {
@@ -259,6 +275,7 @@ export interface PanelOpts {
 /** Panneau encadré en ASCII, avec titre facultatif dans la bordure du haut. */
 export function panel(ui: Frame, th: Theme, x: number, y: number, w: number, h: number, title?: string, o: PanelOpts = {}) {
   const u = th.ui;
+  if (pointer.touch) o = { ...o, key: undefined };
   if (o.overlay) overlayDepth++;
   log("panel", title ?? "", x, y, w, h);
   if (o.overlay) overlayDepth--;
@@ -318,16 +335,20 @@ export interface ButtonOpts {
   focus?: boolean;
 }
 
+/** Pastille de touche affichée sur un bouton : aucune au doigt (pas de clavier sous la main). */
+const shownKey = (key?: string) => (key && !pointer.touch ? ascii(key) : "");
+
 /** Largeur naturelle d'un bouton (libellé, pastille). */
 export function buttonW(label: string, o: Pick<ButtonOpts, "key"> = {}): number {
-  return ascii(label).length + 4 + (o.key ? ascii(o.key).length + 3 : 0);
+  const key = shownKey(o.key);
+  return ascii(label).length + 4 + (key ? key.length + 3 : 0);
 }
 
 /** Bouton « [ libellé ] » cliquable. Renvoie sa largeur. */
 export function button(ui: Frame, th: Theme, id: string, x: number, y: number, label: string, o: ButtonOpts = {}): number {
   const u = th.ui;
   const t = ascii(label);
-  const key = o.key ? ascii(o.key) : "";
+  const key = shownKey(o.key);
   const w = o.w ?? buttonW(t, o);
   const v = o.variant ?? "secondary";
   const focused = !o.disabled && isFocused(id);
@@ -436,6 +457,19 @@ export function hintLine(ui: Frame, th: Theme, items: readonly Hint[], right: re
     text(ui, x + k + 1, y, h[1], u.dim, u.panel, 0.8);
     x += w + 3;
   }
+}
+
+/**
+ * Aides au doigt tirées des aides clavier : « Clic » devient « Toucher », « Echap » le bouton « < » de
+ * l'en-tête, la molette qui défile un glisser ; les autres touches n'ont pas d'équivalent et sont omises.
+ */
+export function touchHints(items: readonly Hint[]): Hint[] {
+  const out: Hint[] = [];
+  for (const [k, l] of items) {
+    const g = k === "Clic" ? "Toucher" : k === "Glisser" ? "Glisser" : k === "Echap" ? "<" : k === "Molette" && l.startsWith("defiler") ? "Glisser" : undefined;
+    if (g) out.push([g, l]);
+  }
+  return out;
 }
 
 /** État vide (même allure partout) : panneau centré, explication, action facultative. */

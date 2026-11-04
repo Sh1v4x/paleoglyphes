@@ -788,7 +788,7 @@ export const parkScene: Scene = {
       if (!spec) continue;
       const sea = spec.habitat === "sea";
       actors.push({
-        id: a.id, r: animalRaster(a, s.time), x: a.x, y: a.y, inWater: a.inWater && !sea && a.alt < 2, submerged: sea && a.task !== "dead" && a.action !== "land" && a.action !== "takeoff", // tortue sur la plage : dessinée hors de l'eau
+        id: a.id, r: animalRaster(a, s.time), x: a.x, y: a.y, inWater: a.inWater && !sea && a.alt < 2, submerged: (sea && a.task !== "dead" && a.action !== "land" && a.action !== "takeoff") || (a.mood === "ambush" && a.inWater && a.action === "idle"), // tortue sur la plage : dessinée hors de l'eau ; crocodile à l'affût : à demi immergé
         sortY: a.alt > 4 ? 1e7 + a.alt : undefined,
         // Ombre au sol pour les volants (plus petite quand ils sont haut), aucune pour les nageurs.
         shadowRx: sea ? 0 : spec.halfLen * spec.shadow * (a.task === "dead" ? 1.1 : 1) * (a.alt > 0 ? Math.max(0.35, 1 - a.alt / 400) : 1),

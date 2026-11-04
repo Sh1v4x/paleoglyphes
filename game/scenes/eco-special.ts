@@ -1,7 +1,9 @@
-import { isNight } from "../daycycle";
 import { CELL_H, CELL_W, WORLD_H } from "../config";
+import { darkIn } from "../features/weather";
+import { SPECIES } from "../species";
 import type { Species, SpeciesId } from "../species/types";
 import { worldFor, type GameState } from "../state";
+import { BIOME } from "../world/biomes";
 import type { World } from "../world/generate";
 import { isWater, T } from "../world/tiles";
 import type { NestKit } from "./eco-nest";
@@ -24,6 +26,13 @@ const FISHERS: ReadonlySet<SpeciesId> = new Set<SpeciesId>(["pteranodon", "nycto
 export const isFisher = (sp: SpeciesId) => FISHERS.has(sp);
 /** Nyctosaurus (sans griffes aux ailes) : se repose en planant, ne se pose presque jamais. */
 export const glider = (sp: SpeciesId) => sp === "nyctosaurus";
+
+/**
+ * Chasseurs nocturnes : Pectinodon (Hell Creek), troodontidé d'Alaska (grands yeux pour la nuit polaire)
+ * et Shuvuuia (Gobi : vue et ouïe de chouette, il chasse les insectes). Voir liveNight.
+ */
+const NOCTURNAL: ReadonlySet<SpeciesId> = new Set<SpeciesId>(["pectinodon", "troodon", "shuvuuia"]);
+export const nocturnal = (sp: SpeciesId) => NOCTURNAL.has(sp);
 
 /** Pondeurs de plage : la tortue de mer et les ptérosaures pêcheurs nichent sur le sable, près de la côte. */
 export const beachNester = (sp: SpeciesId) => sp === "archelon" || FISHERS.has(sp);
@@ -68,7 +77,7 @@ export function beachSite(s: GameState, sp: SpeciesId, y0: number, nests: Nest[]
 }
 
 // ---------------------------------------------------------------------------
-// Pectinodon : nocturne
+// Chasseurs nocturnes (Pectinodon, troodontidé d'Alaska, Shuvuuia)
 // ---------------------------------------------------------------------------
 
 /** Cachette pour la journée : au pied d'un arbre debout, près de l'animal. */
@@ -103,15 +112,18 @@ function prowlSpot(k: WildKit, s: GameState, a: Animal) {
 }
 
 /**
- * Pectinodon : la nuit, il rôde le long des berges et des lisières et happe de petites proies
- * (tâche « graze », humeur « hunt ») ; le jour, il dort caché au pied d'un arbre (tâche « rest »,
- * humeur « den »). Fuite, défense, boisson, carcasses et pillage de nids restent à l'IA ordinaire.
+ * Chasseur nocturne : la nuit, il rôde le long des berges et des lisières et happe de petites proies
+ * (tâche « graze », humeur « hunt » ; insectes pour le Shuvuuia) ; le jour, il dort caché au pied d'un
+ * arbre, ou à l'abri sur place s'il n'y en a pas (tâche « rest », humeur « den »). En Alaska, la nuit
+ * suit la lumière polaire (darkIn) : le troodontidé chasse presque tout le jour en hiver, peu en été.
+ * Fuite, défense, boisson, carcasses et pillage de nids restent à l'IA ordinaire.
  * Renvoie true si l'animal a été pris en charge pour ce pas.
  */
 export function liveNight(k: NestKit, s: GameState, a: Animal, spec: Species, dt: number, done: boolean): boolean {
   const t = a.task;
   if (t !== "wander" && t !== "graze" && t !== "rest") return false;
-  const night = isNight(s.clock);
+  const w = worldFor(s);
+  const night = darkIn(s, w.biome[cellAt(w, a.x, a.y)]);
   if (!night) {
     // Très soif : il file boire (ou manger une carcasse), puis retourne se cacher.
     if (a.thirst > (t === "rest" ? 0.85 : 0.75)) {
@@ -167,5 +179,67 @@ export function liveNight(k: NestKit, s: GameState, a: Animal, spec: Species, dt
   if (Math.random() < dt * (a.hunger > 0.2 ? 0.3 : 0.08)) { k.act(a, "attack"); return true; }
   const d = k.go(s, a, spec, a.tx, a.ty, spec.walkSpeed * 1.2, dt, true);
   if (d < 0 || d < 10) prowlSpot(k, s, a);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Deinosuchus : l'affût au bord de l'eau
+// ---------------------------------------------------------------------------
+
+/** Chasseurs à l'affût : ils attendent, immergés, qu'une proie vienne boire. */
+export const ambusher = (sp: SpeciesId) => sp === "deinosuchus";
+
+/** Affût : un point d'eau du marais (eau peu profonde de la rive), pas déjà pris par un congénère. */
+function lurkSpot(k: WildKit, s: GameState, a: Animal): { x: number; y: number } | null {
+  const w = worldFor(s);
+  let best: { x: number; y: number } | null = null, bd = Infinity;
+  for (const q of k.water()) {
+    if (w.biome[cellAt(w, q.x, q.y)] !== BIOME.Swamp) continue;
+    let d = Math.hypot(q.x - a.x, q.y - a.y) + Math.random() * 300;
+    for (const o of s.park.animals) if (o !== a && o.sp === a.sp && Math.hypot(o.tx - q.x, o.ty - q.y) < 400) d += 2000;
+    if (d < bd && k.canStand(s, a.sp, q.x, q.y)) { bd = d; best = q; }
+  }
+  return best;
+}
+
+/**
+ * Deinosuchus : affamé, il gagne un point d'eau du marais et s'y immobilise, à demi immergé (tâche « rest »,
+ * humeur « ambush »). Quand une proie vient boire à portée, il surgit (poursuite courte : la tâche
+ * « chase » ordinaire). Rassasié, il redevient un animal ordinaire (lézarde, se promène dans le marais).
+ * Comme chez les crocodiles d'aujourd'hui : on suppose qu'il chassait ainsi. Renvoie true si pris en charge.
+ */
+export function liveAmbush(k: NestKit, s: GameState, a: Animal, spec: Species, dt: number): boolean {
+  const t = a.task, lurking = t === "rest" && a.mood === "ambush";
+  if (t !== "wander" && !lurking) return false;
+  // Rassasié, assoiffé ou épuisé : il quitte l'affût (l'IA ordinaire reprend). Pas assez faim pour s'y mettre.
+  if (a.hunger < 0.2 || a.thirst > 0.85 || a.energy < 0.1) {
+    if (lurking) { k.setTask(a, "wander"); a.timer = 0; }
+    return false;
+  }
+  if (!lurking && a.hunger < 0.35) return false;
+  if (!lurking) {
+    const q = lurkSpot(k, s, a);
+    if (!q) return false;
+    k.setTask(a, "rest", "ambush");
+    a.tx = q.x; a.ty = q.y; a.vt = 1;
+  }
+  if (a.vt) {
+    const d = k.go(s, a, spec, a.tx, a.ty, spec.walkSpeed, dt, true);
+    if (d < 0) { k.setTask(a, "wander"); a.timer = 2; return true; }
+    if (d < 14) a.vt = 0;
+    return true;
+  }
+  k.act(a, "idle");
+  // Une proie qui boit (ou passe au bord de l'eau) à portée : l'attaque jaillit de l'eau.
+  for (const o of s.park.animals) {
+    if (o.task === "dead" || o === a || !huntsSp(spec, o.sp) || k.count(o.sp) <= 1) continue;
+    const os = SPECIES[o.sp];
+    if (!os || !preyFits(spec, a, os, o)) continue;
+    const reach = o.task === "drink" ? 300 : 140;
+    if (Math.hypot(o.x - a.x, (o.y - a.y) * 1.3) > reach) continue;
+    k.setTask(a, "chase", "hunt");
+    a.targetId = o.id; a.chase = 0;
+    return true;
+  }
   return true;
 }

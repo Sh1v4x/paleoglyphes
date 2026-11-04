@@ -1,6 +1,6 @@
 import { createNoise2D } from "simplex-noise";
 import { CELL_H, CELL_W, DEV } from "../config";
-import { DAY_SECONDS, daylight, golden, periodName } from "../daycycle";
+import { DAY_SECONDS, daylight, isNight, golden, periodName } from "../daycycle";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
@@ -240,6 +240,15 @@ const seasonDry = (s: GameState) => smooth(0.5, 0.12, seasonWet(s));
 const polarElev = (hour: number, sun: number) => 0.55 * sun + 0.45 * Math.cos((2 * Math.PI * (hour - 12)) / 24);
 const polarLight = (e: number) => smooth(-0.3, 0.25, e);
 const polarGolden = (e: number) => clamp01(1 - Math.abs(e - 0.02) / 0.22);
+
+/**
+ * Fait-il nuit pour un animal de ce biome ? En toundra, c'est la lumière polaire qui compte : nuit presque
+ * permanente au cœur de l'hiver, presque jamais en été (soleil de minuit). Ailleurs, l'heure.
+ */
+export function darkIn(s: GameState, biome: number, hour = s.clock): boolean {
+  if (biome === BIOME.Tundra) return polarLight(polarElev(hour, polarSun(s))) < 0.3;
+  return isNight(hour);
+}
 
 /** Lumière du jour vue par la caméra (0..1) : celle des latitudes moyennes, ou la polaire en toundra. */
 export function seenDaylight(s: GameState, hour = s.clock): number {

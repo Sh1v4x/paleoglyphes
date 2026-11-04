@@ -3,8 +3,9 @@ import { saveProgress } from "./progress";
 import { prepareEcosystem } from "./scenes/ecosystem";
 import type { Bug } from "./scenes/eco-fauna";
 import { syncPopulation, type ParkState } from "./scenes/park";
-import { SPECIES, SPECIES_LIST } from "./species";
+import { isSpeciesId, SPECIES_LIST } from "./species";
 import { worldFor, type GameState } from "./state";
+import { STORAGE_KEYS } from "./storage-keys";
 import { toast } from "./ui/toast";
 import { knockTree, type TreeState } from "./world/trees";
 
@@ -17,7 +18,7 @@ import { knockTree, type TreeState } from "./world/trees";
  * Format versionné : une sauvegarde illisible ou d'une autre version est ignorée, sans erreur.
  */
 
-const KEY = "paleoglyphes:reserve";
+const KEY = STORAGE_KEYS.reserve;
 const VERSION = 1;
 /** Sauvegarde automatique toutes les ... s (temps réel). */
 const EVERY = 20;
@@ -168,7 +169,7 @@ export function restoreReserve(s: GameState, json: string): boolean {
   // Autre carte (taille des champs ou nombre de plantes différents) : sauvegarde incompatible.
   if (!veg || !plankton || !food) return false;
   // Espèces disparues du jeu, ou animal mal formé : écarté.
-  const ok = (a: unknown) => isObj(a) && num(a.id) && num(a.x) && num(a.y) && typeof a.sp === "string" && !!SPECIES[a.sp as keyof typeof SPECIES];
+  const ok = (a: unknown) => isObj(a) && num(a.id) && num(a.x) && num(a.y) && typeof a.sp === "string" && isSpeciesId(a.sp);
   park.animals = (park.animals as unknown[]).filter(ok);
   park.nests = (park.nests as unknown[]).filter(ok);
   const trees = d.trees.filter(([id, st, t, dir]) => w.trees[id]?.state === "up" && STATES.includes(st) && num(t) && (dir === 1 || dir === -1));

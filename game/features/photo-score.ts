@@ -1,3 +1,5 @@
+import { de, plural } from "../fr";
+import type { Task } from "../scenes/park";
 import type { Stage } from "../species/life";
 import type { Action, FactUnlock, Habitat, SpeciesId } from "../species/types";
 
@@ -55,7 +57,7 @@ export interface Score {
 /** Champs d'un animal utiles pour résumer son action (voir scenes/park.ts Animal). */
 export interface ActSource {
   action: Action;
-  task: string;
+  task: Task;
   mood: string;
   alt: number;
   moving: number;
@@ -89,13 +91,16 @@ export function actOf(a: ActSource, habitat: Habitat = "land"): Act {
   return a.moving > 0.5 ? "walk" : "idle";
 }
 
+const MOOD_TRIGGERS: readonly FactUnlock[] = ["herd", "hunt", "flee", "scavenge"];
+
 /** Déclencheurs de faits du carnet pour un animal bien photographié (comme un clic d'observation). */
 export function triggersOf(a: ActSource & { nestId?: number }, stage: Stage): FactUnlock[] {
   const out: FactUnlock[] = ["discover"];
   const byAction: Partial<Record<Action, FactUnlock>> = { eat: "eat", drink: "drink", rest: "rest", attack: "attack", defend: "defend", call: "call" };
   const t = byAction[a.action];
   if (t && a.task !== "dead") out.push(t);
-  if (["herd", "hunt", "flee", "scavenge"].includes(a.mood)) out.push(a.mood as FactUnlock);
+  const byMood = MOOD_TRIGGERS.find((m) => m === a.mood);
+  if (byMood) out.push(byMood);
   if (a.task !== "dead" && (a.nestId || a.mood === "nest")) out.push("nest");
   if (a.task !== "dead" && (stage === "baby" || stage === "juvenile")) out.push("baby");
   return [...new Set(out)];
@@ -114,10 +119,7 @@ export function interest(act: Act): number {
   }
 }
 
-const plural = (n: string) => (/[sx]$/i.test(n) ? n : `${n}s`);
 const NUM = ["", "Un", "Deux", "Trois", "Quatre", "Cinq", "Six"];
-/** « de Tricératops », « d'Edmontosaure ». */
-const deN = (n: string) => (/^[aeiouyhAEIOUYHÉ]/.test(n) ? `d'${n}` : `de ${n}`);
 const isYoung = (st: Stage) => st === "baby" || st === "juvenile";
 
 /** Groupe nominal : « Un Tricératops », « Trois Edmontosaures », « Un troupeau de ... ». */
@@ -169,7 +171,7 @@ export function titleOf(subjects: Subject[], main: number, ctx: ShotContext): st
   const m = subjects[main];
   let head: string;
   if (m.kind === "nest") {
-    head = m.act === "hatch" ? `Un nid ${deN(m.name)} en pleine éclosion` : `Un nid ${deN(m.name)}`;
+    head = m.act === "hatch" ? `Un nid ${de(m.name)} en pleine éclosion` : `Un nid ${de(m.name)}`;
   } else if (m.act === "dead") {
     head = `La carcasse d'un ${m.name}`;
   } else {
@@ -190,7 +192,7 @@ export function titleOf(subjects: Subject[], main: number, ctx: ShotContext): st
   const other = subjects.find((x) => x.kind === "animal" && x.sp !== m.sp && x.act !== "dead" && x.inside >= x.total * 0.3);
   if (other && m.kind === "animal" && m.act !== "dead") {
     const tense = ["hunt", "attack", "defend", "flee"].includes(m.act) || ["hunt", "attack", "defend", "flee"].includes(other.act) || m.carnivore !== other.carnivore;
-    const cnt = subjects.filter((x) => x.sp === other.sp && x.act !== "dead").length;
+    const cnt = subjects.filter((x) => x.kind === "animal" && x.sp === other.sp && x.act !== "dead").length;
     head += ` ${tense ? "face à" : "avec"} ${cnt > 1 ? `des ${plural(other.name)}` : `un ${other.name}`}`;
   }
   const place = placePhrase(m, ctx);
@@ -236,4 +238,7 @@ export function scoreShot(subjects: Subject[], ctx: ShotContext): Score {
 }
 
 /** Étoiles en ASCII : « *** » + « .. ». */
-export const starsText = (n: number) => "*".repeat(n) + ".".repeat(5 - n);
+export function starsText(n: number): string {
+  const k = Math.max(0, Math.min(5, Math.round(n)));
+  return "*".repeat(k) + ".".repeat(5 - k);
+}

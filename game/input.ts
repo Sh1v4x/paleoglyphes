@@ -1,17 +1,24 @@
 const KEYS: Record<string, [number, number]> = {
   ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
-  KeyA: [-1, 0], KeyQ: [-1, 0], KeyD: [1, 0], KeyW: [0, -1], KeyZ: [0, -1], KeyS: [0, 1],
+  KeyA: [-1, 0], KeyD: [1, 0], KeyW: [0, -1], KeyS: [0, 1],
 };
 /**
  * Touches lues par le jeu (les autres restent au navigateur). Carte du clavier :
  * 1-6 onglets ; Tab / Maj+Tab focus suivant / précédent ; Entrée / Espace activer ; Échap retour puis menu ;
  * Retour arrière : retour ; H aide ; V documentaire ; P appareil photo ; C recensement ; M carte ; T temps ;
- * E/R/F outils de fouille ; B couper / remettre le son ; N (dev) debug navigation ; flèches / ZQSD / WASD déplacements ;
+ * E/R/F outils de fouille ; B couper / remettre le son ; N (dev) debug navigation ; flèches / WASD déplacements
+ * (position physique, ZQSD en AZERTY) ; les raccourcis de lettres suivent la lettre imprimée (`e.key`) ;
  * zoom de la réserve : les deux touches à droite du 0 (« = » et « ) » en AZERTY, « = » et « - » en QWERTY),
  * + et - du pavé numérique, pincement ou Ctrl + molette.
  * Écran tactile : un doigt glisse et touche (clic), deux doigts pincent (zoom), voir `pointer`.
  */
-const PRESS = new Set(["Equal", "Minus", "NumpadAdd", "NumpadSubtract", "Escape", "Enter", "Space", "Tab", "Backspace", "KeyH", "KeyT", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "KeyP", "KeyV", "KeyM", "KeyE", "KeyR", "KeyF", "KeyC", "KeyN", "KeyB", ...Object.keys(KEYS)]);
+const PRESS = new Set(["Equal", "Minus", "NumpadAdd", "NumpadSubtract", "Escape", "Enter", "Space", "Tab", "Backspace", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", ...Object.keys(KEYS)]);
+const LETTERS = new Set(["KeyH", "KeyT", "KeyP", "KeyV", "KeyM", "KeyE", "KeyR", "KeyF", "KeyC", "KeyN", "KeyB"]);
+
+function letterCode(e: KeyboardEvent): string {
+  const k = e.key.toLowerCase();
+  return k.length === 1 && k >= "a" && k <= "z" ? `Key${k.toUpperCase()}` : e.code;
+}
 
 export interface Click {
   /** Position en px CSS dans le canvas. */
@@ -24,7 +31,7 @@ export interface Input {
   /** Direction maintenue (flèches, ZQSD, WASD). */
   dx: number;
   dy: number;
-  /** Touches enfoncées depuis la dernière lecture (codes physiques ; « ShiftTab » pour Maj+Tab). */
+  /** Touches enfoncées depuis la dernière lecture (codes physiques, lettre imprimée pour les raccourcis ; « ShiftTab » pour Maj+Tab). */
   pressed: string[];
   mouse: {
     /** Position courante en px CSS dans le canvas. */
@@ -105,15 +112,24 @@ export function bindInput(canvas: HTMLCanvasElement): { read: () => Input; dispo
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
   const onDown = (e: KeyboardEvent) => {
-    if (!PRESS.has(e.code)) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const letter = letterCode(e);
+    const code = PRESS.has(e.code) ? e.code : LETTERS.has(letter) ? letter : null;
+    if (!code) return;
     e.preventDefault();
     pointer.touch = false;
-    if (KEYS[e.code]) down.add(e.code);
+    if (KEYS[code]) down.add(code);
     // Maj+Tab : focus précédent (code à part, pour ne pas suivre l'état des touches de modification).
-    if (!e.repeat) pressed.push(e.code === "Tab" && e.shiftKey ? "ShiftTab" : e.code);
+    if (!e.repeat) pressed.push(code === "Tab" && e.shiftKey ? "ShiftTab" : code);
   };
   const onUp = (e: KeyboardEvent) => down.delete(e.code);
-  const onBlur = () => { down.clear(); mouse.down = false; fingers.clear(); pinch = 0; };
+  const onBlur = () => { down.clear(); mouse.down = false; start = null; fingers.clear(); pinch = 0; };
+  const onCancel = (e: PointerEvent) => {
+    if (fingers.delete(e.pointerId)) { mouse.inside = false; mouse.x = mouse.y = -1; }
+    if (!fingers.size) pinch = 0;
+    mouse.down = false;
+    start = null;
+  };
   const spread = () => {
     const [a, b] = [...fingers.values()];
     return Math.hypot(a.x - b.x, a.y - b.y);
@@ -163,8 +179,7 @@ export function bindInput(canvas: HTMLCanvasElement): { read: () => Input; dispo
     }
     if (e.button === 0) mouse.down = false;
     mouse.releases.push({ ...p, button: e.button });
-    // Appui annulé par le navigateur (pointercancel) : pas un clic.
-    if (start && e.type === "pointerup" && moved < (finger ? TAP_SLOP.touch : TAP_SLOP.mouse)) mouse.clicks.push({ ...p, button: e.button });
+    if (start && moved < (finger ? TAP_SLOP.touch : TAP_SLOP.mouse)) mouse.clicks.push({ ...p, button: e.button });
     start = null;
     // Un doigt levé ne survole plus rien (pas d'étiquette ni d'infobulle qui restent affichées).
     if (finger) { mouse.inside = false; mouse.x = mouse.y = -1; }
@@ -186,7 +201,7 @@ export function bindInput(canvas: HTMLCanvasElement): { read: () => Input; dispo
   canvas.addEventListener("pointerdown", onPDown);
   canvas.addEventListener("pointermove", onPMove);
   canvas.addEventListener("pointerup", onPUp);
-  canvas.addEventListener("pointercancel", onPUp);
+  canvas.addEventListener("pointercancel", onCancel);
   canvas.addEventListener("pointerleave", onLeave);
   canvas.addEventListener("wheel", onWheel, { passive: false });
   canvas.addEventListener("contextmenu", onMenu);
@@ -208,7 +223,7 @@ export function bindInput(canvas: HTMLCanvasElement): { read: () => Input; dispo
       canvas.removeEventListener("pointerdown", onPDown);
       canvas.removeEventListener("pointermove", onPMove);
       canvas.removeEventListener("pointerup", onPUp);
-      canvas.removeEventListener("pointercancel", onPUp);
+      canvas.removeEventListener("pointercancel", onCancel);
       canvas.removeEventListener("pointerleave", onLeave);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", onMenu);

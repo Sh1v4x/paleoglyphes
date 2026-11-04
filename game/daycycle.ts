@@ -1,4 +1,6 @@
-import type { RGB, Theme } from "./palette";
+import { clamp01, mixRgb, smooth01 } from "./math";
+import type { Theme } from "./palette";
+import { STORAGE_KEYS } from "./storage-keys";
 
 /**
  * Cycle jour / nuit de la réserve. L'horloge avance en heures de jeu (0..24) ;
@@ -11,21 +13,42 @@ export const START_HOUR = 9;
 /** Vitesses proposées par l'horloge (clic pour changer). */
 export const CLOCK_SPEEDS = [1, 4, 16] as const;
 
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-const smooth = (v: number) => { const t = clamp01(v); return t * t * (3 - 2 * t); };
-const mix = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+export interface Clock {
+  /** Heure de jeu (0..24). */
+  clock: number;
+  clockSpeed: number;
+  /** Jour de la réserve, compté à chaque passage de minuit, où que soit le joueur. */
+  day: number;
+}
 
-/** Avance l'horloge (heures de jeu) de `dt` secondes réelles. */
-export function advanceClock(hour: number, dt: number, speed: number): number {
-  return (hour + (dt * speed * 24) / DAY_SECONDS) % 24;
+/** Avance l'horloge de `dt` secondes réelles et compte les minuits franchis (gardés dans le navigateur). */
+export function advanceClock(c: Clock, dt: number): void {
+  const h = c.clock + (dt * c.clockSpeed * 24) / DAY_SECONDS;
+  c.clock = h % 24;
+  const days = Math.floor(h / 24);
+  if (!days) return;
+  c.day += days;
+  try {
+    localStorage.setItem(STORAGE_KEYS.day, String(c.day));
+  } catch {
+    // Sans stockage, le jour repart de 1 au prochain chargement.
+  }
+}
+
+export function loadDay(): number {
+  try {
+    return Math.max(1, Number(localStorage.getItem(STORAGE_KEYS.day)) || 1);
+  } catch {
+    return 1;
+  }
 }
 
 /** Jour 1, nuit 0, avec aube (5h-7h) et crépuscule (18h-20h) progressifs. */
 export function daylight(hour: number): number {
   if (hour < 5 || hour >= 20) return 0;
-  if (hour < 7) return smooth((hour - 5) / 2);
+  if (hour < 7) return smooth01((hour - 5) / 2);
   if (hour < 18) return 1;
-  return smooth((20 - hour) / 2);
+  return smooth01((20 - hour) / 2);
 }
 
 /** Lumière dorée : pic au lever et au coucher du soleil. */
@@ -51,9 +74,6 @@ export function periodName(hour: number): string {
   return "Nuit";
 }
 
-const NIGHT_TINT: RGB = [0.5, 0.6, 1.0];
-const GOLD_TINT: RGB = [1.0, 0.72, 0.5];
-const LANTERN: RGB = [1.0, 0.85, 0.6];
 
 /**
  * Le thème éclairé à cette heure : ambiance, teinte, lanterne, vignettage, bestioles, reflets.
@@ -61,14 +81,14 @@ const LANTERN: RGB = [1.0, 0.85, 0.6];
  */
 export function litTheme(th: Theme, hour: number, d = daylight(hour), g = golden(hour)): Theme {
   const n = 1 - d;
-  const tint = mix(mix(NIGHT_TINT, th.lightTint, d), GOLD_TINT, g * 0.55);
+  const tint = mixRgb(mixRgb(th.nightTint, th.lightTint, d), th.goldTint, g * 0.55);
   return {
     ...th,
     ambient: 0.36 + (th.ambient - 0.36) * d,
     lightTint: tint,
     glow: th.glow + n * 0.8,
     glowRadius: th.glowRadius + n * 60,
-    glowTint: mix(th.glowTint, LANTERN, n),
+    glowTint: mixRgb(th.glowTint, th.lanternTint, n),
     vignette: [0.95 - 0.4 * n, 2.1 - 0.65 * n],
     critters: n > 0.5 ? "fireflies" : "butterflies",
     water: n > 0.5 ? "moon" : "glints",

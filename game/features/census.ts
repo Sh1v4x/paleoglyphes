@@ -62,7 +62,7 @@ export function sampleCensus(s: GameState) {
   for (const a of s.park.animals) {
     if (a.task === "dead") continue;
     count[a.sp] = (count[a.sp] ?? 0) + 1;
-    if (SPECIES[a.sp]?.migration) {
+    if (SPECIES[a.sp].migration) {
       const b = w.biome[Math.floor(a.y / CELL_H) * w.cols + Math.floor(a.x / CELL_W)];
       count[`${a.sp}@${b}`] = (count[`${a.sp}@${b}`] ?? 0) + 1;
     }
@@ -152,7 +152,7 @@ function seriesOf(s: GameState): { title: string; series: Series[]; caption: str
     let caption = "";
     if (prey.length) {
       series.push({ label: "ses proies", keys: prey, glyph: "o", col: 0 });
-      caption = `Il chasse : ${prey.map((p) => SPECIES[p]?.name).join(", ")}. Il ne niche que si ses proies sont au moins trois fois plus nombreuses que lui : sa courbe suit la leur, avec du retard.`;
+      caption = `Il chasse : ${prey.map((p) => SPECIES[p].name).join(", ")}. Il ne niche que si ses proies sont au moins trois fois plus nombreuses que lui : sa courbe suit la leur, avec du retard.`;
     } else if (hunters.length) {
       series.push({ label: "ses prédateurs", keys: hunters.map((h) => h.id), glyph: "x", col: 1 });
       caption = `Chassé par : ${hunters.map((h) => h.name).join(", ")}. Quand il abonde, ses prédateurs prospèrent... puis le chassent davantage.`;

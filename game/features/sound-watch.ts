@@ -1,5 +1,6 @@
 import { CELL_H, CELL_W } from "../config";
 import { daylight } from "../daycycle";
+import { clamp01 } from "../math";
 import { SPECIES } from "../species";
 import type { Action, Species } from "../species/types";
 import type { GameState } from "../state";
@@ -94,7 +95,6 @@ function watchPark(s: GameState) {
   gen++;
   for (const a of s.park.animals) {
     const spec = SPECIES[a.sp];
-    if (!spec) continue;
     const k = Math.floor(a.walk / Math.PI);
     const prev = animals.get(a.id);
     if (!prev) { animals.set(a.id, { action: a.action, step: k, gen }); continue; }
@@ -221,7 +221,6 @@ function sampleBiomes(s: GameState, out: number[]) {
 }
 
 const target = [0, 0, 0, 0, 0];
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 function ambient(s: GameState, dt: number) {
   const outdoor = s.mode === "park" || s.mode === "meteor";

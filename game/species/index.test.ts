@@ -3,6 +3,8 @@ import { MATERIAL_SETS } from "../palette";
 import { emptyProgress } from "../progress";
 import { M } from "../render/materials";
 import { isSpeciesId, ofName, SPECIES, SPECIES_LIST } from ".";
+import { hasEggs } from "./eggs";
+import { liveBirth } from "./life";
 
 describe("ofName", () => {
   it("hides the name until the skeleton is assembled", () => {
@@ -39,6 +41,10 @@ describe("species data", () => {
       if (!spec.migration) continue;
       for (const b of [...spec.migration.summer, ...spec.migration.winter]) expect(spec.biomes, spec.id).toContain(b);
     }
+  });
+
+  it("has an egg design exactly for the species that lay eggs", () => {
+    for (const spec of SPECIES_LIST) expect(liveBirth(spec), spec.id).toBe(!hasEggs(spec.id));
   });
 
   it("hunts only existing species", () => {

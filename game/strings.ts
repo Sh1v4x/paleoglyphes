@@ -1,15 +1,15 @@
-/** Textes affichés au joueur, regroupés pour une relecture d'ensemble (puis une traduction). */
+// Kept accented: `boot` and `canvasLabel` are shown in the DOM, grid text goes through `ascii()` when drawn.
 export const STRINGS = {
   boot: {
     font: "Chargement de la police...",
-    map: "Generation de la carte : Alaska, Hell Creek, Gobi, marais, mer...",
-    life: "La vie s'installe : vegetation et plancton (Lenia)...",
-    reserve: "Retour dans la reserve...",
-    failed: "Le jeu n'a pas pu demarrer : ce navigateur ne propose pas WebGL2, ou il est desactive. Essaie un navigateur recent (Chrome, Firefox, Safari, Edge).",
+    map: "Génération de la carte : Alaska, Hell Creek, Gobi, marais, mer...",
+    life: "La vie s'installe : végétation et plancton (Lenia)...",
+    reserve: "Retour dans la réserve...",
+    failed: "Le jeu n'a pas pu démarrer : ce navigateur ne propose pas WebGL2, ou il est désactivé. Essaie un navigateur récent (Chrome, Firefox, Safari, Edge).",
     stalledTitle: "Oups, un bug !",
-    stalledBody: "Une partie du jeu ne repond plus. Recharge la page : ta progression est sauvegardee.",
+    stalledBody: "Une partie du jeu ne répond plus. Recharge la page : ta progression est sauvegardée.",
   },
-  canvasLabel: "Paleoglyphes, jeu educatif sur les dinosaures. Touche H : aide et liste des commandes. Tab : bouton suivant, Entree : activer, Echap : menu.",
+  canvasLabel: "Paléoglyphes, jeu éducatif sur les dinosaures. Touche H : aide et liste des commandes. Tab : bouton suivant, Entrée : activer, Échap : menu.",
   tabs: {
     park: { label: "Reserve", tip: "Reserve : observer les dinosaures vivants" },
     dig: { label: "Fouille", tip: "Fouille : degager des fossiles" },

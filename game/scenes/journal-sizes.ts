@@ -106,6 +106,7 @@ const REFS: Record<Exclude<RefId, "none">, Ref> = {
   whale: { label: "Baleine bleue", un: "une baleine bleue", plur: "baleines bleues", lengthM: 25, heightM: 3.7, massKg: 150000, note: "le plus gros animal de tous les temps", model: whale },
 };
 const REF_ORDER: RefId[] = ["cat", "elephant", "giraffe", "bus", "whale", "none"];
+const isRefId = (v: string): v is RefId => Object.hasOwn(REFS, v) || v === "none";
 
 function autoRef(sp: Species): RefId {
   return sp.lengthM < 2 ? "cat" : sp.lengthM < 8 ? "elephant" : sp.lengthM < 18 ? "bus" : "whale";
@@ -118,7 +119,10 @@ export function sizesUpdate(s: GameState, input: Input) {
       const sp = id.slice(14);
       if (isSpeciesId(sp)) { z.sp = sp; z.ref = undefined; }
     }
-    else if (id.startsWith("journal:sz:ref:")) z.ref = id.slice(15) as RefId;
+    else if (id.startsWith("journal:sz:ref:")) {
+      const ref = id.slice(15);
+      if (isRefId(ref)) z.ref = ref;
+    }
   }
   const list = knownList(s);
   for (const k of input.pressed) {

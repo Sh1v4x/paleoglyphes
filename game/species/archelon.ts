@@ -4,7 +4,8 @@ import { PX_PER_M } from "../config";
 import { AR } from "./archelon.mat";
 import { MR } from "./marine.mat";
 import { NM } from "./nest.mat";
-import { c, e, flipY, lerp, rot, win } from "./kit";
+import { lerp } from "../math";
+import { c, e, flipY, rot, win } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**

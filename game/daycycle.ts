@@ -35,6 +35,15 @@ export function advanceClock(c: Clock, dt: number): void {
   }
 }
 
+export function resetDay(c: Clock): void {
+  c.day = 1;
+  try {
+    localStorage.removeItem(STORAGE_KEYS.day);
+  } catch {
+    // Sans stockage, il n'y a rien à effacer.
+  }
+}
+
 export function loadDay(): number {
   try {
     return Math.max(1, Number(localStorage.getItem(STORAGE_KEYS.day)) || 1);

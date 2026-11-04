@@ -35,6 +35,14 @@ export function hex(h: string): RGB {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+// Same hues in both styles.
+const PLANKTON: RGB = [110, 250, 215];
+const LICHEN: RGB = [214, 140, 52];
+const LICHEN_GREY: RGB = [150, 168, 128];
+const NIGHT_TINT: RGB = [0.5, 0.6, 1.0];
+const GOLD_TINT: RGB = [1.0, 0.72, 0.5];
+const LANTERN_TINT: RGB = [1.0, 0.85, 0.6];
+
 export interface Palette {
   /** Fond hors du monde et base de tous les fonds de cellule. */
   void: RGB;
@@ -164,9 +172,9 @@ const DARK_PAL: Palette = {
   runeOff: hex("#2e2236"),
   text: hex("#6c6f7a"),
   critters: [hex("#9be88a")],
-  plankton: [110, 250, 215],
-  lichen: [214, 140, 52],
-  lichenGrey: [150, 168, 128],
+  plankton: PLANKTON,
+  lichen: LICHEN,
+  lichenGrey: LICHEN_GREY,
 };
 
 const bone = hex("#a59c86");
@@ -212,9 +220,9 @@ export const DARK: Theme = {
   glow: 1.05,
   glowRadius: 300,
   glowTint: [1.0, 0.94, 0.84],
-  nightTint: [0.5, 0.6, 1.0],
-  goldTint: [1.0, 0.72, 0.5],
-  lanternTint: [1.0, 0.85, 0.6],
+  nightTint: NIGHT_TINT,
+  goldTint: GOLD_TINT,
+  lanternTint: LANTERN_TINT,
   vignette: [0.55, 1.45],
   fog: "mist",
   water: "moon",
@@ -252,9 +260,9 @@ const CARTOON_PAL: Palette = {
   runeOff: hex("#6a7a99"),
   text: hex("#ffffff"),
   critters: [hex("#ff7eb6"), hex("#ffd34a"), hex("#8fd3ff"), hex("#c59bff"), hex("#ffffff")],
-  plankton: [110, 250, 215],
-  lichen: [214, 140, 52],
-  lichenGrey: [150, 168, 128],
+  plankton: PLANKTON,
+  lichen: LICHEN,
+  lichenGrey: LICHEN_GREY,
 };
 
 const cream = hex("#fff1d0");
@@ -301,9 +309,9 @@ export const CARTOON: Theme = {
   glow: 0.22,
   glowRadius: 320,
   glowTint: [1.0, 1.0, 1.0],
-  nightTint: [0.5, 0.6, 1.0],
-  goldTint: [1.0, 0.72, 0.5],
-  lanternTint: [1.0, 0.85, 0.6],
+  nightTint: NIGHT_TINT,
+  goldTint: GOLD_TINT,
+  lanternTint: LANTERN_TINT,
   vignette: [0.95, 2.1],
   fog: "clouds",
   water: "glints",

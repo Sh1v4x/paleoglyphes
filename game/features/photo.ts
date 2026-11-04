@@ -173,9 +173,9 @@ function takePhoto(s: GameState, world: Frame, r: Rect) {
     title: sc.title, stars: sc.stars, species: sc.species, notes: sc.notes, biome, act: subjects[sc.main]?.act,
     ...captureCells(world, r.x, r.y, r.w, r.h),
   };
+  const left = MAX_PHOTOS - album.photos.length - 1;
   void addPhoto(photo).then((outcome) => {
-    const left = MAX_PHOTOS - album.photos.length;
-    toast(s, "Photo enregistrée ! (onglet Photos)", `${sc.title}  [${starsText(sc.stars)}]${left <= 5 ? `  -  plus que ${left} place${left > 1 ? "s" : ""} dans l'album` : ""}${outcome === "saved" ? "" : "  (stockage indisponible : photo perdue au rechargement)"}`);
+    toast(s, "Photo enregistrée ! (onglet Photos)", `${sc.title}  [${starsText(sc.stars)}]${left <= 5 ? `  -  plus que ${left} place${left > 1 ? "s" : ""} dans l'album` : ""}${outcome === "memory" ? "  (stockage indisponible : photo perdue au rechargement)" : ""}`);
   });
   // Le carnet : chaque animal bien cadré (au moins la moitié de sa silhouette) compte comme une observation.
   for (const sub of subjects) {

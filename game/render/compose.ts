@@ -536,14 +536,14 @@ export interface MapView {
   marks: MapMark[];
 }
 
+/** Couleur de travail de la vue carte (plancton) : réutilisée pour ne rien allouer par cellule. */
+const mapTint: [number, number, number] = [0, 0, 0];
+
 /**
  * Vue carte : un glyphe par bloc, d'après la cellule centrale (sol, décor, eau), avec la végétation
  * vivante et le plancton (Lenia) qui bougent, et les animaux en lettres. Pas de rastérisation : on voit
  * toute la carte d'un coup sans ralentir.
  */
-/** Couleur de travail de la vue carte (plancton) : réutilisée pour ne rien allouer par cellule. */
-const mapTint: [number, number, number] = [0, 0, 0];
-
 export function composeMap(th: Theme, f: Frame, v: MapView): void {
   const P = th.pal, w = v.world, { cols, rows } = f, k = v.k, half = k >> 1;
   const L = 0.35 + 0.65 * v.light;

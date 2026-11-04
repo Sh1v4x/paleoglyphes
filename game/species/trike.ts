@@ -21,7 +21,7 @@ const LEGS: PillarLegSpec = {
 
 export function trikeModel(pose: Pose): Prim[] {
   const { walk, moving, time, action, actionT: at } = pose;
-  const L = quadLook(pose, { breath: 1.3, runHead: 0.1, swayFreq: 1.1, swayAmp: 7 });
+  const L = quadLook(pose, { breathPeriod: 1.3, runHead: 0.1, swayFreq: 1.1, swayAmp: 7 });
   const chew = Math.sin(at * Math.PI * 8);
   if (action === "eat") { L.headA = 0.5 + chew * 0.04; L.headDy = 8; L.mouth = Math.max(0, chew) * 0.6; }
   else if (action === "drink") { L.headA = 0.62; L.headDy = 12; L.drop = 5; L.spread = 10; }

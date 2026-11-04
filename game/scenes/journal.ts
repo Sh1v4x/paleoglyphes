@@ -37,6 +37,7 @@ const SUBTABS: { id: JournalTab; label: string; short: string; icon: string; tip
   { id: "sizes", label: "Tailles", short: "Tailles", icon: "Tail", tip: "Comparer leur taille a la notre" },
   { id: "travel", label: "Voyage", short: "Voyage", icon: "Voy", tip: "Carnet de voyage : les biomes et leurs vrais sites" },
 ];
+const isJournalTab = (v: string): v is JournalTab => SUBTABS.some((t) => t.id === v);
 /** Fenêtre étroite (téléphone) : le bouton Extras rejoint les sous-onglets, la fiche passe sous le studio. */
 const narrow = (ui: Frame) => ui.cols < 70;
 
@@ -92,8 +93,7 @@ export const UNLOCK_HINT: Record<FactUnlock, string> = {
 // ---------------------------------------------------------------------------
 let seen: Set<string> | null = null;
 
-/** Clés « déjà lu » relues du stockage : tout ce qui n'est pas une chaîne est ignoré. */
-export function parseSeenKeys(raw: string): string[] {
+function parseSeenKeys(raw: string): string[] {
   const v: unknown = JSON.parse(raw);
   return Array.isArray(v) ? v.filter((k) => typeof k === "string") : [];
 }
@@ -126,7 +126,7 @@ export function resetSeen() {
 
 function newCount(s: GameState, sp: Species): number {
   const set = seenSet();
-  return sp.facts.filter((f) => hasFact(s.progress,sp.id, f.id) && !set.has(factKey(sp.id, f.id))).length;
+  return sp.facts.filter((f) => hasFact(s.progress, sp.id, f.id) && !set.has(factKey(sp.id, f.id))).length;
 }
 
 /** Ouvre une page : ce qui n'a jamais été lu devient « Nouveau ! » pour cette visite, puis « lu ». */
@@ -137,7 +137,7 @@ function openPage(s: GameState) {
   const set = seenSet();
   let keys: string[] = [];
   const spec = j.species ? SPECIES[j.species] : undefined;
-  if (spec) keys = spec.facts.filter((f) => hasFact(s.progress,spec.id, f.id)).map((f) => factKey(spec.id, f.id));
+  if (spec) keys = spec.facts.filter((f) => hasFact(s.progress, spec.id, f.id)).map((f) => factKey(spec.id, f.id));
   else if (j.extras) keys = s.progress.extras.map((e) => `x:${e}`);
   j.fresh = keys.filter((k) => !set.has(k));
   markSeen(keys);
@@ -185,7 +185,7 @@ function summary(s: GameState, th: Theme, world: Frame, ui: Frame) {
   const u = th.ui, j = s.journal;
   const p = s.progress;
   const total = SPECIES_LIST.reduce((n, sp) => n + sp.facts.length, 0);
-  const got = SPECIES_LIST.reduce((n, sp) => n + sp.facts.filter((f) => hasFact(s.progress,sp.id, f.id)).length, 0);
+  const got = SPECIES_LIST.reduce((n, sp) => n + sp.facts.filter((f) => hasFact(s.progress, sp.id, f.id)).length, 0);
   const xl = `Extras (${p.extras.length})`;
   const bx = ui.cols - buttonW(xl) - SP.pad;
   if (!narrow(ui)) button(ui, th, "journal:extras", bx, UI_TOP - 1, xl, { tip: "Fossiles bonus et petite faune" });
@@ -220,7 +220,7 @@ function summary(s: GameState, th: Theme, world: Frame, ui: Frame) {
       wrap("Espèce inconnue : trouve un de ses os en fouille.", cw - 4).slice(0, 2).forEach((l, i) => text(ui, x + 2, ty + 1 + i, l, u.dim, u.panel, u.alpha));
       return;
     }
-    const facts = sp.facts.filter((f) => hasFact(s.progress,sp.id, f.id)).length;
+    const facts = sp.facts.filter((f) => hasFact(s.progress, sp.id, f.id)).length;
     const nw = newCount(s, sp);
     const name = clip(sp.name, cw - 4 - (nw ? 16 : 0));
     const nl = text(ui, x + 2, ty, name, hot ? u.hi : u.text, u.panel, u.alpha);
@@ -329,11 +329,11 @@ function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Spe
   const bones = p.bones[spec.id]?.length ?? 0;
   add(`Atelier : ${p.assembled.includes(spec.id) ? "squelette assemblé" : `${bones}/${spec.bones.length} os trouvés`}`, u.text);
   lines.push({ t: "", c: u.text });
-  const got = spec.facts.filter((f) => hasFact(s.progress,spec.id, f.id)).length;
+  const got = spec.facts.filter((f) => hasFact(s.progress, spec.id, f.id)).length;
   add(`Faits (${got}/${spec.facts.length})`, u.hi);
   lines.push({ t: "-".repeat(Math.min(tw, 30)), c: u.border });
   for (const f of spec.facts) {
-    if (hasFact(s.progress,spec.id, f.id)) {
+    if (hasFact(s.progress, spec.id, f.id)) {
       add(`[*] ${f.title}`, u.text, j.fresh.includes(factKey(spec.id, f.id)) ? " Nouveau ! " : undefined);
       wrap(f.text, tw - 4).forEach((l) => lines.push({ t: `    ${l}`, c: u.dim === u.text ? u.text : mixRgb(u.text, u.dim, 0.35) }));
     } else {
@@ -446,7 +446,10 @@ export const journalScene: Scene = {
     // Une fiche ouverte depuis ailleurs (la réserve) ramène à l'onglet « Espèces ».
     if (page !== j.opened) { openPage(s); if (j.species) j.tab = "species"; }
     for (const id of input.ui) {
-      if (id.startsWith("journal:tab:")) { j.tab = id.slice(12) as JournalTab; j.scroll = 0; }
+      if (id.startsWith("journal:tab:")) {
+        const tab = id.slice(12);
+        if (isJournalTab(tab)) { j.tab = tab; j.scroll = 0; }
+      }
       // Une vignette de la frise (ou d'ailleurs) ouvre la fiche de l'espèce.
       else if (id.startsWith("journal:sp:")) {
         const sp = id.slice(11);

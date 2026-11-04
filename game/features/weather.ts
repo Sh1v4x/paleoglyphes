@@ -1,7 +1,7 @@
 import { createNoise2D } from "simplex-noise";
 import { CELL_H, CELL_W, DEV } from "../config";
 import { DAY_SECONDS, daylight, isNight, golden, periodName } from "../daycycle";
-import { clamp01, mixRgb, smoothstep } from "../math";
+import { clamp01, lerp, mixRgb, smoothstep } from "../math";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
@@ -560,7 +560,6 @@ export function forceWeather(s: GameState, name: (typeof FORCE)[number]) {
 // Thème
 // ---------------------------------------------------------------------------
 
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /** Teinte le thème éclairé selon la météo (ciel couvert, orage...). */
 export function weatherTheme(s: GameState, th: Theme): Theme {

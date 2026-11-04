@@ -2,8 +2,6 @@ import { CELL_H, CELL_W } from "../config";
 import { M } from "../render/materials";
 import type { Prim } from "../render/raster";
 import { mulberry32 } from "../rng";
-import { SPECIES } from "./index";
-import { liveBirth } from "./life";
 import { NM } from "./nest.mat";
 import type { SpeciesId } from "./types";
 
@@ -41,6 +39,9 @@ interface EggSpec {
 
 type OviparousId = Exclude<SpeciesId, "mosa" | "xiphactinus" | "elasmosaurus">;
 
+// Species without their own nest design yet share this one.
+const GENERIC: EggSpec = { nest: "scrape", W: 70, H: 4, shell: NM.ShellCream, w: 12, h: 15, paired: false, speck: 1, veg: 0.6, big: 16 };
+
 const SPEC: Record<OviparousId, EggSpec> = {
   ankylo: { nest: "scrape", W: 70, H: 4, shell: NM.ShellCream, w: 13, h: 15, paired: false, speck: 0, veg: 0.8, big: 17 },
   trike: { nest: "mound", W: 80, H: 9, shell: NM.ShellCream, w: 13, h: 16, paired: false, speck: 0, veg: 1, big: 18 },
@@ -56,31 +57,25 @@ const SPEC: Record<OviparousId, EggSpec> = {
   protoceratops: { nest: "sand", W: 58, H: 4, shell: NM.ShellLeather, w: 9, h: 12, paired: false, speck: 0, veg: 0, big: 13 },
   // Œufs bleu-vert allongés, en couronne, couvés par l'adulte (les oviraptoridés pondaient des œufs colorés).
   citipati: { nest: "scrape", W: 64, H: 4, shell: NM.ShellBlue, w: 8, h: 18, paired: true, speck: 0, veg: 0, big: 19 },
-  // Œufs ronds de titanosaure, enfouis dans des fosses creusées (sites d'Auca Mahuevo).
-  alamosaurus: { nest: "sand", W: 84, H: 5, shell: NM.ShellCream, w: 15, h: 15, paired: false, speck: 0, veg: 0, big: 18 },
-  allosaurus: { nest: "scrape", W: 86, H: 5, shell: NM.ShellBrown, w: 11, h: 22, paired: true, speck: 2, veg: 0.3, big: 23 },
-  // Troodontidés : œufs allongés, à demi enterrés debout, par paires.
-  pectinodon: { nest: "scrape", W: 58, H: 3, shell: NM.ShellBlue, w: 7, h: 16, paired: true, speck: 1, veg: 0, big: 17 },
-  troodon: { nest: "scrape", W: 62, H: 3, shell: NM.ShellBlue, w: 8, h: 17, paired: true, speck: 1, veg: 0, big: 18 },
-  // Ptérosaures : œufs à coquille souple enterrés dans le sable (œufs de Hamipterus).
-  pteranodon: { nest: "sand", W: 52, H: 4, shell: NM.ShellLeather, w: 10, h: 12, paired: false, speck: 0, veg: 0, big: 13 },
-  nyctosaurus: { nest: "sand", W: 46, H: 3, shell: NM.ShellLeather, w: 8, h: 10, paired: false, speck: 0, veg: 0, big: 11 },
-  // Tortue marine : œufs ronds et souples pondus dans une fosse de plage.
-  archelon: { nest: "sand", W: 72, H: 5, shell: NM.ShellLeather, w: 11, h: 11, paired: false, speck: 0, veg: 0, big: 13 },
-  ornithomimus: { nest: "scrape", W: 66, H: 4, shell: NM.ShellTan, w: 8, h: 17, paired: true, speck: 1, veg: 0.2, big: 18 },
-  // Crocodylien : butte de végétaux qui couve les œufs par la chaleur de la décomposition.
-  deinosuchus: { nest: "mound", W: 84, H: 10, shell: NM.ShellCream, w: 11, h: 15, paired: false, speck: 0, veg: 1.3, big: 16 },
-  shuvuuia: { nest: "scrape", W: 42, H: 2, shell: NM.ShellCream, w: 6, h: 10, paired: false, speck: 1, veg: 0, big: 11 },
-  pinacosaurus: { nest: "scrape", W: 66, H: 4, shell: NM.ShellCream, w: 12, h: 14, paired: false, speck: 0, veg: 0.3, big: 16 },
-  // Nids en colonie à découvert, œufs presque sphériques (site de Javkhlant).
-  therizino: { nest: "scrape", W: 76, H: 4, shell: NM.ShellTan, w: 13, h: 14, paired: false, speck: 1, veg: 0.5, big: 17 },
+  alamosaurus: GENERIC,
+  allosaurus: GENERIC,
+  pectinodon: GENERIC,
+  troodon: GENERIC,
+  pteranodon: GENERIC,
+  nyctosaurus: GENERIC,
+  archelon: GENERIC,
+  ornithomimus: GENERIC,
+  deinosuchus: GENERIC,
+  shuvuuia: GENERIC,
+  pinacosaurus: GENERIC,
+  therizino: GENERIC,
 };
 
-const hasEggs = (sp: SpeciesId): sp is OviparousId => Object.hasOwn(SPEC, sp);
+export const hasEggs = (sp: SpeciesId): sp is OviparousId => Object.hasOwn(SPEC, sp);
 
 /** Réglages d'œuf d'une espèce, ou null si elle met bas. */
 function eggSpec(sp: SpeciesId): EggSpec | null {
-  return hasEggs(sp) && !liveBirth(SPECIES[sp]) ? SPEC[sp] : null;
+  return hasEggs(sp) ? SPEC[sp] : null;
 }
 
 /** Hauteur d'un œuf (px, taille réelle dans la réserve) ; 0 = pas d'œuf (espèce vivipare). */

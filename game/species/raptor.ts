@@ -2,7 +2,8 @@ import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { CM } from "./carnivores.mat";
-import { c, e, lerp, REST_RIG, rot, theroLegs, win, type TheroLegSpec, type TheroRig } from "./kit";
+import { lerp } from "../math";
+import { c, e, REST_RIG, rot, theroLegs, win, type TheroLegSpec, type TheroRig } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**

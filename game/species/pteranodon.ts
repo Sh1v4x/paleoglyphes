@@ -3,7 +3,8 @@ import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { MR } from "./marine.mat";
 import { PT } from "./pteranodon.mat";
-import { along, c, e, joint, lerp, rot, rp, sheet, win, type Pt } from "./kit";
+import { lerp } from "../math";
+import { along, c, e, joint, rot, rp, sheet, win, type Pt } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**

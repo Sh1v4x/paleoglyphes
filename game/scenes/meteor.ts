@@ -1,4 +1,5 @@
 import { CELL_H, CELL_W, WORLD_H, WORLD_W } from "../config";
+import { resetDay } from "../daycycle";
 import { addAt } from "../features/lenia";
 import { createPhotoState } from "../features/photo";
 import { clearAlbum } from "../features/photo-store";
@@ -12,7 +13,6 @@ import { hash2 } from "../rng";
 import { clearSave } from "../save";
 import { calm } from "../settings";
 import { worldFor, type GameState } from "../state";
-import { STORAGE_KEYS } from "../storage-keys";
 import { resetUi, text, wrap } from "../ui/kit";
 import { toast } from "../ui/toast";
 import { knockTree, regrowAll } from "../world/trees";
@@ -54,13 +54,10 @@ function resetAll(s: GameState) {
   saveProgress(s.progress);
   clearSave();
   resetSeen();
-  clearAlbum();
-  s.day = 1;
-  try {
-    localStorage.removeItem(STORAGE_KEYS.day);
-  } catch {
-    // Stockage indisponible : rien à effacer.
-  }
+  void clearAlbum().then((cleared) => {
+    if (!cleared) toast(s, "Album photo non effacé", "Le navigateur a refusé : tes anciennes photos peuvent revenir au rechargement.");
+  });
+  resetDay(s);
   // Fouille, atelier, carnet, musée et album repartent de zéro : nouveau site, établi vide.
   s.dig = createDigState();
   s.lab = createLabState();

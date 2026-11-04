@@ -25,6 +25,7 @@ export function toast(s: GameState, title: string, body = "") {
 
 /** Retire les notifications expirées (logique, pas au dessin). */
 export function updateToasts(s: GameState) {
+  // Toasts are appended in t0 order with a constant LIFE, so the oldest is always first.
   while (s.toasts.length && s.time - s.toasts[0].t0 >= LIFE) s.toasts.shift();
 }
 

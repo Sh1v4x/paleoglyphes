@@ -112,6 +112,8 @@ export function bindInput(canvas: HTMLCanvasElement): { read: () => Input; dispo
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
   const onDown = (e: KeyboardEvent) => {
+    // macOS sends no keyup for keys released while Cmd is held: drop held keys so movement can't stick.
+    if (e.key === "Meta") down.clear();
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const letter = letterCode(e);
     const code = PRESS.has(e.code) ? e.code : LETTERS.has(letter) ? letter : null;

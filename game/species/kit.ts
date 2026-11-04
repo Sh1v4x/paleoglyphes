@@ -1,4 +1,4 @@
-import { smooth01, smoothstep } from "../math";
+import { lerp, smooth01, smoothstep } from "../math";
 import type { Prim } from "../render/raster";
 import type { Pose } from "./types";
 
@@ -14,7 +14,6 @@ export const e = (x: number, y: number, rx: number, ry: number, m: number, z: nu
 export const c = (ax: number, ay: number, bx: number, by: number, ra: number, rb: number, m: number, z: number, h: number, stroke = false): Prim =>
   ({ k: "c", ax, ay, bx, by, ra, rb, m, z, h, stroke });
 
-export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 /** Fenêtre lissée : 0 avant a, 1 après b. */
 export const win = (t: number, a: number, b: number) => smoothstep(a, b, t);
 
@@ -39,8 +38,7 @@ export function rp(x: number, y: number, px: number, py: number, a: number, dx =
  * Les ellipses ne tournent pas, seul leur centre bouge.
  */
 export function rot(ps: Prim[], px: number, py: number, a: number, dx = 0, dy = 0): Prim[] {
-  const co = Math.cos(a), si = Math.sin(a);
-  const R = (x: number, y: number): Pt => [px + (x - px) * co - (y - py) * si + dx, py + (x - px) * si + (y - py) * co + dy];
+  const R = (x: number, y: number): Pt => rp(x, y, px, py, a, dx, dy);
   return ps.map((p) => {
     if (p.k === "c") {
       const [ax, ay] = R(p.ax, p.ay), [bx, by] = R(p.bx, p.by);
@@ -76,19 +74,15 @@ export function flipY(ps: Prim[], cy: number, dy = 0): Prim[] {
 
 /** Cinématique inverse à deux segments, genou vers l'avant (+x) : position du genou. */
 export function knee(hx: number, hy: number, ax: number, ay: number, l1: number, l2: number): Pt {
-  const dx = ax - hx, dy = ay - hy;
-  const d = Math.min(l1 + l2 - 0.01, Math.max(Math.abs(l1 - l2) + 0.01, Math.hypot(dx, dy)));
-  const a = Math.atan2(dy, dx);
-  const b = Math.acos(Math.min(1, Math.max(-1, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d))));
-  return [hx + l1 * Math.cos(a - b), hy + l1 * Math.sin(a - b)];
+  return joint(hx, hy, ax, ay, l1, l2, false);
 }
 
 /** Articulation d'un membre à deux segments ; `back` plie vers l'arrière (coude), sinon vers l'avant (genou). */
 export function joint(hx: number, hy: number, ax: number, ay: number, l1: number, l2: number, back: boolean): Pt {
-  if (!back) return knee(hx, hy, ax, ay, l1, l2);
   const dx = ax - hx, dy = ay - hy;
   const d = Math.min(l1 + l2 - 0.01, Math.max(Math.abs(l1 - l2) + 0.01, Math.hypot(dx, dy)));
-  const a = Math.atan2(dy, dx) + Math.acos(Math.min(1, Math.max(-1, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d))));
+  const b = Math.acos(Math.min(1, Math.max(-1, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d))));
+  const a = Math.atan2(dy, dx) + (back ? b : -b);
   return [hx + l1 * Math.cos(a), hy + l1 * Math.sin(a)];
 }
 
@@ -120,8 +114,6 @@ export function sheet(L: Pt[], T: Pt[], n: number, m: number, z: number): Prim[]
   }
   return P;
 }
-
-// --- Théropodes ---
 
 /** Réglages de pose d'un théropode, déduits de l'action. */
 export interface TheroRig {
@@ -226,8 +218,6 @@ export function theroLegs(pose: Pose, r: TheroRig, bx: number, by: number, S: Th
   });
 }
 
-// --- Quadrupèdes à pattes en piliers (cératopsiens) ---
-
 export interface QuadLook {
   bob: number;
   drop: number;
@@ -244,11 +234,11 @@ export interface QuadLook {
 }
 
 /** Allure de base : balancement de marche, respiration (plus lente au repos), ondulation de la queue. */
-export function quadLook({ walk, moving, time, action }: Pose, o: { breath: number; runHead: number; swayFreq: number; swayAmp: number }): QuadLook {
+export function quadLook({ walk, moving, time, action }: Pose, o: { breathPeriod: number; runHead: number; swayFreq: number; swayAmp: number }): QuadLook {
   const run = action === "run";
   const amp = run ? 1.5 : 1;
   const rest = action === "rest";
-  const breath = Math.sin((time * Math.PI * 2) / (rest ? 3.4 : o.breath)) * (1 - moving) * (rest ? 1.8 : 1);
+  const breath = Math.sin((time * Math.PI * 2) / (rest ? 3.4 : o.breathPeriod)) * (1 - moving) * (rest ? 1.8 : 1);
   return {
     bob: -Math.abs(Math.sin(walk)) * 3 * moving * amp * amp + breath * 1.3, drop: 0, dx: 0,
     legs: "walk", amp, spread: 0, headA: run ? o.runHead : 0, headDy: 0, mouth: 0,

@@ -622,7 +622,7 @@ function lamp(f: Frame, L: Look, x: number, y: number) {
 function drawCase(f: Frame, th: Theme, L: Look, e: Exhibit, ink: RGB) {
   const gh = e.k ?? 12;
   const x0 = e.x0, x1 = e.x1, y0 = e.y0, gb = e.y0 + gh;
-  const wall = scaleRgb(L.walls[ROOMS.fossils], 1);
+  const wall = L.walls[ROOMS.fossils];
   // Meuble : tiroirs et pieds.
   for (let y = gb; y <= e.y1; y++)
     for (let x = x0 + 1; x <= x1 - 1; x++) {

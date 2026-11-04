@@ -95,7 +95,10 @@ export const photosScene: Scene = {
         if (id === "photos:del:no") ps.confirm = false;
         if (id === "photos:del:yes" && p) {
           ps.confirm = false;
-          if (!removePhoto(p.id)) continue;
+          if (!removePhoto(p.id)) {
+            toast(s, "Album pas encore prêt", "Réessaie dans un instant.");
+            continue;
+          }
           toast(s, "Photo supprimée", p.title);
           if (!album.photos.length) ps.view = -1;
           else ps.view = Math.min(ps.view, album.photos.length - 1);

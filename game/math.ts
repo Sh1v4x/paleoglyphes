@@ -1,5 +1,7 @@
 import type { RGB } from "./palette";
 
+export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
 export const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 /** Hermite ease of `t` clamped to [0, 1]. */

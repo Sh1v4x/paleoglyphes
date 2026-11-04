@@ -2,7 +2,8 @@ import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { EL } from "./elasmosaurus.mat";
-import { c, e, flipY, lerp, rot, win } from "./kit";
+import { lerp } from "../math";
+import { c, e, flipY, rot, win } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**

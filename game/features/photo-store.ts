@@ -139,17 +139,21 @@ function openDb(): Promise<IDBDatabase | null> {
   return dbp;
 }
 
+/** Bumped by clearAlbum so that a read started before the reset doesn't bring the old photos back. */
+let loadGeneration = 0;
+
 /** Charge l'album (une seule fois). */
 export function loadAlbum(): void {
   if (album.loaded || album.loading) return;
   album.loading = true;
+  const generation = loadGeneration;
   void openDb().then((db) => {
     if (!db) { album.persistent = false; album.loaded = true; album.loading = false; return; }
     try {
       const req = db.transaction(STORE, "readonly").objectStore(STORE).getAll();
       req.onsuccess = () => {
         // Prise de vue et suppression attendent la fin du chargement : rien à fusionner.
-        album.photos = req.result.filter(validPhoto).sort((a, b) => b.real - a.real);
+        if (generation === loadGeneration) album.photos = req.result.filter(validPhoto).sort((a, b) => b.real - a.real);
         album.loaded = true; album.loading = false;
       };
       req.onerror = () => { album.persistent = false; album.loaded = true; album.loading = false; };
@@ -177,12 +181,10 @@ async function write(fn: (st: IDBObjectStore) => void): Promise<boolean> {
   return ok;
 }
 
-export type AddOutcome = "loading" | "full" | "saved" | "memory";
+export type AddOutcome = "saved" | "memory";
 
-/** Ajoute une photo : en mémoire tout de suite, puis « saved » une fois écrite dans la base, sinon « memory ». */
+/** The caller checks beforehand that the album is loaded and not full. */
 export async function addPhoto(p: Photo): Promise<AddOutcome> {
-  if (!album.loaded) return "loading";
-  if (album.photos.length >= MAX_PHOTOS) return "full";
   album.photos.unshift(p);
   return (await write((st) => st.put(p))) ? "saved" : "memory";
 }
@@ -195,7 +197,8 @@ export function removePhoto(id: string): boolean {
 }
 
 /** « Tout recommencer » : l'album est vidé, en mémoire et dans la base. */
-export function clearAlbum(): void {
+export function clearAlbum(): Promise<boolean> {
+  loadGeneration++;
   album.photos = [];
-  void write((st) => st.clear());
+  return write((st) => st.clear());
 }

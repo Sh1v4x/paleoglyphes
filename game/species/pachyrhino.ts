@@ -23,7 +23,7 @@ const LEGS: PillarLegSpec = {
 
 export function pachyrhinoModel(pose: Pose): Prim[] {
   const { walk, moving, time, action, actionT: at } = pose;
-  const L = quadLook(pose, { breath: 1.2, runHead: 0.12, swayFreq: 1.2, swayAmp: 6 });
+  const L = quadLook(pose, { breathPeriod: 1.2, runHead: 0.12, swayFreq: 1.2, swayAmp: 6 });
   const chew = Math.sin(at * Math.PI * 8);
   if (action === "eat") { L.headA = 0.52 + chew * 0.04; L.headDy = 8; L.mouth = Math.max(0, chew) * 0.6; }
   else if (action === "drink") { L.headA = 0.64; L.headDy = 12; L.drop = 5; L.spread = 10; }

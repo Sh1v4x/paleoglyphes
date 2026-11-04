@@ -2,7 +2,7 @@ import type { GameState } from "./game/state";
 
 declare global {
   interface Window {
-    /** Accès console pour le débogage (dev uniquement). */
+    /** Only set in dev builds. */
     __game?: GameState;
   }
 }

@@ -181,7 +181,7 @@ function pools(s: GameState): Pools {
   return { K, F };
 }
 
-const quizReady =(s: GameState) => pools(s).F.length >= MIN_FACTS;
+const quizReady = (s: GameState) => pools(s).F.length >= MIN_FACTS;
 
 function nextQuestion(s: GameState) {
   const qz = s.journal.quiz;

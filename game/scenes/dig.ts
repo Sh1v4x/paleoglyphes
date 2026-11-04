@@ -118,8 +118,8 @@ function ensureSite(s: GameState): Site | null {
     }
     d.site = site;
     d.dust = []; d.focus = -1; d.backdrop = null;
-    // Falaise toujours sans os malgré les nouveaux tirages : terminée d'emblée, le joueur n'est pas bloqué.
-    checkComplete(s, site);
+    // No bone at all: the player can move on, but an untouched cliff doesn't count as a dig.
+    if (!site.fossils.some((f) => f.kind === "bone")) site.complete = true;
   }
   return d.site;
 }

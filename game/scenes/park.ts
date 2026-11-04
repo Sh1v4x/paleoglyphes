@@ -22,6 +22,7 @@ import { deName } from "./dig-fossils";
 import { activeTrees, treeRaster, updateTrees } from "../world/trees";
 import { drawDocuLog, drawDocumentary, missedCount, stopDocumentary, updateDocumentary } from "../features/documentary";
 import { drawPhoto, updatePhoto } from "../features/photo";
+import { censusClick, sampleCensus, type CensusState } from "../features/census";
 import { drawThunder, drawWeather, drawWeatherRows, updateWeather, weatherClick, weatherTheme } from "../features/weather";
 import { recordVisit } from "./journal-travel";
 import { INCUBATION, juvenilePrims, lifespan, STAGE_AT } from "../species/life";
@@ -174,6 +175,8 @@ export interface ParkState {
   /** Mini-carte masquée (touche M). */
   hideMap?: boolean;
   rosterScroll?: number;
+  /** Historique des effectifs et onglet « Graphique » du recensement (voir features/census.ts). */
+  census?: CensusState;
   /** Animal pour lequel on demande confirmation avant de le retirer. */
   confirmRetire?: number;
   /** Niveau de zoom (indice dans ZOOMS ; défaut ZOOM_DEFAULT) et pincement cumulé. */
@@ -637,6 +640,7 @@ export const parkScene: Scene = {
       stepEcosystem(s, sdt);
       updateTrees(w, sdt, p.regrow ?? 1);
     }
+    sampleCensus(s);
 
     const sel = p.animals.find((a) => a.id === p.selected);
     if (!sel) p.selected = undefined;
@@ -711,7 +715,7 @@ export const parkScene: Scene = {
       if (id === "park:zoomout") setZoom(s, (p.zoom ?? ZOOM_DEFAULT) + 1);
       if (id === "park:gotodig") s.mode = "dig";
       if (id === "park:close") { p.selected = undefined; p.bug = undefined; p.nestSel = undefined; p.follow = false; p.confirmRetire = undefined; }
-      if (weatherClick(s, id)) continue;
+      if (weatherClick(s, id) || censusClick(s, id)) continue;
       if (id === "park:roster") p.roster = !p.roster;
       if (id === "park:couple") {
         // Test : un couple prêt à nicher, au centre de l'écran, de l'espèce sélectionnée si possible.

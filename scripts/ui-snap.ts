@@ -82,6 +82,7 @@ const firstAnimal = () => s.park.animals.find((a) => a.task !== "dead")!;
 const SCREENS: { name: string; setup: () => void; post?: () => void }[] = [
   { name: "park", setup: () => setMode(s, "park") },
   { name: "park-sel", setup: () => { setMode(s, "park"); s.park.selected = firstAnimal().id; s.park.roster = true; toast(s, "Nouvelle entree au carnet !", "Le Tricératops mange : un fait de plus."); } },
+  { name: "park-census", setup: () => { setMode(s, "park"); s.park.selected = firstAnimal().id; s.park.roster = true; s.park.census = { t: [], n: {}, tab: "chart", view: "species" }; step(s, 1); } },
   { name: "park-log", setup: () => { setMode(s, "park"); s.docu.listOpen = true; } },
   { name: "park-docu", setup: () => { setMode(s, "park"); s.docu.on = true; s.docu.since = s.time - 10; } },
   { name: "park-photo", setup: () => { setMode(s, "park"); s.photo.aiming = true; } },

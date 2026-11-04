@@ -286,6 +286,11 @@ function reach(s: GameState, a: Animal, spec: Species, speed: number, dt: number
 // ---------------------------------------------------------------------------
 
 /** Plantes et points d'eau du monde (generate.ts), ou repli calculé ici s'ils manquent. */
+/** Prépare l'écosystème (végétation, plancton, points d'eau) d'avance : écran de chargement. */
+export function prepareEcosystem(s: GameState): void {
+  ensureEco(s);
+}
+
 function ensureEco(s: GameState): EcoState {
   const w = worldFor(s);
   const p = s.park;

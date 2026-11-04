@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DEV, FONT_SIZE } from "@/game/config";
 import { bindInput } from "@/game/input";
 import { startLoop } from "@/game/loop";
@@ -8,10 +8,16 @@ import { Renderer } from "@/game/render/draw";
 import { view } from "@/game/render/metrics";
 import { worldZoom } from "@/game/scenes/park";
 import { composeGame, updateGame } from "@/game/scenes";
-import { createState } from "@/game/state";
+import { prepareEcosystem } from "@/game/scenes/ecosystem";
+import { createState, worldFor } from "@/game/state";
+import Loading from "./Loading";
+
+/** Laisse le navigateur afficher l'étape annoncée avant un calcul qui l'occupe. */
+const paint = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
 export default function Game({ fontFamily }: { fontFamily: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const [step, setStep] = useState<string | null>("Chargement de la police...");
 
   useEffect(() => {
     let stop = () => {};
@@ -24,6 +30,16 @@ export default function Game({ fontFamily }: { fontFamily: string }) {
       const input = bindInput(canvas);
       const renderer = new Renderer(canvas, fontFamily);
       const state = createState();
+      // La carte (~2 s) puis la végétation et le plancton : chaque étape est annoncée avant de bloquer.
+      setStep("Generation de la carte : Alaska, Hell Creek, Gobi, marais, mer...");
+      await paint();
+      if (disposed) return;
+      worldFor(state);
+      setStep("La vie s'installe : vegetation et plancton (Lenia)...");
+      await paint();
+      if (disposed) return;
+      prepareEcosystem(state);
+      setStep(null);
       // Accès console pour le débogage (dev uniquement).
       if (DEV) (window as unknown as { __game: unknown }).__game = state;
       const resize = () => renderer.resize(window.innerWidth, window.innerHeight);
@@ -40,11 +56,14 @@ export default function Game({ fontFamily }: { fontFamily: string }) {
 
   // Le jeu se pilote entièrement au clavier (Tab, Entrée, Échap, H pour l'aide) ou à la souris.
   return (
-    <canvas
-      ref={ref}
-      role="application"
-      aria-label="Paleoglyphes, jeu educatif sur les dinosaures. Touche H : aide et liste des commandes. Tab : bouton suivant, Entree : activer, Echap : menu."
-      style={{ display: "block", touchAction: "none" }}
-    />
+    <>
+      {step && <Loading step={step} />}
+      <canvas
+        ref={ref}
+        role="application"
+        aria-label="Paleoglyphes, jeu educatif sur les dinosaures. Touche H : aide et liste des commandes. Tab : bouton suivant, Entree : activer, Echap : menu."
+        style={{ display: "block", touchAction: "none" }}
+      />
+    </>
   );
 }

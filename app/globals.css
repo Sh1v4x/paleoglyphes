@@ -13,3 +13,32 @@ main {
   height: 100vh;
   overflow: hidden;
 }
+
+/* Écran de chargement (components/Loading.tsx), aux couleurs du jeu. */
+.loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1rem;
+  background: #0b0a0f;
+  color: #9fb2c6;
+  font-size: 14px;
+  text-align: center;
+}
+.loading pre {
+  margin: 0;
+  color: #d6a77a;
+  line-height: 1.15;
+}
+.loading p {
+  margin: 0;
+}
+.loading-title {
+  color: #e9e2d0;
+  letter-spacing: 0.3em;
+  font-weight: 500;
+}

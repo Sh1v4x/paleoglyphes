@@ -1,4 +1,5 @@
 import { pointer } from "../input";
+import { clamp01 } from "../math";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { metrics, uiCellAt } from "../render/metrics";
@@ -56,8 +57,15 @@ export interface UiRect {
   h: number;
 }
 
+interface UiLog {
+  enabled: boolean;
+  rects: UiRect[];
+  /** Textes qui débordent du calque. */
+  clipped: { x: number; y: number; t: string }[];
+}
+
 /** Journal de dessin (désactivé en jeu : seul le script de vérification l'allume). */
-export const uiLog = { enabled: false, rects: [] as UiRect[], clipped: [] as { x: number; y: number; t: string }[] };
+export const uiLog: UiLog = { enabled: false, rects: [], clipped: [] };
 
 let hits: Hit[] = [];
 let prevHits: Hit[] = [];
@@ -202,8 +210,23 @@ const isFocused = (id: string) => focusVisible && focusId === id;
 // Texte
 // ---------------------------------------------------------------------------
 
+const PRINTABLE = /^[\x20-\x7e]*$/;
+/** Conversions déjà faites : les mêmes libellés reviennent à chaque image (60 fois par seconde). */
+const asciiCache = new Map<string, string>();
+const ASCII_CACHE_MAX = 2000;
+
 /** Retire accents et signes non ASCII : « é » devient « e », « œ » devient « oe ». */
 export function ascii(s: string): string {
+  if (PRINTABLE.test(s)) return s;
+  const hit = asciiCache.get(s);
+  if (hit !== undefined) return hit;
+  if (asciiCache.size >= ASCII_CACHE_MAX) asciiCache.clear();
+  const t = toAscii(s);
+  asciiCache.set(s, t);
+  return t;
+}
+
+function toAscii(s: string): string {
   return s
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
@@ -224,10 +247,10 @@ export function clip(str: string, w: number): string {
   return t.length <= w ? t : w <= 3 ? t.slice(0, w) : `${t.slice(0, w - 3)}...`;
 }
 
-export function put(ui: Frame, x: number, y: number, ch: number, fg: RGB, bg: RGB | null = null, bgA = 1) {
+export function put(ui: Frame, x: number, y: number, ch: number | string, fg: RGB, bg: RGB | null = null, bgA = 1) {
   if (x < 0 || y < 0 || x >= ui.cols || y >= ui.rows) return;
   const i = y * ui.cols + x, k = i * 4;
-  ui.ch[i] = ch;
+  ui.ch[i] = typeof ch === "string" ? ch.charCodeAt(0) : ch;
   ui.fg[k] = fg[0]; ui.fg[k + 1] = fg[1]; ui.fg[k + 2] = fg[2]; ui.fg[k + 3] = 255;
   if (bg) { ui.bg[k] = bg[0]; ui.bg[k + 1] = bg[1]; ui.bg[k + 2] = bg[2]; ui.bg[k + 3] = Math.round(bgA * 255); }
 }
@@ -295,15 +318,6 @@ export function panel(ui: Frame, th: Theme, x: number, y: number, w: number, h: 
 /** Bouton de fermeture « [x] », à poser sur la bordure haute d'un panneau. */
 export function closeButton(ui: Frame, th: Theme, id: string, x: number, y: number) {
   button(ui, th, id, x, y, "x", { w: 3, variant: "ghost", tip: "Fermer (Echap)" });
-}
-
-/** Titre de section « -- Libellé ----- » dans un panneau. */
-export function section(ui: Frame, th: Theme, x: number, y: number, w: number, label: string) {
-  const u = th.ui;
-  const t = clip(label, w - 4);
-  text(ui, x, y, "--", u.border, u.panel, u.alpha);
-  text(ui, x + 3, y, t, u.hi, u.panel, u.alpha);
-  for (let i = x + 4 + t.length; i < x + w; i++) put(ui, i, y, 45, u.border, u.panel, u.alpha);
 }
 
 /** Pastille de touche (« V », « Echap ») : lettres claires sur fond sombre. Renvoie sa largeur. */
@@ -419,7 +433,7 @@ export function toolbar(ui: Frame, th: Theme, x: number, y: number, w: number, i
 /** Barre de progression ASCII « [#####.....] ». */
 export function bar(ui: Frame, th: Theme, x: number, y: number, w: number, v: number, color?: RGB) {
   const u = th.ui;
-  const n = Math.round(Math.max(0, Math.min(1, v)) * (w - 2));
+  const n = Math.round(clamp01(v) * (w - 2));
   put(ui, x, y, 91, u.border, u.panel, u.alpha);
   for (let i = 0; i < w - 2; i++) put(ui, x + 1 + i, y, i < n ? 35 : 46, i < n ? (color ?? u.hi) : u.dim, u.panel, u.alpha);
   put(ui, x + w - 1, y, 93, u.border, u.panel, u.alpha);

@@ -62,6 +62,11 @@ export interface Palette {
   text: RGB;
   /** Couleurs des petites bêtes (papillons en cartoon). */
   critters: RGB[];
+  /** Lueur du plancton (bleu-vert froid), visible surtout la nuit. */
+  plankton: RGB;
+  /** Lichens de la toundra (Xanthoria orangé, lichens gris-vert). */
+  lichen: RGB;
+  lichenGrey: RGB;
 }
 
 /** Couleurs de l'interface (calque lisible par-dessus le monde). */
@@ -76,6 +81,10 @@ export interface UiSkin {
   bad: RGB;
   /** Opacité des panneaux (0..1). */
   alpha: number;
+  /** Menu Échap, dessiné dans la grille du monde : texte, ombre portée et voile sur le monde. */
+  menuText: RGB;
+  menuShadow: RGB;
+  menuVeil: number;
 }
 
 export interface Theme {
@@ -90,6 +99,10 @@ export interface Theme {
   glow: number;
   glowRadius: number;
   glowTint: RGB;
+  /** Teintes du cycle jour / nuit : nuit, heure dorée, lanterne. */
+  nightTint: RGB;
+  goldTint: RGB;
+  lanternTint: RGB;
   /** Vignettage : début et fin du fondu (rayon normalisé). */
   vignette: readonly [number, number];
   /** Brume pâle (dark) ou ombres de nuages (cartoon). */
@@ -110,7 +123,8 @@ export interface Theme {
   dirtRamp: string;
 }
 
-const EXTRA = [
+/** Matières déclarées hors du cœur, chacune dans sa propre plage d'ids (voir render/materials.ts). */
+export const MATERIAL_SETS = [
   HERBIVORE_MATS, CARNIVORE_MATS, FLORA_MATS, SCENE_MATS, MARINE_MATS, NEST_MATS,
   ARCHELON_MATS, XIPHACTINUS_MATS, PTERANODON_MATS, NYCTOSAURUS_MATS, PECTINODON_MATS, ALLOSAURUS_MATS, ALAMOSAURUS_MATS,
   NANUQ_MATS, PACHYRHINO_MATS, VELOCIRAPTOR_MATS, PROTOCERATOPS_MATS, CITIPATI_MATS,
@@ -121,7 +135,7 @@ const EXTRA = [
 function materials(def: Record<number, Material>, style: Style): Material[] {
   const out: Material[] = [];
   for (const [k, v] of Object.entries(def)) out[Number(k)] = v;
-  for (const set of EXTRA) for (const [k, v] of Object.entries(set[style])) out[Number(k)] = v;
+  for (const set of MATERIAL_SETS) for (const [k, v] of Object.entries(set[style])) out[Number(k)] = v;
   // Toute matière manquante retombe sur une pierre neutre plutôt que de planter le rendu.
   for (let i = 0; i < 256; i++) out[i] ??= def[M.Stone];
   return out;
@@ -150,6 +164,9 @@ const DARK_PAL: Palette = {
   runeOff: hex("#2e2236"),
   text: hex("#6c6f7a"),
   critters: [hex("#9be88a")],
+  plankton: [110, 250, 215],
+  lichen: [214, 140, 52],
+  lichenGrey: [150, 168, 128],
 };
 
 const bone = hex("#a59c86");
@@ -158,6 +175,7 @@ export const DARK: Theme = {
   ui: {
     panel: hex("#100e15"), panelAlt: hex("#1a1722"), border: hex("#4a4458"), text: hex("#c4bed2"),
     dim: hex("#8f89a3"), hi: hex("#9be88a"), ok: hex("#9be88a"), bad: hex("#d0625a"), alpha: 0.92,
+    menuText: hex("#a9a3b8"), menuShadow: hex("#000000"), menuVeil: 0.3,
   },
   pal: DARK_PAL,
   mats: materials({
@@ -194,6 +212,9 @@ export const DARK: Theme = {
   glow: 1.05,
   glowRadius: 300,
   glowTint: [1.0, 0.94, 0.84],
+  nightTint: [0.5, 0.6, 1.0],
+  goldTint: [1.0, 0.72, 0.5],
+  lanternTint: [1.0, 0.85, 0.6],
   vignette: [0.55, 1.45],
   fog: "mist",
   water: "moon",
@@ -231,6 +252,9 @@ const CARTOON_PAL: Palette = {
   runeOff: hex("#6a7a99"),
   text: hex("#ffffff"),
   critters: [hex("#ff7eb6"), hex("#ffd34a"), hex("#8fd3ff"), hex("#c59bff"), hex("#ffffff")],
+  plankton: [110, 250, 215],
+  lichen: [214, 140, 52],
+  lichenGrey: [150, 168, 128],
 };
 
 const cream = hex("#fff1d0");
@@ -240,6 +264,7 @@ export const CARTOON: Theme = {
     panel: hex("#fff6e0"), panelAlt: hex("#f3e4c2"), border: hex("#1b1f2e"), text: hex("#1b1f2e"),
     // Contrastes WCAG AA (>= 4,5:1) sur le papier crème, y compris le texte discret.
     dim: hex("#6b604c"), hi: hex("#b83c1c"), ok: hex("#2a7228"), bad: hex("#b52a2a"), alpha: 0.96,
+    menuText: hex("#1b1f2e"), menuShadow: hex("#000000"), menuVeil: 0.45,
   },
   pal: CARTOON_PAL,
   mats: materials({
@@ -276,6 +301,9 @@ export const CARTOON: Theme = {
   glow: 0.22,
   glowRadius: 320,
   glowTint: [1.0, 1.0, 1.0],
+  nightTint: [0.5, 0.6, 1.0],
+  goldTint: [1.0, 0.72, 0.5],
+  lanternTint: [1.0, 0.85, 0.6],
   vignette: [0.95, 2.1],
   fog: "clouds",
   water: "glints",

@@ -6,6 +6,8 @@ import { uiScaleFor } from "../settings";
 
 const FIRST = 32, LAST = 126;
 
+const pixelRatio = () => window.devicePixelRatio || 1;
+
 const VERT = `#version 300 es
 in vec2 p;
 void main() { gl_Position = vec4(p, 0.0, 1.0); }`;
@@ -127,10 +129,14 @@ export class Renderer {
   private size = { w: 1, h: 1 };
   private scale = 0;
   private zoom = 1;
+  private dpr = 1;
 
-  /** À appeler avant de composer une image : suit le zoom du monde et la taille d'interface (réglage, doigt / souris). */
+  /**
+   * À appeler avant de composer une image : suit le zoom du monde, la taille d'interface (réglage, doigt / souris)
+   * et la densité de l'écran (fenêtre passée d'un écran Retina à un écran externe sans changer de taille).
+   */
   sync() {
-    if (view.zoom !== this.zoom || uiScaleFor(this.size.w, this.size.h, pointer.coarse) !== this.scale) this.resize(this.size.w, this.size.h);
+    if (view.zoom !== this.zoom || uiScaleFor(this.size.w, this.size.h, pointer.coarse) !== this.scale || pixelRatio() !== this.dpr) this.resize(this.size.w, this.size.h);
   }
 
   resize(width: number, height: number) {
@@ -138,8 +144,8 @@ export class Renderer {
     this.size = { w: width, h: height };
     this.scale = uiScaleFor(width, height, pointer.coarse);
     this.zoom = view.zoom;
-    const k = this.scale, z = this.zoom;
-    const dpr = window.devicePixelRatio || 1;
+    this.dpr = pixelRatio();
+    const k = this.scale, z = this.zoom, dpr = this.dpr;
     // Zoom : chaque cellule du monde grossit (et sa police est redessinée à la bonne taille, nette).
     const cw = Math.max(1, Math.round(CELL_W * z * dpr));
     const ch = Math.max(1, Math.round(CELL_H * z * dpr));
@@ -209,16 +215,16 @@ export class Renderer {
     gl.activeTexture(gl.TEXTURE1);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, f.cols, f.rows, gl.RED, gl.UNSIGNED_BYTE, f.ch);
     gl.activeTexture(gl.TEXTURE2);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, f.cols, f.rows, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(f.fg.buffer));
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, f.cols, f.rows, gl.RGBA, gl.UNSIGNED_BYTE, f.fg);
     gl.activeTexture(gl.TEXTURE3);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, f.cols, f.rows, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(f.bg.buffer));
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, f.cols, f.rows, gl.RGBA, gl.UNSIGNED_BYTE, f.bg);
     const u = this.ui;
     gl.activeTexture(gl.TEXTURE5);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, u.cols, u.rows, gl.RED, gl.UNSIGNED_BYTE, u.ch);
     gl.activeTexture(gl.TEXTURE6);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, u.cols, u.rows, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(u.fg.buffer));
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, u.cols, u.rows, gl.RGBA, gl.UNSIGNED_BYTE, u.fg);
     gl.activeTexture(gl.TEXTURE7);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, u.cols, u.rows, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(u.bg.buffer));
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, u.cols, u.rows, gl.RGBA, gl.UNSIGNED_BYTE, u.bg);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 }

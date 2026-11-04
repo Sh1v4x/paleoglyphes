@@ -195,7 +195,7 @@ const ZOOMS: readonly { z: number; m: number; name: string }[] = [
 const ZOOM_DEFAULT = 2;
 
 /** Zoom effectif : documentaire, appareil photo et cinématiques restent au zoom normal. */
-function zoomLevel(s: GameState) {
+export function zoomLevel(s: GameState) {
   if (s.mode !== "park" || s.photo.aiming || s.docu.on) return ZOOMS[ZOOM_DEFAULT];
   return ZOOMS[s.park.zoom ?? ZOOM_DEFAULT];
 }
@@ -206,8 +206,8 @@ export function worldZoom(s: GameState): number {
 }
 
 /** Taille de la vue en px monde (fenêtre / zoom des glyphes x cellules par bloc de la carte). */
-const viewW = (s: GameState) => (metrics.cols * metrics.cellW * zoomLevel(s).m) / zoomLevel(s).z;
-const viewH = (s: GameState) => (metrics.rows * metrics.cellH * zoomLevel(s).m) / zoomLevel(s).z;
+export const viewW = (s: GameState) => (metrics.cols * metrics.cellW * zoomLevel(s).m) / zoomLevel(s).z;
+export const viewH = (s: GameState) => (metrics.rows * metrics.cellH * zoomLevel(s).m) / zoomLevel(s).z;
 
 /** Change de niveau de zoom en gardant le point (px monde) `ax, ay` sous le même endroit de l'écran. */
 function setZoom(s: GameState, level: number, ax?: number, ay?: number) {

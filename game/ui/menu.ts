@@ -2,7 +2,7 @@ import { DEV } from "../config";
 import { hex, type RGB, type Theme } from "../palette";
 import { setBg, setFg, type Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
-import { calm, settings, UI_SCALES } from "../settings";
+import { calm, settings, UI_SCALES, VOLUMES } from "../settings";
 import { actions, button, keyChip, panel, region, SP, text, wrap } from "./kit";
 import type { GameState } from "../state";
 import { BIG, type BigLabel } from "./bigtext";
@@ -117,6 +117,17 @@ export function drawSettings(s: GameState, th: Theme, ui: Frame) {
           const on = settings.uiScale === k;
           x += button(ui, th, `set:scale:${k}`, x, y, `${Math.round(k * 100)} %`, { active: on, toggle: true, tip: on ? "Taille actuelle" : "Choisir cette taille" }) + SP.gap;
         }
+      },
+    },
+    {
+      title: "Son",
+      help: "Ambiance, cris des animaux et outils, tout synthetise. Touche B : couper / remettre.",
+      draw: (x, y) => {
+        for (const v of VOLUMES) {
+          const on = !settings.mute && settings.volume === v;
+          x += button(ui, th, `set:vol:${v}`, x, y, `${v * 100} %`, { active: on, toggle: true, tip: on ? "Volume actuel" : "Choisir ce volume" }) + SP.gap;
+        }
+        button(ui, th, "set:mute", x, y, "Muet", { toggle: true, active: settings.mute, key: "B", tip: "Couper / remettre le son" });
       },
     },
     {

@@ -288,7 +288,8 @@ export function lifeBrain(k: NestKit, s: GameState, a: Animal, spec: Species, dt
     if (c.mate.task === "dead" || (c.ttl -= dt) <= 0) { courting.delete(a); return false; }
     const d = Math.hypot(c.mate.x - a.x, c.mate.y - a.y);
     a.mood = "court";
-    if (d > 180) { if (k.go(s, a, spec, c.mate.x, c.mate.y, spec.walkSpeed, dt) < 0) courting.delete(a); }
+    // Vrai chemin (rivières, falaises) : sur la grande carte, le partenaire peut être loin.
+    if (d > 180) { if (k.go(s, a, spec, c.mate.x, c.mate.y, spec.walkSpeed, dt, true) < 0) courting.delete(a); }
     else { k.act(a, "idle"); k.face(a, c.mate.x); }
     return true;
   }
@@ -611,9 +612,13 @@ function breedScan(s: GameState, k: NestKit) {
     }
     if (!pa || !pb) continue;
     if (bd > near) {
-      // Trop loin l'un de l'autre : parade, ils se rejoignent (solitaires surtout).
-      if (bd < 4000 && !courting.has(pa) && !courting.has(pb) && pa.task === "wander" && pb.task === "wander") {
-        courting.set(pa, { mate: pb, ttl: 80 }); courting.set(pb, { mate: pa, ttl: 80 });
+      // Trop loin l'un de l'autre : parade, ils se rejoignent (solitaires surtout). Une espèce rare se
+      // cherche à travers toute la réserve (sinon, sur la grande carte, deux solitaires ne se croisent
+      // jamais et l'espèce s'éteint de vieillesse) ; le délai laisse le temps de traverser.
+      const rare = living(s, a0.sp) <= 3;
+      if ((bd < 4000 || rare) && !courting.has(pa) && !courting.has(pb) && pa.task === "wander" && pb.task === "wander") {
+        const ttl = Math.min(900, Math.max(80, bd / (spec.walkSpeed * 0.5)));
+        courting.set(pa, { mate: pb, ttl }); courting.set(pb, { mate: pa, ttl });
       }
       continue;
     }

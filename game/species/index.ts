@@ -24,7 +24,8 @@ export function shownName(p: Progress, id: SpeciesId): string {
 export function ofName(p: Progress, id: SpeciesId): string {
   const n = shownName(p, id);
   if (!p.assembled.includes(id)) return `de l'${n.charAt(0).toLowerCase()}${n.slice(1)}`;
-  return /^[aeiouyhAEIOUYH]/.test(n) ? `d'${n}` : `de ${n}`;
+  // Voyelle (accentuée ou non) ou h muet : élision (« d'Édmontosaure »).
+  return /^[aeiouyh]/i.test(n.normalize("NFD")) ? `d'${n}` : `de ${n}`;
 }
 
 /** Espèces dont on a au moins un os (ou déjà assemblées), dans l'ordre de découverte. */

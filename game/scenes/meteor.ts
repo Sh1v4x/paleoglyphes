@@ -5,6 +5,7 @@ import { emptyProgress, saveProgress } from "../progress";
 import { createFrame, setBg, setFg, type Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
 import { hash2 } from "../rng";
+import { clearSave } from "../save";
 import { calm } from "../settings";
 import { worldFor, type GameState } from "../state";
 import { resetUi, text, wrap } from "../ui/kit";
@@ -44,6 +45,7 @@ const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 function resetAll(s: GameState) {
   s.progress = emptyProgress();
   saveProgress(s.progress);
+  clearSave();
   try {
     localStorage.removeItem("ascii-dino-journal-seen-v1");
   } catch {

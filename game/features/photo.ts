@@ -1,6 +1,6 @@
 import { CELL_H, CELL_W } from "../config";
 import { golden, isNight } from "../daycycle";
-import type { Input } from "../input";
+import { pointer, type Input } from "../input";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { metrics } from "../render/metrics";
@@ -91,6 +91,11 @@ export function updatePhoto(s: GameState, input: Input, dt: number): boolean {
   if (input.mouse.wheel) {
     st.zoom = Math.max(0.25, Math.min(0.95, st.zoom - Math.sign(input.mouse.wheel) * 0.05));
     input.mouse.wheel = 0;
+  }
+  // Pincement (doigts, pavé tactile) : même réglage, et la réserve ne zoome pas pendant la visée.
+  if (input.mouse.zoom) {
+    st.zoom = Math.max(0.25, Math.min(0.95, st.zoom + input.mouse.zoom * 0.002));
+    input.mouse.zoom = 0;
   }
   if (input.ui.includes("photo:shoot") || input.worldClicks.length || input.pressed.includes("Space") || input.pressed.includes("Enter")) {
     if (st.cool <= 0) st.shoot = true;
@@ -285,7 +290,8 @@ function drawShotFx(s: GameState, th: Theme, ui: Frame) {
 export function drawPhoto(s: GameState, th: Theme, world: Frame, ui: Frame): void {
   const st = s.photo;
   if (st.aiming) {
-    const r = viewRect(st.zoom, s.mouse.x, s.mouse.y, s.mouse.x >= 0 && s.mouse.y >= 0);
+    // Au doigt, le viseur reste centré : glisser déplace la vue, toucher déclenche.
+    const r = viewRect(st.zoom, s.mouse.x, s.mouse.y, !pointer.touch && s.mouse.x >= 0 && s.mouse.y >= 0);
     if (st.shoot) takePhoto(s, world, r);
     // Viseur plein écran : l'interface de la réserve s'efface pour bien cadrer.
     resetUi(ui);

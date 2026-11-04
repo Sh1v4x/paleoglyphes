@@ -9,7 +9,7 @@ import { hash2 } from "../rng";
 import { ofName, SPECIES } from "../species";
 import type { GameState } from "../state";
 import { calm } from "../settings";
-import { bar, button, hitAt, panel, text, wrap, type Hint } from "../ui/kit";
+import { bar, button, hitAt, panel, text, toolbar, wrap, type Hint, type ToolItem } from "../ui/kit";
 import { toast } from "../ui/toast";
 import { EGG_FACT, EXTRA_BY_ID } from "./dig-fossils";
 import { buildBackdrop, generateSite, hardness, MATRIX_INFO, SUB, type Backdrop, type Fossil, type Site } from "./dig-site";
@@ -73,15 +73,24 @@ const TIPS = [
 
 const LEFT_W = 27, RIGHT_W = 34;
 
+/**
+ * Petit écran (téléphone) : pas la place des deux panneaux autour du site. Les outils et l'état du site
+ * passent en deux rangées de boutons au-dessus, le site prend toute la largeur (voir `drawCompactUi`).
+ */
+const compact = () => metrics.ucols < LEFT_W + RIGHT_W + 40 || metrics.urows < 34;
+/** Lignes d'interface prises par les deux rangées du mode compact. */
+const COMPACT_ROWS = 4;
+
 /** Zone du site sur le calque monde (cellules), selon la taille de l'écran. */
 function layout(site: Site | null) {
   const { cols, rows, uiW, uiH, cellW, cellH, ucols } = metrics;
-  const left = Math.ceil(((LEFT_W + 2) * uiW) / cellW) + 2;
-  const right = Math.floor(((ucols - RIGHT_W - 2) * uiW) / cellW) - 2;
-  const top = Math.ceil((uiH * (UI_TOP - 0.6)) / cellH);
+  const small = compact();
+  const left = small ? 2 : Math.ceil(((LEFT_W + 2) * uiW) / cellW) + 2;
+  const right = small ? cols - 2 : Math.floor(((ucols - RIGHT_W - 2) * uiW) / cellW) - 2;
+  const top = Math.ceil((uiH * (UI_TOP + (small ? COMPACT_ROWS - 1 : 0) - 0.6)) / cellH);
   const bottom = Math.ceil((uiH * 1.6) / cellH) + 1;
-  const W = site?.W ?? Math.max(90, Math.min(240, right - left));
-  const H = site?.H ?? Math.max(45, Math.min(110, rows - top - bottom - 10));
+  const W = site?.W ?? (small ? Math.max(40, Math.min(240, right - left)) : Math.max(90, Math.min(240, right - left)));
+  const H = site?.H ?? (small ? Math.max(24, Math.min(110, rows - top - bottom - 6)) : Math.max(45, Math.min(110, rows - top - bottom - 10)));
   const gTop = site?.gTop ?? 5;
   const ox = left + Math.floor((right - left - W) / 2);
   const oy = Math.max(top + 4 + gTop, rows - bottom - H);
@@ -617,6 +626,7 @@ function drawCursor(s: GameState, th: Theme, f: Frame, site: Site, ox: number, o
 // Interface
 // ---------------------------------------------------------------------------
 function drawUi(s: GameState, th: Theme, ui: Frame, site: Site) {
+  if (compact()) { drawCompactUi(s, th, ui, site); return; }
   const d = s.dig, u = th.ui;
   const T = (x: number, y: number, str: string, col: RGB = u.text) => text(ui, x, y, str, col, u.panel, u.alpha);
 
@@ -712,10 +722,41 @@ function drawUi(s: GameState, th: Theme, ui: Frame, site: Site) {
     else if (f && f.state === "buried" && f.exposed > 0) label = ` Degage : ${Math.round((f.exposed / f.cells) * 100)} % `;
     if (label) text(ui, Math.min(ui.cols - label.length - 1, c.x + 2), c.y - 1, label, ready(f!) ? u.panel : u.text, ready(f!) ? u.hi : u.panel, 0.95);
   }
-  if (d.hint && s.time - d.hint.t < 2.5) {
-    const w = d.hint.text.length + 4, x = Math.floor((ui.cols - w) / 2);
-    panel(ui, th, x, ui.rows - 5, w, 3);
-    T(x + 2, ui.rows - 4, d.hint.text);
-  }
+  drawDigHint(s, th, ui);
+}
 
+/** Message « Pas encore : dégage-le encore un peu », en bas au centre. */
+function drawDigHint(s: GameState, th: Theme, ui: Frame) {
+  const d = s.dig;
+  if (!d.hint || s.time - d.hint.t >= 2.5) return;
+  const lines = wrap(d.hint.text, ui.cols - 8);
+  const w = Math.max(...lines.map((l) => l.length)) + 4, x = Math.floor((ui.cols - w) / 2), y = ui.rows - 4 - lines.length;
+  panel(ui, th, x, y, w, lines.length + 2);
+  lines.forEach((l, i) => text(ui, x + 2, y + 1 + i, l, th.ui.text, th.ui.panel, th.ui.alpha));
+}
+
+/**
+ * Interface compacte (petit écran) : outils sur la première rangée, puis l'état du site et ses actions
+ * (récolter, site suivant, indice) sur la seconde. Le détail des couches et l'anecdote sont omis.
+ */
+function drawCompactUi(s: GameState, th: Theme, ui: Frame, site: Site) {
+  const d = s.dig, u = th.ui, x = 1, w = ui.cols - 2;
+  const tools: ToolItem[] = TOOL_ORDER.map((t) => ({ id: `dig:tool:${t}`, label: TOOLS[t].name, short: TOOLS[t].name.slice(0, 4), icon: TOOLS[t].name[0], toggle: true, active: d.tool === t, key: TOOLS[t].key, tip: TOOLS[t].desc }));
+  const used = toolbar(ui, th, x, UI_TOP, w, tools);
+  const bones = site.fossils.filter((f) => f.kind === "bone");
+  const status = `Site ${site.n}  Os ${bones.filter((f) => f.state === "done").length}/${bones.length}`;
+  if (used + status.length + 1 <= w) text(ui, x + w - status.length, UI_TOP, status, u.hi, u.panel, u.alpha);
+  const fo = d.focus >= 0 ? site.fossils[d.focus] : undefined;
+  const acts: ToolItem[] = [];
+  if (site.complete) acts.push({ id: "dig:next", label: "Site suivant", key: "Entree", variant: "primary" });
+  else if (site.fossils.some(ready)) acts.push({ id: "dig:collect", label: "Recolter", key: "Entree", variant: "primary" });
+  const hints = s.progress.hints ?? 0;
+  acts.push({ id: "dig:hint", label: `Indice (${hints})`, disabled: hints <= 0 || site.complete || s.time < d.reveal, tip: "Montre les fossiles caches quelques secondes (indices a gagner au quiz du Carnet)" });
+  if (DEV && !site.complete) acts.push({ id: "dig:reveal", label: "Tout degager (test)", short: "Test", variant: "ghost", tip: "Test : degager tout le site" });
+  const aw = toolbar(ui, th, x, UI_TOP + 2, w, acts);
+  if (fo && fo.state === "buried" && !site.complete) {
+    const pct = `Degage ${Math.round((fo.exposed / fo.cells) * 100)} %`;
+    if (aw + pct.length + 1 <= w) text(ui, x + w - pct.length, UI_TOP + 2, pct, u.text, u.panel, u.alpha);
+  }
+  drawDigHint(s, th, ui);
 }

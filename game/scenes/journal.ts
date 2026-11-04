@@ -1,5 +1,5 @@
 import { liveBirth } from "../species/life";
-import type { Input } from "../input";
+import { pointer, type Input } from "../input";
 import type { RGB, Theme } from "../palette";
 import type { Frame } from "../render/frame";
 import { scalePrim } from "../render/raster";
@@ -9,7 +9,7 @@ import { SPECIES, SPECIES_LIST } from "../species";
 import { eggModel } from "../species/eggs";
 import type { FactUnlock, Species, SpeciesId } from "../species/types";
 import type { GameState } from "../state";
-import { actions, button, buttonW, clip, over, panel, put, region, SP, text, wrap, type Hint } from "../ui/kit";
+import { actions, button, buttonW, clip, over, panel, put, region, SP, text, toolbar, wrap, type Hint, type ToolItem } from "../ui/kit";
 import { box, cached, DEFENSE, factKey, fitSprite, fmtKg, fmtM, groundLine, hasF, human, idle, known, knownList, lerp, paper, RH, RW } from "./journal-common";
 import { createQuizState, quizPage, quizUpdate, type QuizState } from "./journal-quiz";
 import { createSizesState, sizesPage, sizesUpdate, type SizesState } from "./journal-sizes";
@@ -24,12 +24,14 @@ import { UI_TOP, type Scene } from "./types";
  */
 
 export type JournalTab = "species" | "timeline" | "quiz" | "sizes";
-const SUBTABS: { id: JournalTab; label: string; tip: string }[] = [
-  { id: "species", label: "Espèces", tip: "Les fiches de toutes les especes" },
-  { id: "timeline", label: "Frise du temps", tip: "Quand vivaient-ils ? Et un petit jeu" },
-  { id: "quiz", label: "Quiz", tip: "Questions sur les faits decouverts" },
-  { id: "sizes", label: "Tailles", tip: "Comparer leur taille a la notre" },
+const SUBTABS: { id: JournalTab; label: string; short: string; icon: string; tip: string }[] = [
+  { id: "species", label: "Espèces", short: "Espèces", icon: "Esp", tip: "Les fiches de toutes les especes" },
+  { id: "timeline", label: "Frise du temps", short: "Frise", icon: "Frise", tip: "Quand vivaient-ils ? Et un petit jeu" },
+  { id: "quiz", label: "Quiz", short: "Quiz", icon: "Quiz", tip: "Questions sur les faits decouverts" },
+  { id: "sizes", label: "Tailles", short: "Tailles", icon: "Tail", tip: "Comparer leur taille a la notre" },
 ];
+/** Fenêtre étroite (téléphone) : le bouton Extras rejoint les sous-onglets, la fiche passe sous le studio. */
+const narrow = (ui: Frame) => ui.cols < 70;
 
 export interface JournalState {
   /** Sous-onglet du carnet (« Espèces » par défaut). */
@@ -168,7 +170,7 @@ function summary(s: GameState, th: Theme, world: Frame, ui: Frame) {
   const got = SPECIES_LIST.reduce((n, sp) => n + sp.facts.filter((f) => hasF(s, sp.id, f.id)).length, 0);
   const xl = `Extras (${p.extras.length})`;
   const bx = ui.cols - buttonW(xl) - SP.pad;
-  button(ui, th, "journal:extras", bx, UI_TOP - 1, xl, { tip: "Fossiles bonus et petite faune" });
+  if (!narrow(ui)) button(ui, th, "journal:extras", bx, UI_TOP - 1, xl, { tip: "Fossiles bonus et petite faune" });
   const ft = `Faits decouverts : ${got}/${total}`;
   if (bx - ft.length - 3 > 56) text(ui, bx - ft.length - 3, UI_TOP - 1, ft, u.text);
 
@@ -214,7 +216,7 @@ function summary(s: GameState, th: Theme, world: Frame, ui: Frame) {
     region(`journal:sp:${sp.id}`, x, y, cw, ch, { focus: true, tip: `Ouvrir la fiche : ${sp.name}` });
   });
   if (nrow > vis) {
-    const t = ` Rangees ${j.scroll + 1}-${Math.min(nrow, j.scroll + vis)} sur ${nrow} : molette `;
+    const t = ` Rangees ${j.scroll + 1}-${Math.min(nrow, j.scroll + vis)} sur ${nrow} : ${pointer.touch ? "glisser" : "molette"} `;
     text(ui, ui.cols - t.length - 2, bottom, t, u.dim, u.panel, u.alpha);
   }
 }
@@ -223,18 +225,20 @@ interface Line { t: string; c: RGB; tag?: string }
 
 function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Species) {
   const u = th.ui, j = s.journal, p = s.progress;
-  const L = Math.max(40, Math.floor(ui.cols * 0.55));
+  // Studio à gauche, fiche à droite ; fenêtre étroite : studio en haut (SH lignes), fiche dessous.
+  const thin = narrow(ui);
+  const L = thin ? ui.cols : Math.max(40, Math.floor(ui.cols * 0.55));
   const top = UI_TOP, bottom = ui.rows - 3;
-  const H = bottom - top;
+  const H = bottom - top, SH = thin ? Math.max(12, Math.floor(H * 0.4)) : H, sb = top + SH;
 
   // --- Rendu de studio à gauche ---
-  box(ui, th, 1, top, L - 1, H, u.border, spec.name);
+  box(ui, th, 1, top, L - 1, SH, u.border, spec.name);
   let bx = 3;
   bx += button(ui, th, "journal:flesh", bx, top + 1, "Chair", { active: !j.skeleton }) + 1;
   bx += button(ui, th, "journal:skel", bx, top + 1, "Squelette", { active: j.skeleton }) + 2;
   const rw = RW(), rh = RH();
   const ax = 3 * rw, aw = (L - 6) * rw;
-  const groundY = Math.round((bottom - 4) * rh);
+  const groundY = Math.round((sb - 4) * rh);
   const ah = groundY - (top + 3) * rh;
   const man = cached("human", human);
   const r1 = cached(`big:${spec.id}|1`, () => spec.model(idle(0)));
@@ -284,9 +288,9 @@ function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Spe
   text(ui, Math.max(2, hux - 3), Math.floor(groundY / rh) + 1, "Humain", u.dim);
   text(ui, Math.max(2, hux - 3), Math.floor(groundY / rh) + 2, "1,75 m", u.dim);
 
-  // --- Fiche à droite ---
-  const px = L + 1, pw = ui.cols - px - 1;
-  panel(ui, th, px, top, pw, H, "Fiche");
+  // --- Fiche à droite (ou dessous) ---
+  const px = thin ? 1 : L + 1, pw = ui.cols - px - 1, py = thin ? sb : top, ph = thin ? H - SH : H;
+  panel(ui, th, px, py, pw, ph, "Fiche");
   const tw = pw - 4;
   const B = spec.behavior;
   const lines: Line[] = [];
@@ -322,7 +326,7 @@ function speciesPage(s: GameState, th: Theme, world: Frame, ui: Frame, spec: Spe
     }
     lines.push({ t: "", c: u.text });
   }
-  drawLines(ui, th, j, lines, px + 2, top + 1, H - 2, tw);
+  drawLines(ui, th, j, lines, px + 2, py + 1, ph - 2, tw);
 
   // --- Navigation (bas à droite, l'action principale « Suivant » tout à droite) ---
   actions(ui, th, 2, ui.rows - 2, ui.cols - 4, [
@@ -368,7 +372,7 @@ function humanize(id: string): string {
 function extrasPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
   const u = th.ui, j = s.journal;
   text(ui, 2, UI_TOP, "Extras", u.hi);
-  text(ui, 2, UI_TOP + 1, "Fossiles bonus trouvés en fouille et notes sur la petite faune de la réserve.", u.dim);
+  text(ui, 2, UI_TOP + 1, clip("Fossiles bonus trouvés en fouille et notes sur la petite faune de la réserve.", ui.cols - 4), u.dim);
   const top = UI_TOP + 3, bottom = ui.rows - 3, H = bottom - top;
   const x = 2, W = ui.cols - 4, iconW = 14;
   box(ui, th, x, top, W, H, u.border);
@@ -422,9 +426,15 @@ function extrasPage(s: GameState, th: Theme, world: Frame, ui: Frame) {
 }
 
 /** Sous-onglets du carnet, sur la ligne d'air sous l'en-tête. */
+/** Sous-onglets (libellés raccourcis si la place manque) ; sur le sommaire, à gauche du bouton Extras. */
 function subTabs(s: GameState, th: Theme, ui: Frame) {
-  let x = 2;
-  for (const t of SUBTABS) x += button(ui, th, `journal:tab:${t.id}`, x, UI_TOP - 1, t.label, { active: s.journal.tab === t.id, tip: t.tip }) + SP.gap;
+  const j = s.journal;
+  const items: ToolItem[] = SUBTABS.map((t) => ({ id: `journal:tab:${t.id}`, label: t.label, short: t.short, icon: t.icon, active: j.tab === t.id && !(narrow(ui) && j.extras), tip: t.tip }));
+  const home = j.tab === "species" && !j.species;
+  let w = ui.cols - 4;
+  if (home && narrow(ui)) items.push({ id: "journal:extras", label: `Extras (${s.progress.extras.length})`, short: "Extras", icon: "Ext", active: j.extras, tip: "Fossiles bonus et petite faune" });
+  else if (home && !j.extras) w -= buttonW(`Extras (${s.progress.extras.length})`) + SP.gap;
+  toolbar(ui, th, 2, UI_TOP - 1, w, items);
 }
 
 export const journalScene: Scene = {

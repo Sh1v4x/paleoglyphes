@@ -42,7 +42,9 @@ export default function Game({ fontFamily }: { fontFamily: string }) {
       setStep(null);
       // Accès console pour le débogage (dev uniquement).
       if (DEV) (window as unknown as { __game: unknown }).__game = state;
-      const resize = () => renderer.resize(window.innerWidth, window.innerHeight);
+      // La zone de jeu (main) : la fenêtre moins les zones sûres d'un téléphone (voir globals.css).
+      const box = canvas.parentElement ?? document.body;
+      const resize = () => renderer.resize(box.clientWidth, box.clientHeight);
       resize();
       window.addEventListener("resize", resize);
       const halt = startLoop(
@@ -54,7 +56,7 @@ export default function Game({ fontFamily }: { fontFamily: string }) {
     return () => { disposed = true; stop(); };
   }, [fontFamily]);
 
-  // Le jeu se pilote entièrement au clavier (Tab, Entrée, Échap, H pour l'aide) ou à la souris.
+  // Le jeu se pilote entièrement au clavier (Tab, Entrée, Échap, H pour l'aide), à la souris ou au doigt.
   return (
     <>
       {step && <Loading step={step} />}

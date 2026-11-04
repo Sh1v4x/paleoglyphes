@@ -2,7 +2,7 @@ import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { CM } from "./carnivores.mat";
-import { REST_RIG, c, e, knee, lerp, rot, win, type TheroRig } from "./raptor";
+import { c, e, lerp, REST_RIG, rot, theroLegs, win, type TheroLegSpec, type TheroRig } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -66,6 +66,13 @@ function trexRig({ action, actionT: t, time }: Pose): TheroRig {
 }
 
 const HIP = { x: 0, y: -112 };
+const LEGS: TheroLegSpec = {
+  hip: HIP, farHip: 8, lift: 16, reach: 12, swing: 40, footY: -6,
+  mx: 16, my: 28, metaLift: 0.3,
+  sit: { dx: 34, far: 10, y: -6, mx: 36, my: 6 },
+  lie: { dx: 92, far: -14, y: -8, nearDy: 6, mx: 30, my: 4 },
+  kneeDy: 8, thigh: 52, shin: 48,
+};
 const NECK = { x: 66, y: -126 };
 const NAPE = { x: 98, y: -150 };
 export const TREX_EYE = { x: 130, y: -162 };
@@ -79,19 +86,10 @@ export function trexModel(pose: Pose): Prim[] {
   const P: Prim[] = [];
 
   // --- Pattes massives (cinématique inverse) ---
-  for (const L of [{ phase: 0, far: true }, { phase: Math.PI, far: false }]) {
-    const ph = walk + L.phase;
-    const sw = Math.sin(ph) * moving * r.stride;
-    const lift = Math.max(0, Math.cos(ph)) * moving * 16 * r.stride;
+  for (const L of theroLegs(pose, r, bx, by, LEGS)) {
     const m = L.far ? CM.RexFar : CM.RexSkin;
     const z = L.far ? -70 : 44;
-    const hx = HIP.x + (L.far ? 8 : 0) + bx, hy = HIP.y + by;
-    let fx = hx + 12 + sw * 40 + (L.far ? -r.stance : r.stance), fy = -6 - lift;
-    let mx = 16, my = 28 - lift * 0.3;
-    if (r.legs === "sit") { fx = hx + 34 + (L.far ? 10 : 0); fy = -6; mx = 36; my = 6; }
-    else if (r.legs === "lie") { fx = hx + 92 + (L.far ? -14 : 0); fy = -8 - (L.far ? 0 : 6); mx = 30; my = 4; }
-    const ax = fx - mx, ay = fy - my;
-    const [kx, ky] = knee(hx, hy + 8, ax, ay, 52, 48);
+    const { hx, hy, fx, fy, ax, ay, kx, ky } = L;
     // Cuisse énorme, jambe, métatarse, trois orteils griffus.
     P.push(e(hx + 2, hy + 4, 28, 40, m, z - 6, 22));
     P.push(c(hx, hy + 10, kx, ky, 24, 14, m, z, 18));

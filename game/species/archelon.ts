@@ -4,7 +4,7 @@ import { PX_PER_M } from "../config";
 import { AR } from "./archelon.mat";
 import { MR } from "./marine.mat";
 import { NM } from "./nest.mat";
-import { c, e, lerp, rot, win } from "./raptor";
+import { c, e, flipY, lerp, rot, win } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -125,16 +125,6 @@ function archelonRig({ action, actionT: t, time, walk, moving }: Pose): ArchRig 
       break;
   }
   return r;
-}
-
-/** Retourne verticalement autour de y = cy (ventre en l'air), puis décale. */
-function flipY(ps: Prim[], cy: number, dy: number): Prim[] {
-  const f = (y: number) => 2 * cy - y + dy;
-  return ps.map((p) => {
-    if (p.k === "c") return { ...p, ay: f(p.ay), by: f(p.by) };
-    if (p.k === "cut") return { ...p, y: f(p.y) };
-    return { ...p, y: f(p.y), yMin: p.yMax === undefined ? undefined : f(p.yMax), yMax: p.yMin === undefined ? undefined : f(p.yMin) };
-  });
 }
 
 /** Hauteur du dôme de la carapace à l'abscisse x (0 au bord, 1 au sommet). */

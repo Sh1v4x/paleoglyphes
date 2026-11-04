@@ -2,7 +2,7 @@ import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { BIOME } from "../world/biomes";
-import { c, e, squash, strike, turn } from "./ankylo";
+import { c, e, rot, squash, strike } from "./kit";
 import { PR } from "./protoceratops.mat";
 import type { Pose, Species } from "./types";
 
@@ -147,10 +147,10 @@ function protoParts(L: ProtoLook, walk: number, moving: number): Prim[] {
   // Bec de perroquet : crochet supérieur, mâchoire inférieure qui pivote.
   const jaw = L.mouth * 0.35;
   if (L.mouth > 0.05) T.push(e(98, -46 + L.mouth * 2, 11, 2 + L.mouth * 4, M.Mouth, 24, 1));
-  T.push(...turn([c(80, -46, 106, -44, 8, 4, PR.Skin, 20, 7), c(104, -44, 110, -42, 4, 1.5, PR.Beak, 24, 3)], 78, -48, jaw));
+  T.push(...rot([c(80, -46, 106, -44, 8, 4, PR.Skin, 20, 7), c(104, -44, 110, -42, 4, 1.5, PR.Beak, 24, 3)], 78, -48, jaw));
   T.push(c(98, -62, 114, -46, 9, 2.5, PR.Beak, 22, 7));
   if (L.eye) T.push(e(80, -64, 3.5, 3.5, M.Eye, 50, 1));
-  P.push(...turn(T, 50, -54, L.headA, X, bob + L.headDy));
+  P.push(...rot(T, 50, -54, L.headA, X, bob + L.headDy));
   return P;
 }
 

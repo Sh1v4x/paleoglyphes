@@ -4,7 +4,7 @@ import { PX_PER_M } from "../config";
 import { BIOME } from "../world/biomes";
 import { CM } from "./carnivores.mat";
 import { VM } from "./velociraptor.mat";
-import { REST_RIG, c, e, knee, lerp, rot, win, type TheroRig } from "./raptor";
+import { c, e, lerp, REST_RIG, rot, theroLegs, win, type TheroLegSpec, type TheroRig } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -79,6 +79,15 @@ function velociraptorRig({ action, actionT: t, time }: Pose): TheroRig {
 
 /** Bassin (pivot du corps), base du cou, nuque et œil, px bruts. */
 const HIP = { x: 0, y: -50 };
+const LEGS: TheroLegSpec = {
+  hip: HIP, farHip: 3, lift: 9, reach: 5, swing: 20, footY: -3,
+  // Métatarse en marche court et trapu : vecteur de la cheville vers la base des orteils.
+  mx: 8, my: 13, metaLift: 0.3,
+  sit: { dx: 12, far: 5, y: -3, mx: 16, my: 2 },
+  lie: { dx: 42, far: -6, y: -4, nearDy: 3, mx: 13, my: 2 },
+  air: { dx: 26, far: -5, near: 3, y: 34, mx: 12, my: 9 },
+  kneeDy: 3, thigh: 18, shin: 21,
+};
 const NECK = { x: 22, y: -58 };
 const NAPE = { x: 34, y: -72 };
 const EYE = { x: 44, y: -77 };
@@ -92,21 +101,10 @@ export function velociraptorModel(pose: Pose): Prim[] {
   const P: Prim[] = [];
 
   // --- Pattes courtes et robustes (cinématique inverse : la patte suit le bassin) ---
-  for (const L of [{ phase: 0, far: true }, { phase: Math.PI, far: false }]) {
-    const ph = walk + L.phase;
-    const sw = Math.sin(ph) * moving * r.stride;
-    const lift = Math.max(0, Math.cos(ph)) * moving * 9 * r.stride;
+  for (const L of theroLegs(pose, r, bx, by, LEGS)) {
     const m = L.far ? VM.Far : VM.Skin;
     const z = L.far ? -40 : 22;
-    const hx = HIP.x + (L.far ? 3 : 0) + bx, hy = HIP.y + by;
-    let fx = hx + 5 + sw * 20 + (L.far ? -r.stance : r.stance), fy = -3 - lift;
-    // Métatarse court et trapu : vecteur de la cheville vers la base des orteils.
-    let mx = 8, my = 13 - lift * 0.3;
-    if (r.legs === "sit") { fx = hx + 12 + (L.far ? 5 : 0); fy = -3; mx = 16; my = 2; }
-    else if (r.legs === "air") { fx = hx + 26 + (L.far ? -5 : 3); fy = hy + 34; mx = 12; my = 9; }
-    else if (r.legs === "lie") { fx = hx + 42 + (L.far ? -6 : 0); fy = -4 - (L.far ? 0 : 3); mx = 13; my = 2; }
-    const ax = fx - mx, ay = fy - my;
-    const [kx, ky] = knee(hx, hy + 3, ax, ay, 18, 21);
+    const { hx, hy, fx, fy, ax, ay, kx, ky } = L;
     // Cuisse emplumée, jambe, métatarse écailleux.
     P.push(e(hx, hy, 12, 14, m, z - 4, 10));
     P.push(c(hx, hy + 3, kx, ky, 8, 5, m, z, 8));

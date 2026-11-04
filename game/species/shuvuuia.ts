@@ -4,7 +4,7 @@ import { PX_PER_M } from "../config";
 import { BIOME } from "../world/biomes";
 import { CM } from "./carnivores.mat";
 import { SM } from "./shuvuuia.mat";
-import { REST_RIG, c, e, knee, lerp, rot, win, type TheroRig } from "./raptor";
+import { c, e, lerp, REST_RIG, rot, theroLegs, win, type TheroLegSpec, type TheroRig } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -91,6 +91,14 @@ function shuvuuiaRig({ action, actionT: t, time }: Pose): ShuvRig {
 
 /** Bassin (pivot du corps), base du cou, nuque et œil, px bruts. */
 const HIP = { x: 0, y: -118 };
+const LEGS: TheroLegSpec = {
+  hip: HIP, farHip: 4, lift: 14, reach: 4, swing: 26, footY: -3,
+  // Métatarse en marche très long (coureur) : vecteur de la cheville vers les orteils.
+  mx: 10, my: 40, metaLift: 0.3,
+  sit: { dx: 20, far: 6, y: -3, mx: 32, my: 3 },
+  lie: { dx: 70, far: -10, y: -5, nearDy: 5, mx: 26, my: 3 },
+  kneeDy: 4, thigh: 36, shin: 50,
+};
 const NECK = { x: 22, y: -128 };
 const NAPE = { x: 50, y: -136 };
 const EYE = { x: 72, y: -135 };
@@ -104,20 +112,10 @@ export function shuvuuiaModel(pose: Pose): Prim[] {
   const P: Prim[] = [];
 
   // --- Très longues pattes fines (cinématique inverse), doublées d'un trait fin ---
-  for (const L of [{ phase: 0, far: true }, { phase: Math.PI, far: false }]) {
-    const ph = walk + L.phase;
-    const sw = Math.sin(ph) * moving * r.stride;
-    const lift = Math.max(0, Math.cos(ph)) * moving * 14 * r.stride;
+  for (const L of theroLegs(pose, r, bx, by, LEGS)) {
     const m = L.far ? SM.Far : SM.Skin;
     const z = L.far ? -40 : 22;
-    const hx = HIP.x + (L.far ? 4 : 0) + bx, hy = HIP.y + by;
-    let fx = hx + 4 + sw * 26 + (L.far ? -r.stance : r.stance), fy = -3 - lift;
-    // Métatarse très long (coureur) : vecteur de la cheville vers les orteils.
-    let mx = 10, my = 40 - lift * 0.3;
-    if (r.legs === "sit") { fx = hx + 20 + (L.far ? 6 : 0); fy = -3; mx = 32; my = 3; }
-    else if (r.legs === "lie") { fx = hx + 70 + (L.far ? -10 : 0); fy = -5 - (L.far ? 0 : 5); mx = 26; my = 3; }
-    const ax = fx - mx, ay = fy - my;
-    const [kx, ky] = knee(hx, hy + 4, ax, ay, 36, 50);
+    const { hx, hy, fx, fy, ax, ay, kx, ky } = L;
     // Cuisse emplumée, jambe et métatarse fins, orteils griffus.
     P.push(e(hx, hy, 12, 15, m, z - 4, 10));
     P.push(c(hx, hy + 4, kx, ky, 8, 4, m, z, 8));

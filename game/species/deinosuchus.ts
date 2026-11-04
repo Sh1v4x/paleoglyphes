@@ -2,9 +2,8 @@ import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { BIOME } from "../world/biomes";
-import { c, e, turn } from "./ankylo";
+import { c, e, flipY, lerp, rot, win } from "./kit";
 import { DE } from "./deinosuchus.mat";
-import { lerp, win } from "./raptor";
 import type { Pose, Species } from "./types";
 
 /**
@@ -112,16 +111,6 @@ export function deinosuchusModel(pose: Pose): Prim[] {
   return P.map((p) => scalePrim(p, DEINOSUCHUS_SCALE));
 }
 
-/** Retourne verticalement autour de y = cy (sur le dos). */
-function flipY(ps: Prim[], cy: number): Prim[] {
-  const f = (y: number) => 2 * cy - y;
-  return ps.map((p) => {
-    if (p.k === "c") return { ...p, ay: f(p.ay), by: f(p.by) };
-    if (p.k === "cut") return { ...p, y: f(p.y) };
-    return { ...p, y: f(p.y), yMin: p.yMax === undefined ? undefined : f(p.yMax), yMax: p.yMin === undefined ? undefined : f(p.yMin) };
-  });
-}
-
 function crocParts(L: CrocRig, walk: number, moving: number): Prim[] {
   const X = L.dx;
   const by = -22 - L.lift + L.bob; // centre du tronc
@@ -185,7 +174,7 @@ function crocParts(L: CrocRig, walk: number, moving: number): Prim[] {
 
   // --- Cou épais, puis crâne géant (pivot à la base du cou) ---
   P.push(c(70 + X, by - 2, 104 + X, by - 2, 21, 18, DE.Skin, 4, 20));
-  P.push(...turn(crocHead(L), 100, -24, L.head, X, by + 22 + L.headDy));
+  P.push(...rot(crocHead(L), 100, -24, L.head, X, by + 22 + L.headDy));
   return P;
 }
 
@@ -212,9 +201,9 @@ function crocHead(L: CrocRig): Prim[] {
   if (open) for (const x of [124, 136, 148, 160, 172]) J.push(e(x, -23, 2.4, 5, DE.Tooth, 16, 2));
   else J.push(c(108, -19, 184, -21, 1, 1, DE.Lid, 18, 1, true));
   const H: Prim[] = [];
-  if (open) H.push(...turn([e(140, -19, 38, 3 + L.jaw * 13, DE.Mouth, 1, 2)], 100, -22, L.jaw * 0.13));
-  H.push(...turn(U, 100, -24, -L.jaw * 0.22));
-  H.push(...turn(J, 100, -20, L.jaw * 0.5));
+  if (open) H.push(...rot([e(140, -19, 38, 3 + L.jaw * 13, DE.Mouth, 1, 2)], 100, -22, L.jaw * 0.13));
+  H.push(...rot(U, 100, -24, -L.jaw * 0.22));
+  H.push(...rot(J, 100, -20, L.jaw * 0.5));
   return H;
 }
 

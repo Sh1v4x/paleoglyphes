@@ -4,7 +4,7 @@ import { PX_PER_M } from "../config";
 import { BIOME } from "../world/biomes";
 import { CM } from "./carnivores.mat";
 import { TM } from "./troodon.mat";
-import { REST_RIG, c, e, knee, lerp, rot, win, type TheroRig } from "./raptor";
+import { c, e, lerp, REST_RIG, rot, theroLegs, win, type TheroLegSpec, type TheroRig } from "./kit";
 import type { Pose, Species } from "./types";
 
 /**
@@ -90,6 +90,13 @@ function troodonRig({ action, actionT: t, time }: Pose): PolarRig {
 
 /** Bassin (pivot du corps), base du cou, nuque et œil, px bruts. */
 const HIP = { x: 0, y: -74 };
+const LEGS: TheroLegSpec = {
+  hip: HIP, farHip: 4, lift: 13, reach: 6, swing: 32, footY: -3,
+  mx: 12, my: 27, metaLift: 0.3,
+  sit: { dx: 18, far: 6, y: -3, mx: 28, my: 3 },
+  lie: { dx: 68, far: -8, y: -5, nearDy: 4, mx: 22, my: 3 },
+  kneeDy: 4, thigh: 28, shin: 34,
+};
 const NECK = { x: 32, y: -90 };
 const NAPE = { x: 50, y: -114 };
 const EYE = { x: 70, y: -122 };
@@ -104,19 +111,10 @@ export function troodonModel(pose: Pose): Prim[] {
   const P: Prim[] = [];
 
   // --- Longues pattes : grosses culottes de plumes, métatarse écailleux, griffe en faucille ---
-  for (const L of [{ phase: 0, far: true }, { phase: Math.PI, far: false }]) {
-    const ph = walk + L.phase;
-    const sw = Math.sin(ph) * moving * r.stride;
-    const lift = Math.max(0, Math.cos(ph)) * moving * 13 * r.stride;
+  for (const L of theroLegs(pose, r, bx, by, LEGS)) {
     const m = L.far ? TM.Far : TM.Skin;
     const z = L.far ? -40 : 22;
-    const hx = HIP.x + (L.far ? 4 : 0) + bx, hy = HIP.y + by;
-    let fx = hx + 6 + sw * 32 + (L.far ? -r.stance : r.stance), fy = -3 - lift;
-    let mx = 12, my = 27 - lift * 0.3;
-    if (r.legs === "sit") { fx = hx + 18 + (L.far ? 6 : 0); fy = -3; mx = 28; my = 3; }
-    else if (r.legs === "lie") { fx = hx + 68 + (L.far ? -8 : 0); fy = -5 - (L.far ? 0 : 4); mx = 22; my = 3; }
-    const ax = fx - mx, ay = fy - my;
-    const [kx, ky] = knee(hx, hy + 4, ax, ay, 28, 34);
+    const { hx, hy, fx, fy, ax, ay, kx, ky } = L;
     // Cuisse et « culotte » de duvet qui descend jusqu'au genou.
     P.push(e(hx, hy, 17 + puff * 0.5, 20 + puff * 0.5, m, z - 4, 12));
     P.push(c(hx, hy + 4, kx, ky, 12 + puff * 0.4, 7, L.far ? TM.Far : TM.Down, z, 9));

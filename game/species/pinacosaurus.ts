@@ -2,7 +2,7 @@ import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { BIOME } from "../world/biomes";
-import { c, e, squash, strike, turn } from "./ankylo";
+import { c, e, rot, squash, strike } from "./kit";
 import { PN } from "./pinacosaurus.mat";
 import type { Pose, Species } from "./types";
 
@@ -171,7 +171,7 @@ function pinacoParts(L: PinacoLook, walk: number, moving: number): Prim[] {
   H.push(e(114, -52, 3, 3, PN.Nare, 30, 1));
   const jaw = L.mouth * 0.3;
   if (L.mouth > 0.05) H.push(e(122, -38 + L.mouth * 2, 10, 2 + L.mouth * 3, M.Mouth, 22, 1));
-  H.push(...turn([c(98, -40, 128, -37, 6, 3.5, PN.Skin, 16, 5)], 96, -42, jaw));
+  H.push(...rot([c(98, -40, 128, -37, 6, 3.5, PN.Skin, 16, 5)], 96, -42, jaw));
   H.push(c(130, -46, 139, -41, 4.5, 1.5, PN.Beak, 18, 3));
   // Cornes de la joue et de l'arrière du crâne.
   H.push(c(82, -60, 70, -70, 4, 1, PN.Spike, 22, 3));
@@ -180,7 +180,7 @@ function pinacoParts(L: PinacoLook, walk: number, moving: number): Prim[] {
   // Demi-anneaux du cou : deux bandes de plaques.
   P.push(e(72, -50 + bob, 18, 16, PN.Skin, 6, 16));
   P.push(e(72, -63 + bob, 11, 5, PN.Plate, 18, 4));
-  P.push(...turn(H, 70, -50, L.headA, 0, bob + L.headDy));
+  P.push(...rot(H, 70, -50, L.headA, 0, bob + L.headDy));
   return P;
 }
 

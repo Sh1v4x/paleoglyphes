@@ -39,8 +39,6 @@ export function growthOf(spec: Species, life: number): number {
   return 0.32 + 0.68 * (1 - (1 - u) * (1 - u));
 }
 
-export const STAGE_NAME: Record<Stage, string> = { baby: "bebe", juvenile: "juvenile", adult: "adulte", old: "age" };
-
 /**
  * Modèle d'un jeune : le corps est réduit à `g`, mais la tête (autour de l'œil) l'est moins,
  * comme chez les vrais bébés (grosse tête, gros yeux, museau court). Fonctionne pour toute espèce.

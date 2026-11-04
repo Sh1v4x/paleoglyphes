@@ -2,7 +2,7 @@ import { M } from "../render/materials";
 import { scalePrim, type Prim } from "../render/raster";
 import { PX_PER_M } from "../config";
 import { BIOME } from "../world/biomes";
-import { c, e, squash, strike, turn } from "./ankylo";
+import { c, e, pillarLegs, quadLook, rot, squash, strike, taperedTail, type PillarLegSpec, type QuadLook } from "./kit";
 import { PR } from "./pachyrhino.mat";
 import type { Pose, Species } from "./types";
 
@@ -14,32 +14,16 @@ import type { Pose, Species } from "./types";
 const LENGTH_M = 6;
 export const PACHYRHINO_SCALE = (LENGTH_M * PX_PER_M) / 340;
 
-interface PachyrhinoLook {
-  bob: number;
-  drop: number;
-  /** Avancée du corps (poussée). */
-  dx: number;
-  legs: "walk" | "tuck" | "none";
-  amp: number;
-  spread: number;
-  headA: number;
-  headDy: number;
-  mouth: number;
-  sway: number;
-  eye: boolean;
-}
+/** Pattes : piliers trapus, ongles en sabots. */
+const LEGS: PillarLegSpec = {
+  hips: [-46, 52, -36, 60], far: PR.Far, skin: PR.Skin, nail: PR.Spike, swing: 14, lift: 7, frontY: -56, backY: -66,
+  shoulder: [18, 22], thigh: [24, 29], thighH: 15, upper: [14, 17], upperB: 12, upperH: 12, lower: [12, 10, 10], foot: [14, 7],
+  nailDx: 12, nailR: [2.8, 2.4], tuckDx: 14, tuckR: 20, tuckNailDx: 16,
+};
 
 export function pachyrhinoModel(pose: Pose): Prim[] {
   const { walk, moving, time, action, actionT: at } = pose;
-  const run = action === "run";
-  const amp = run ? 1.5 : 1;
-  const rest = action === "rest";
-  const breath = Math.sin((time * Math.PI * 2) / (rest ? 3.4 : 1.2)) * (1 - moving) * (rest ? 1.8 : 1);
-  const L: PachyrhinoLook = {
-    bob: -Math.abs(Math.sin(walk)) * 3 * moving * amp * amp + breath * 1.3, drop: 0, dx: 0,
-    legs: "walk", amp, spread: 0, headA: run ? 0.12 : 0, headDy: 0, mouth: 0,
-    sway: Math.sin(time * 1.2) * 3 * (1 - moving) + Math.sin(walk) * 6 * moving * amp, eye: true,
-  };
+  const L = quadLook(pose, { breath: 1.2, runHead: 0.12, swayFreq: 1.2, swayAmp: 6 });
   const chew = Math.sin(at * Math.PI * 8);
   if (action === "eat") { L.headA = 0.52 + chew * 0.04; L.headDy = 8; L.mouth = Math.max(0, chew) * 0.6; }
   else if (action === "drink") { L.headA = 0.64; L.headDy = 12; L.drop = 5; L.spread = 10; }
@@ -72,53 +56,15 @@ export function pachyrhinoModel(pose: Pose): Prim[] {
   return P.map((p) => scalePrim(p, PACHYRHINO_SCALE));
 }
 
-function pachyrhinoParts(L: PachyrhinoLook, walk: number, moving: number): Prim[] {
+function pachyrhinoParts(L: QuadLook, walk: number, moving: number): Prim[] {
   const bob = L.bob + L.drop, X = L.dx;
   const P: Prim[] = [];
-
-  // --- Pattes : piliers trapus, ongles en sabots ---
-  const legs = [
-    { hip: -46, phase: 0, far: true, front: false },
-    { hip: 52, phase: Math.PI, far: true, front: true },
-    { hip: -36, phase: Math.PI, far: false, front: false },
-    { hip: 60, phase: 0, far: false, front: true },
-  ];
-  for (const G of legs) {
-    const m = G.far ? PR.Far : PR.Skin;
-    const z = G.far ? -70 : 30;
-    const hx = G.hip + X;
-    if (L.legs === "tuck") {
-      const fx = hx + (G.front ? 14 : -2);
-      P.push(e(fx, -7, 20, 7, m, z, 7));
-      for (const t of [-6, 1, 8]) P.push(e(fx + 16 + t * 0.4, -4, 2.8, 2.4, PR.Spike, z + 6, 2));
-      continue;
-    }
-    if (L.legs === "none") continue;
-    const s = Math.sin(walk + G.phase) * moving * L.amp;
-    const lift = Math.max(0, Math.cos(walk + G.phase)) * moving * 7 * L.amp;
-    const fx = G.hip + s * 14 + (G.front ? (G.far ? -L.spread * 0.6 : L.spread) : -L.spread * 0.3) + X * 0.2;
-    const hy = (G.front ? -56 : -66) + bob;
-    // Cuisse ou épaule, puis colonne jusqu'au pied (coude écarté à l'avant).
-    P.push(e(hx, hy, G.front ? 18 : 24, G.front ? 22 : 29, m, z - 6, 15));
-    const kx = (hx + fx) / 2 + (G.front ? 6 : -2), ky = (hy - 8 - lift) / 2;
-    P.push(c(hx, hy + 6, kx, ky, G.front ? 14 : 17, 12, m, z, 12));
-    P.push(c(kx, ky, fx, -9 - lift, 12, 10, m, z + 2, 10));
-    P.push(e(fx + 3, -7 - lift, 14, 7, m, z + 2, 8));
-    for (const t of [-6, 1, 8]) P.push(e(fx + 12 + t * 0.4, -4 - lift, 2.8, 2.4, PR.Spike, z + 8, 2));
-  }
+  pillarLegs(P, L, walk, moving, bob, LEGS);
 
   // --- Queue courte, portée bas ---
-  const tail: [number, number][] = [];
-  for (let k = 0; k <= 5; k++) {
-    const t = k / 5;
-    tail.push([-86 - t * 74 + X, -80 + bob * (1 - t) + L.drop * t + t * 34 + L.sway * t * t]);
-  }
-  for (let k = 0; k < 5; k++) {
-    const [ax, ay] = tail[k], [bx, by] = tail[k + 1];
-    const ra = 24 - k * 4.2, rb = 24 - (k + 1) * 4.2;
-    P.push(c(ax, ay, bx, by, ra, Math.max(3, rb), PR.Skin, 2, 15));
+  taperedTail(P, L, bob, { x: -86, len: 74, y: -80, droop: 34, r: 24, step: 4.2, m: PR.Skin, h: 15 }, (k, ax, ay, bx, by, ra) => {
     if (k % 2 === 0) P.push(e((ax + bx) / 2, (ay + by) / 2 - ra * 0.5, ra * 0.5, ra * 0.3, PR.Mottle, 2 + ra * 0.9, 3));
-  }
+  });
 
   // --- Corps : tonneau trapu, dos plus rond que celui du tricératops ---
   P.push(e(-6 + X, -78 + bob, 92, 42, PR.Skin, 0, 42));
@@ -162,7 +108,7 @@ function pachyrhinoParts(L: PachyrhinoLook, walk: number, moving: number): Prim[
   T.push(c(128, -68, 133, -54, 5, 1.5, PR.Spike, 30, 3));
   const jaw = L.mouth * 0.32;
   if (L.mouth > 0.05) T.push(e(152, -58 + L.mouth * 3, 16, 3 + L.mouth * 4, M.Mouth, 26, 1));
-  T.push(...turn([c(132, -60, 170, -54, 8, 4, PR.Skin, 22, 7), c(168, -54, 180, -50, 4, 1.5, PR.Beak, 26, 3)], 126, -62, jaw));
+  T.push(...rot([c(132, -60, 170, -54, 8, 4, PR.Skin, 22, 7), c(168, -54, 180, -50, 4, 1.5, PR.Beak, 26, 3)], 126, -62, jaw));
   T.push(c(158, -68, 186, -58, 11, 3, PR.Beak, 22, 8));
   // Bosse nasale : énorme coussin d'os rugueux, plat, du museau jusqu'entre les yeux.
   T.push(e(152, -86, 22, 10, PR.Boss, 40, 10));
@@ -170,7 +116,7 @@ function pachyrhinoParts(L: PachyrhinoLook, walk: number, moving: number): Prim[
   // Petites bosses au-dessus des yeux.
   T.push(e(132, -100, 9, 6, PR.Boss, 40, 6));
   if (L.eye) T.push(e(134, -88, 3.5, 3.5, M.Eye, 50, 1));
-  P.push(...turn(T, 88, -80, L.headA, X, bob + L.headDy + 20));
+  P.push(...rot(T, 88, -80, L.headA, X, bob + L.headDy + 20));
   return P;
 }
 
